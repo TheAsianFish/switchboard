@@ -1,0 +1,29 @@
+# Go
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Node (web/)
+node_modules/
+web/dist/
+
+# Local state
+.env
+.env.*
+*.local
+/data/
+/eval/data/raw/
+/eval/results/**/tmp/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+
+# Agent and assistant files are never committed
+CLAUDE.md
+AGENTS.md
+.claude/
+.agent/
