@@ -176,3 +176,34 @@ func golden(t *testing.T, name string, got []byte) {
 		t.Errorf("output differs from %s (go test -update to accept):\n%s", path, got)
 	}
 }
+
+func TestLoadSDK(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cases := map[string]string{
+		"openai--m.json":    `{"sdk":"openai-python","sdk_version":"3.0","model":"m","backend":"b","passed":true,"recorded_at":"2026-10-26T10:00:00Z","stream":{"text":"a|b","chunks":3,"stop_reason":"stop","ttft_ms":81.4,"usage":{"completion_tokens":4}}}`,
+		"anthropic--m.json": `{"sdk":"anthropic-python","sdk_version":"2.0","model":"m","backend":"b","passed":false,"error":"TypeError: x","recorded_at":"2026-10-27T10:00:00Z"}`,
+	}
+	for name, body := range cases {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := loadSDK(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Rows) != 2 || strings.Join(got.Dates, ",") != "2026-10-26,2026-10-27" {
+		t.Fatalf("got %+v", got)
+	}
+	a, o := got.Rows[0], got.Rows[1]
+	if a.Passed != "no" || a.Error != "TypeError: x" || a.SDK != "anthropic-python 2.0" {
+		t.Errorf("failed case = %+v", a)
+	}
+	if o.Passed != "yes" || o.Chunks != 3 || o.OutputTokens != 4 || o.TTFT != "81" || o.Text != `a\|b` {
+		t.Errorf("passed case = %+v", o)
+	}
+	if none, err := loadSDK(filepath.Join(dir, "missing")); none != nil || err != nil {
+		t.Errorf("missing dir = %v, %v", none, err)
+	}
+}

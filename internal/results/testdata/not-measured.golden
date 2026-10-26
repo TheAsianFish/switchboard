@@ -14,6 +14,21 @@ Command: `make bench` (`eval/bench/q1.sh`), raw files in
 
 Not measured yet. Run `make bench`, then `make results`.
 
+## Unmodified SDKs through the gateway
+
+Does a stock client stream a reply through the gateway, whichever wire
+format it speaks and whichever backend serves it? Command: `make sdk-smoke`
+(`eval/sdk/smoke.sh`), raw files in `eval/results/sdk-smoke/`. Each case
+streams one short prompt and then makes the same request without streaming;
+it passes when the SDK's own parser delivered the text in more than one
+chunk with a stop reason and usage, and the non-streamed call returned text.
+`-via-messages` is the same Ollama model reached through the gateway's
+Anthropic provider and Ollama's `/v1/messages`, so the four rows per model
+cover every client × backend translation. TTFT is one sample, measured in
+the client, and says nothing about the gateway's overhead (Q1 does).
+
+Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `make results`.
+
 ## To measure
 
 - Q1 per-feature breakdown (limits, budget, exact and semantic cache miss

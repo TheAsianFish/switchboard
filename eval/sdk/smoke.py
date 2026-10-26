@@ -75,6 +75,7 @@ def openai_case(base: str, key: str, model: str) -> dict:
 
 
 def anthropic_case(base: str, key: str, model: str) -> dict:
+    # anthropic 2.x takes no temperature; the default sampling is used.
     client = anthropic.Anthropic(base_url=base, api_key=key, max_retries=0)
     start = time.perf_counter()
     first = None
@@ -82,7 +83,6 @@ def anthropic_case(base: str, key: str, model: str) -> dict:
     with client.messages.stream(
         model=model,
         max_tokens=MAX_TOKENS,
-        temperature=0,
         messages=[{"role": "user", "content": PROMPT}],
     ) as stream:
         for text in stream.text_stream:
@@ -94,7 +94,6 @@ def anthropic_case(base: str, key: str, model: str) -> dict:
     full = client.messages.create(
         model=model,
         max_tokens=MAX_TOKENS,
-        temperature=0,
         messages=[{"role": "user", "content": PROMPT}],
     )
     return {

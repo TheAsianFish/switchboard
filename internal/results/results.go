@@ -51,7 +51,8 @@ type FakeSettings struct {
 // Data is what the RESULTS.md template sees. A nil section has not been
 // measured yet.
 type Data struct {
-	Q1 *Q1
+	Q1  *Q1
+	SDK *SDK
 }
 
 // Q1 is the gateway overhead section.
@@ -94,12 +95,16 @@ func Render(resultsDir, templatePath string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	sdk, err := loadSDK(filepath.Join(resultsDir, SDKDir))
+	if err != nil {
+		return err
+	}
 	tmpl, err := template.New(filepath.Base(templatePath)).Option("missingkey=error").ParseFiles(templatePath)
 	if err != nil {
 		return fmt.Errorf("results: parse template: %w", err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, Data{Q1: q1}); err != nil {
+	if err := tmpl.Execute(&buf, Data{Q1: q1, SDK: sdk}); err != nil {
 		return fmt.Errorf("results: render template: %w", err)
 	}
 	if _, err := w.Write(buf.Bytes()); err != nil {

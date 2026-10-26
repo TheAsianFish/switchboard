@@ -45,6 +45,29 @@ as a cost of the gateway.
 {{else}}
 Not measured yet. Run `make bench`, then `make results`.
 {{end}}
+## Unmodified SDKs through the gateway
+
+Does a stock client stream a reply through the gateway, whichever wire
+format it speaks and whichever backend serves it? Command: `make sdk-smoke`
+(`eval/sdk/smoke.sh`), raw files in `eval/results/sdk-smoke/`. Each case
+streams one short prompt and then makes the same request without streaming;
+it passes when the SDK's own parser delivered the text in more than one
+chunk with a stop reason and usage, and the non-streamed call returned text.
+`-via-messages` is the same Ollama model reached through the gateway's
+Anthropic provider and Ollama's `/v1/messages`, so the four rows per model
+cover every client × backend translation. TTFT is one sample, measured in
+the client, and says nothing about the gateway's overhead (Q1 does).
+{{with .SDK}}
+| SDK | Model | Backend | Passed | Chunks | Stop reason | Output tokens | TTFT (ms) | Streamed text |
+|-----|-------|---------|--------|-------:|-------------|--------------:|----------:|---------------|
+{{- range .Rows}}
+| {{.SDK}} | `{{.Model}}` | {{.Backend}} | {{.Passed}} | {{.Chunks}} | {{.StopReason}} | {{.OutputTokens}} | {{.TTFT}} | {{if .Error}}error: {{.Error}}{{else}}{{.Text}}{{end}} |
+{{- end}}
+
+Recorded {{range $i, $d := .Dates}}{{if $i}}, {{end}}{{$d}}{{end}} on the machine in Q1. Cost: $0 (local Ollama only).
+{{else}}
+Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `make results`.
+{{end}}
 ## To measure
 
 - Q1 per-feature breakdown (limits, budget, exact and semantic cache miss
