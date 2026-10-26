@@ -1,0 +1,1 @@
+{"id":"msg_a550a08212a5b5c712d83173","type":"message","role":"assistant","model":"qwen2.5:0.5b","content":[{"type":"text","text":"Red, Yellow, Blue"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"cache_read_input_tokens":23,"output_tokens":6}}
