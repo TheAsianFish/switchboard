@@ -11,6 +11,8 @@ import (
 // below the front ends knows about HTTP status codes of the client API.
 type ErrorKind int
 
+// Error kinds. KindInternal is the zero value so an unclassified error is
+// never mistaken for a client error.
 const (
 	KindInternal ErrorKind = iota
 	KindInvalidRequest
@@ -89,20 +91,20 @@ func AsError(err error) *Error {
 
 // KindFromStatus classifies an upstream HTTP status code.
 func KindFromStatus(status int) ErrorKind {
-	switch {
-	case status == 400 || status == 413 || status == 422:
+	switch status {
+	case 400, 413, 422:
 		return KindInvalidRequest
-	case status == 401:
+	case 401:
 		return KindAuthentication
-	case status == 403:
+	case 403:
 		return KindPermission
-	case status == 404:
+	case 404:
 		return KindNotFound
-	case status == 408 || status == 504:
+	case 408, 504:
 		return KindTimeout
-	case status == 429:
+	case 429:
 		return KindRateLimited
-	case status == 503 || status == 529:
+	case 503, 529:
 		return KindOverloaded
 	default:
 		return KindUpstream

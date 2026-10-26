@@ -14,6 +14,7 @@ import (
 // Role is the author of a message in a conversation.
 type Role string
 
+// Roles a message can have.
 const (
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
@@ -44,6 +45,7 @@ type Request struct {
 // StopReason says why the model stopped generating.
 type StopReason string
 
+// Canonical stop reasons.
 const (
 	StopEndTurn       StopReason = "end_turn"
 	StopMaxTokens     StopReason = "max_tokens"
