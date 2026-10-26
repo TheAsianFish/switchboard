@@ -1,0 +1,32 @@
+# Gateway config for `make sdk-smoke`. One Ollama model is reachable two ways
+# so that every translation path is exercised: the OpenAI-compatible
+# provider (/v1/chat/completions) and the Anthropic provider pointed at
+# Ollama's /v1/messages. Claude is only used when ANTHROPIC_API_KEY is set.
+listen: 127.0.0.1:8090
+log:
+  format: json
+  level: info
+providers:
+  - name: ollama-openai
+    type: openaicompat
+    base_url: http://127.0.0.1:11434/v1
+    timeout: 2m
+  - name: ollama-messages
+    type: anthropic
+    base_url: http://127.0.0.1:11434
+    timeout: 2m
+  - name: anthropic
+    type: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    timeout: 2m
+models:
+  - name: qwen2.5:0.5b
+    provider: ollama-openai
+  - name: qwen2.5:0.5b-via-messages
+    provider: ollama-messages
+    upstream: qwen2.5:0.5b
+  - name: claude-haiku-5-5
+    provider: anthropic
+keys:
+  - name: smoke
+    key: sk-smoke
