@@ -1,0 +1,85 @@
+// Package auth resolves client API keys to principals.
+package auth
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+
+	"github.com/TheAsianFish/switchboard/internal/config"
+	"github.com/TheAsianFish/switchboard/internal/core"
+)
+
+// Principal is the identity behind an API key.
+type Principal struct {
+	// Name is the key's configured name; it is what logs and metrics show,
+	// never the key itself.
+	Name string
+	// models is the allow list; nil allows every model.
+	models map[string]bool
+}
+
+// Allows reports whether the principal may use model.
+func (p *Principal) Allows(model string) bool {
+	return p.models == nil || p.models[model]
+}
+
+// Keys is an immutable key table, safe for concurrent use.
+type Keys struct {
+	byDigest map[[sha256.Size]byte]*Principal
+}
+
+// NewKeys builds the table from configured keys. Plain keys are hashed on
+// load so that lookups for plain and pre-hashed keys take the same path.
+func NewKeys(keys []config.Key) *Keys {
+	t := &Keys{byDigest: make(map[[sha256.Size]byte]*Principal, len(keys))}
+	for _, k := range keys {
+		var digest [sha256.Size]byte
+		if k.Key != "" {
+			digest = sha256.Sum256([]byte(k.Key))
+		} else {
+			b, err := hex.DecodeString(strings.ToLower(k.SHA256))
+			if err != nil || len(b) != sha256.Size {
+				continue // config.Validate rejects these
+			}
+			copy(digest[:], b)
+		}
+		p := &Principal{Name: k.Name}
+		if len(k.Models) > 0 {
+			p.models = make(map[string]bool, len(k.Models))
+			for _, m := range k.Models {
+				p.models[m] = true
+			}
+		}
+		t.byDigest[digest] = p
+	}
+	return t
+}
+
+// Lookup resolves a presented key. The lookup is by SHA-256 digest, so the
+// map comparison never touches the key itself and its timing reveals
+// nothing about how close a guess was.
+func (t *Keys) Lookup(key string) (*Principal, error) {
+	if key == "" {
+		return nil, core.Errorf(core.KindAuthentication, "missing API key")
+	}
+	p, ok := t.byDigest[sha256.Sum256([]byte(key))]
+	if !ok {
+		return nil, core.Errorf(core.KindAuthentication, "invalid API key")
+	}
+	return p, nil
+}
+
+type ctxKey struct{}
+
+// WithPrincipal returns a context carrying p.
+func WithPrincipal(ctx context.Context, p *Principal) context.Context {
+	return context.WithValue(ctx, ctxKey{}, p)
+}
+
+// FromContext returns the authenticated principal, or nil.
+func FromContext(ctx context.Context) *Principal {
+	p, _ := ctx.Value(ctxKey{}).(*Principal)
+	return p
+}
