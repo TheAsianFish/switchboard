@@ -27,3 +27,6 @@ CLAUDE.md
 AGENTS.md
 .claude/
 .agent/
+
+# Local gateway config (copy of switchboard.example.yaml)
+/switchboard.yaml
