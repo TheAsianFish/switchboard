@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -226,9 +225,4 @@ func (c *Config) validateShared(models map[string]Model) []error {
 		}
 	}
 	return errs
-}
-
-func atoi(s string) (int, bool) {
-	n, err := strconv.Atoi(s)
-	return n, err == nil
 }

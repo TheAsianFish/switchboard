@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -132,7 +133,9 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
 		}
 	}
-	applyEnv(cfg, getenv)
+	if err := applyEnv(cfg, getenv); err != nil {
+		return nil, err
+	}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
 		if p.Timeout == 0 {
@@ -160,7 +163,7 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 // overridden as SWITCHBOARD_PROVIDER_<NAME>_BASE_URL, with the name upper
 // cased and non-alphanumerics replaced by underscores, which is how compose
 // points the same file at a container hostname.
-func applyEnv(cfg *Config, getenv func(string) string) {
+func applyEnv(cfg *Config, getenv func(string) string) error {
 	set := func(dst *string, name string) {
 		if v := getenv(name); v != "" {
 			*dst = v
@@ -172,12 +175,19 @@ func applyEnv(cfg *Config, getenv func(string) string) {
 	set(&cfg.AdminListen, "SWITCHBOARD_ADMIN_LISTEN")
 	set(&cfg.Redis.URL, "SWITCHBOARD_REDIS_URL")
 	set(&cfg.RateLimit.Algorithm, "SWITCHBOARD_RATELIMIT_ALGORITHM")
-	if n, ok := atoi(getenv("SWITCHBOARD_RATELIMIT_REPLICAS")); ok {
+	if v := getenv("SWITCHBOARD_RATELIMIT_REPLICAS"); v != "" {
+		// A typo must not fall back to the file's count: with too few
+		// replicas, each one takes too big a share during an outage.
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("SWITCHBOARD_RATELIMIT_REPLICAS: %q is not a whole number", v)
+		}
 		cfg.RateLimit.Replicas = n
 	}
 	for i := range cfg.Providers {
 		set(&cfg.Providers[i].BaseURL, "SWITCHBOARD_PROVIDER_"+envName(cfg.Providers[i].Name)+"_BASE_URL")
 	}
+	return nil
 }
 
 func envName(s string) string {

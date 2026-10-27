@@ -253,3 +253,11 @@ func TestValidateShared(t *testing.T) {
 		})
 	}
 }
+
+func TestReplicasFromEnvMustParse(t *testing.T) {
+	t.Parallel()
+	_, err := Load(writeFile(t, shared), env(map[string]string{"SWITCHBOARD_RATELIMIT_REPLICAS": "three"}))
+	if err == nil || !strings.Contains(err.Error(), "SWITCHBOARD_RATELIMIT_REPLICAS") {
+		t.Errorf("err = %v, want it to name SWITCHBOARD_RATELIMIT_REPLICAS", err)
+	}
+}
