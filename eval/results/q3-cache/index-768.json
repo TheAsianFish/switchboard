@@ -1,0 +1,105 @@
+{
+  "commit": "a17cb59-dirty",
+  "date": "2026-10-27T15:49:07Z",
+  "command": "switchboard eval cache-index ",
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+    "kernel": "6.17.0-1022-azure"
+  },
+  "redis_version": "8.10.3",
+  "entries": 100000,
+  "dims": 768,
+  "queries": 1000,
+  "contexts": 10000,
+  "vectors": "random unit (normalised Gaussian), entries and queries independent, seed 1",
+  "runs": [
+    {
+      "algorithm": "FLAT",
+      "build_seconds": 1.326191669,
+      "unfiltered": {
+        "p50_ms": 8.373,
+        "p99_ms": 14.598,
+        "mean_ms": 8.573
+      },
+      "filtered": {
+        "p50_ms": 0.133,
+        "p99_ms": 0.175,
+        "mean_ms": 0.135
+      },
+      "recall_at_1": 1,
+      "filtered_recall_at_1": 1,
+      "index_size_mb": 298.6537170410156
+    },
+    {
+      "algorithm": "HNSW",
+      "params": {
+        "EF_CONSTRUCTION": 200,
+        "EF_RUNTIME": 10,
+        "M": 16
+      },
+      "build_seconds": 42.839392874,
+      "unfiltered": {
+        "p50_ms": 0.197,
+        "p99_ms": 0.253,
+        "mean_ms": 0.2
+      },
+      "filtered": {
+        "p50_ms": 0.139,
+        "p99_ms": 0.181,
+        "mean_ms": 0.14
+      },
+      "recall_at_1": 0.014,
+      "filtered_recall_at_1": 1,
+      "index_size_mb": 325.03741455078125
+    },
+    {
+      "algorithm": "HNSW",
+      "params": {
+        "EF_CONSTRUCTION": 200,
+        "EF_RUNTIME": 100,
+        "M": 16
+      },
+      "build_seconds": 42.839392874,
+      "unfiltered": {
+        "p50_ms": 0.679,
+        "p99_ms": 1.812,
+        "mean_ms": 0.722
+      },
+      "filtered": {
+        "p50_ms": 0.143,
+        "p99_ms": 0.167,
+        "mean_ms": 0.144
+      },
+      "recall_at_1": 0.099,
+      "filtered_recall_at_1": 1,
+      "index_size_mb": 325.03741455078125
+    },
+    {
+      "algorithm": "HNSW",
+      "params": {
+        "EF_CONSTRUCTION": 200,
+        "EF_RUNTIME": 1000,
+        "M": 16
+      },
+      "build_seconds": 42.839392874,
+      "unfiltered": {
+        "p50_ms": 4.595,
+        "p99_ms": 11.659,
+        "mean_ms": 4.853
+      },
+      "filtered": {
+        "p50_ms": 0.136,
+        "p99_ms": 0.164,
+        "mean_ms": 0.137
+      },
+      "recall_at_1": 0.5,
+      "filtered_recall_at_1": 1,
+      "index_size_mb": 325.03741455078125
+    }
+  ]
+}
