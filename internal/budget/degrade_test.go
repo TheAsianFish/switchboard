@@ -411,7 +411,10 @@ func TestDegradingConcurrentOutages(t *testing.T) {
 	)
 	for w := range 16 {
 		wg.Go(func() {
-			for i := range 100 {
+			// At least 100 each, and on until the store has gone down a
+			// few times: without -race the first 100 can finish before
+			// the flipper's first tick.
+			for i := 0; i < 100 || (outages.Load() < 3 && i < 1_000_000); i++ {
 				r, err := d.Reserve(ctx, "k", b, fmt.Sprintf("w%d-%d", w, i), 1000)
 				if errors.Is(err, ErrExhausted) {
 					continue
