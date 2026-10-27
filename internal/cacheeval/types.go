@@ -137,6 +137,23 @@ type Latency struct {
 	Warmups int     `json:"warmups"`
 }
 
+// Quantiles are nearest-rank quantiles of a set of cosines.
+type Quantiles struct {
+	P10 float64 `json:"p10"`
+	P50 float64 `json:"p50"`
+	P90 float64 `json:"p90"`
+	Max float64 `json:"max"`
+}
+
+// Spread is where one pair set's cosines fall under one model: if the
+// negatives sit as high as the positives, no threshold separates them.
+type Spread struct {
+	Model     string    `json:"model"`
+	Set       string    `json:"set"`
+	Positives Quantiles `json:"positives"`
+	Negatives Quantiles `json:"negatives"`
+}
+
 // Chosen is the gateway's shipped default: the model and threshold the
 // rule picked, and the rule in words.
 type Chosen struct {
@@ -161,6 +178,7 @@ type Summary struct {
 	Curves    []Curve    `json:"curves"`
 	Joints    []Joint    `json:"joints"`
 	Latency   []Latency  `json:"embed_latency"`
+	Spreads   []Spread   `json:"spreads"`
 	Chosen    Chosen     `json:"chosen"`
 	// DataMeta is how the GSM8K pairs were built.
 	Data DataMeta `json:"data"`

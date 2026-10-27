@@ -183,6 +183,16 @@ false hit among them.
 | `{{.Name}}` | {{.Positives}} | {{.Negatives}} |
 {{- end}}
 
+**Where the pairs sit.** Cosine similarity of the positives and of the
+negatives, as p10 / median / p90 (max). Where the negatives sit as high as
+the positives, no threshold can serve one without the other.
+
+| Model | Pair set | Positives | Negatives |
+|-------|----------|-----------|-----------|
+{{- range .Spreads}}
+| `{{.Model}}` | `{{.Set}}` | {{.Positives}} | {{.Negatives}} |
+{{- end}}
+
 | Model | Pair set | Number guard | Threshold (false-hit rate ≤ {{.Target}}) | Hit rate there | False-hit rate there | Threshold (upper bound ≤ {{.Target}}) | Hit rate there | False-hit rate there |
 |-------|----------|:------------:|------------------------:|---------------:|---------------------:|------------------------:|---------------:|---------------------:|
 {{- range .Rows}}

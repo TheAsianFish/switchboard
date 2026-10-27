@@ -42,6 +42,7 @@ type Q3Sweep struct {
 	Baseline           []Q3Baseline
 	Joints             []Q3Joint
 	Latency            []Q3Latency
+	Spreads            []Q3Spread
 	Chosen             cacheeval.Chosen
 	// ChosenThreshold is Chosen.Threshold to four decimals.
 	ChosenThreshold string
@@ -51,6 +52,12 @@ type Q3Sweep struct {
 	// AtFloor is true when some threshold shown is the grid's lowest.
 	AtFloor                         bool
 	Commit, Date, Command, Hardware string
+}
+
+// Q3Spread is where one pair set's cosines fall under one model, each
+// cell "p10 / median / p90 (max)" to three decimals.
+type Q3Spread struct {
+	Model, Set, Positives, Negatives string
 }
 
 // Q3Set is one pair set's size.
@@ -177,6 +184,9 @@ func buildQ3Sweep(s cacheeval.Summary) *Q3Sweep {
 			row.PerSet = strings.Join(parts, "; ")
 		}
 		q.Joints = append(q.Joints, row)
+	}
+	for _, sp := range s.Spreads {
+		q.Spreads = append(q.Spreads, Q3Spread{Model: sp.Model, Set: sp.Set, Positives: spread(sp.Positives), Negatives: spread(sp.Negatives)})
 	}
 	for _, l := range s.Latency {
 		q.Latency = append(q.Latency, Q3Latency{
@@ -317,4 +327,8 @@ func minNegatives(target float64) int {
 			return n
 		}
 	}
+}
+
+func spread(q cacheeval.Quantiles) string {
+	return fmt.Sprintf("%.3f / %.3f / %.3f (%.3f)", q.P10, q.P50, q.P90, q.Max)
 }

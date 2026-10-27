@@ -229,6 +229,9 @@ func Summarise(sims []Sims, models, sets []string, target float64, latency []Lat
 					s.Baselines = append(s.Baselines, BaselineOf(set, sm.Pairs))
 				}
 				curves = append(curves, SweepCurve(m, set, sm.Pairs, guard, target))
+				if !guard {
+					s.Spreads = append(s.Spreads, SpreadOf(m, set, sm.Pairs))
+				}
 			}
 			s.Curves = append(s.Curves, curves...)
 			s.Joints = append(s.Joints, JointOf(m, guard, curves))
@@ -236,6 +239,33 @@ func Summarise(sims []Sims, models, sets []string, target float64, latency []Lat
 	}
 	s.Chosen = Choose(s.Joints, dims, models)
 	return s, nil
+}
+
+// SpreadOf summarises where the positives' and negatives' cosines fall.
+func SpreadOf(model, set string, pairs []SimPair) Spread {
+	var pos, neg []float64
+	for _, p := range pairs {
+		if p.Same {
+			pos = append(pos, p.Cos)
+		} else {
+			neg = append(neg, p.Cos)
+		}
+	}
+	return Spread{Model: model, Set: set, Positives: quantiles(pos), Negatives: quantiles(neg)}
+}
+
+// quantiles are nearest-rank: the q-quantile of n sorted values is the
+// value at rank ceil(q·n).
+func quantiles(v []float64) Quantiles {
+	if len(v) == 0 {
+		return Quantiles{}
+	}
+	slices.Sort(v)
+	at := func(q float64) float64 {
+		i := int(math.Ceil(q*float64(len(v)))) - 1
+		return v[max(i, 0)]
+	}
+	return Quantiles{P10: at(0.1), P50: at(0.5), P90: at(0.9), Max: v[len(v)-1]}
 }
 
 func b2i(b bool) int {

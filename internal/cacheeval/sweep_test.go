@@ -313,3 +313,22 @@ func TestSummarise(t *testing.T) {
 		t.Error("duplicate similarity file accepted")
 	}
 }
+
+func TestSpreadOf(t *testing.T) {
+	t.Parallel()
+	var ps []SimPair
+	for i := 1; i <= 10; i++ {
+		ps = append(ps, SimPair{Same: true, Cos: float64(i) / 10}, SimPair{Cos: 0.9 + float64(i)/1000})
+	}
+	sp := SpreadOf("m", "s", ps)
+	want := Spread{Model: "m", Set: "s",
+		Positives: Quantiles{P10: 0.1, P50: 0.5, P90: 0.9, Max: 1},
+		Negatives: Quantiles{P10: 0.901, P50: 0.905, P90: 0.909, Max: 0.91},
+	}
+	if sp != want {
+		t.Errorf("spread = %+v, want %+v", sp, want)
+	}
+	if got := SpreadOf("m", "s", nil); got.Positives != (Quantiles{}) {
+		t.Errorf("empty = %+v", got)
+	}
+}

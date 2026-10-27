@@ -70,6 +70,17 @@ false hit among them.
 | `paws-wiki` | 20 | 402 |
 | `gsm8k-perturb` | 20 | 402 |
 
+**Where the pairs sit.** Cosine similarity of the positives and of the
+negatives, as p10 / median / p90 (max). Where the negatives sit as high as
+the positives, no threshold can serve one without the other.
+
+| Model | Pair set | Positives | Negatives |
+|-------|----------|-----------|-----------|
+| `all-minilm` | `paws-wiki` | 0.850 / 0.850 / 0.950 (0.950) | 0.900 / 0.900 / 0.900 (0.990) |
+| `all-minilm` | `gsm8k-perturb` | 0.850 / 0.850 / 0.950 (0.950) | 0.800 / 0.800 / 0.800 (0.990) |
+| `nomic-embed-text` | `paws-wiki` | 0.850 / 0.850 / 0.950 (0.950) | 0.800 / 0.800 / 0.800 (0.990) |
+| `nomic-embed-text` | `gsm8k-perturb` | 0.850 / 0.850 / 0.950 (0.950) | 0.800 / 0.800 / 0.800 (0.990) |
+
 | Model | Pair set | Number guard | Threshold (false-hit rate ≤ 1%) | Hit rate there | False-hit rate there | Threshold (upper bound ≤ 1%) | Hit rate there | False-hit rate there |
 |-------|----------|:------------:|------------------------:|---------------:|---------------------:|------------------------:|---------------:|---------------------:|
 | `all-minilm` | `paws-wiki` | off | 0.9025 | 50.0% (29.9–70.1) | 0.5% (0.1–1.8) | 0.9901 | 0.0% (0.0–16.1) | 0.0% (0.0–0.9) |
