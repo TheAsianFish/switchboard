@@ -58,6 +58,17 @@ raw files in `eval/results/q2-limits/`.
 
 Not measured yet. Run `make test-limits` (Docker), then `make results`.
 
+## Q3: semantic cache false hits
+
+At what cosine similarity threshold does the semantic cache's false-hit
+rate fall under 1%, how much hit rate survives there, and does the answer
+depend on the embedding model and the kind of prompt? Command:
+`make eval-cache` (`switchboard eval cache` for the sweep,
+`switchboard eval cache-index` for the index check), raw files in
+`eval/results/q3-cache/`.
+
+Not measured yet. Run `make eval-cache`, then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire

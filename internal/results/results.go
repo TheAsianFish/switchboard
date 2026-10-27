@@ -53,6 +53,7 @@ type FakeSettings struct {
 type Data struct {
 	Q1  *Q1
 	Q2  *Q2
+	Q3  *Q3
 	SDK *SDK
 }
 
@@ -104,12 +105,16 @@ func Render(resultsDir, templatePath string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	q3, err := loadQ3(filepath.Join(resultsDir, Q3Dir))
+	if err != nil {
+		return err
+	}
 	tmpl, err := template.New(filepath.Base(templatePath)).Option("missingkey=error").ParseFiles(templatePath)
 	if err != nil {
 		return fmt.Errorf("results: parse template: %w", err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, Data{Q1: q1, Q2: q2, SDK: sdk}); err != nil {
+	if err := tmpl.Execute(&buf, Data{Q1: q1, Q2: q2, Q3: q3, SDK: sdk}); err != nil {
 		return fmt.Errorf("results: render template: %w", err)
 	}
 	if _, err := w.Write(buf.Bytes()); err != nil {
