@@ -137,8 +137,10 @@ request speed, and stay sane when the store dies.** Every limit check and
 every budget reservation is one Lua script in Redis, so the read, the
 decision and the write are atomic across replicas, and the scripts read
 Redis's own clock, so replicas with skewed clocks still agree on time. A
-request reserves its worst-case cost (estimated input plus `max_tokens`)
-before it is sent and settles the provider's real usage afterwards. That way
+request reserves its worst-case cost (estimated input plus `max_tokens`;
+a request without one is sent upstream with the model's
+`max_output_tokens`, so the worst case is a real cap) before it is sent and
+settles the provider's real usage afterwards. That way
 three replicas spending at once cannot together pass the budget, and a
 reservation held by a replica that dies expires instead of leaking. The
 token limit is charged on the same estimate and corrected afterwards. When

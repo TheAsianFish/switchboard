@@ -356,12 +356,21 @@ Changes made while building:
     `max_output_tokens`) and settle the provider's usage.
   - A key with a budget may not reach a model without a price; the config
     is refused at load time.
+  - The burst + rate·W/period bound is GCRA's promise, not the fixed
+    window's, which may admit twice its rate across a boundary by design.
+    Q2 therefore also counts admissions per aligned limiter window: that
+    is the fixed window's own promise (at most the rate per window) and
+    the direct check that the replicas share one counter.
+  - A request without `max_tokens` from a key with a budget or token
+    limit is sent upstream with the model's `max_output_tokens`, so the
+    reservation is a real bound on its cost.
   - Done-criteria evidence (RESULTS.md, Q2, `make test-limits` at
-    `d8626ad`): three replicas share one request limit and one budget; the
-    budget's spend in Redis equals the fake provider's ledger to the
-    nanodollar and stays inside the budget; the over-admission run works
-    in compose for the baseline, with and without Redis, and through an
-    outage.
+    `d967c73`): with Redis up, three replicas admitted exactly the rate
+    in every limiter window (100 of 100; without a shared store, 300);
+    the shared budget's spend in Redis equals the fake provider's ledger
+    to the nanodollar and stays inside the budget; the over-admission
+    run works in compose for the baseline, with and without Redis, and
+    through an outage.
 
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
