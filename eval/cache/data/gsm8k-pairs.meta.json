@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-27T15:43:29Z",
+  "command": "switchboard eval cache-data --out eval/cache/data --n 500",
+  "model": "qwen2.5:3b",
+  "seed": 1,
+  "gsm8k_eligible": 1282,
+  "gsm8k_sampled": 500,
+  "paraphrase_numbers_ok": 412,
+  "paraphrase_answer_ok": 329,
+  "positives": 329,
+  "negatives": 500,
+  "paws_rows": 8000,
+  "sources": [
+    "https://datasets-server.huggingface.co/rows?dataset=google-research-datasets/paws\u0026config=labeled_final\u0026split=test",
+    "https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/test.jsonl"
+  ]
+}
