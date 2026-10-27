@@ -167,8 +167,8 @@ Each distinct text is embedded once per model through the gateway's own
 Ollama client (`/api/embed`) and every pair is scored by the cosine of its
 two embeddings, rounded to six decimals in the raw files. A pair hits at
 threshold t when its cosine is at least t and, with the number guard on,
-both sides contain the same numbers (`cache.SameNumbers`, which also reads
-spelled-out numbers). The threshold is swept from 0.5000 to {{.FineFrom}} in steps
+both sides contain the same numbers in the same order (`cache.SameNumbers`,
+which also reads spelled-out numbers). The threshold is swept from 0.5000 to {{.FineFrom}} in steps
 of {{.Step}} and on to 1.0000 in steps of {{.FineStep}}, where the pair sets separate if they
 do at all. Hit rate is over the positives, false-hit rate over the
 negatives, both with Wilson 95% intervals in brackets. Two thresholds are
@@ -203,9 +203,10 @@ the positives, no threshold can serve one without the other.
 \* The lowest threshold swept; a lower one might meet the target too.
 {{- end}}
 
-**Exact-match baseline.** The floor a semantic cache has to beat: an exact
-cache keyed on the trimmed text (what the gateway's exact layer does) and
-one that also collapses whitespace and folds case.
+**Exact-match baseline.** The floor a semantic cache has to beat: the
+gateway's exact layer (`cache.KeysFor`, which normalises line endings and
+trailing whitespace only) and an exact cache that also collapses
+whitespace and folds case.
 
 | Pair set | Exact hit rate | Exact false-hit rate | Normalised hit rate | Normalised false-hit rate |
 |----------|---------------:|---------------------:|--------------------:|--------------------------:|
@@ -223,7 +224,8 @@ every pair set, and the hit rate each set keeps there.
 | `{{.Model}}` | {{.Guard}} | {{.Threshold}} | {{.PerSet}} | {{.Mean}} |
 {{- end}}
 
-**Shipped default.** {{if .Chosen.Model}}The gateway ships with `{{.Chosen.Model}}` at threshold {{.ChosenThreshold}} with the number guard on.{{else}}No model met the rule.{{end}}
+**Shipped default.** {{if .Chosen.Model}}The gateway ships with `{{.Chosen.Model}}` at threshold {{.ChosenThreshold}} with the number guard on.
+There the semantic layer serves this share of the true paraphrases: {{.ChosenPerSet}}; the exact layer alone serves {{.ExactPerSet}}.{{else}}No model met the rule.{{end}}
 Rule: {{.Chosen.Rule}}
 {{- if .Latency}}
 

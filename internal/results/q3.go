@@ -46,6 +46,10 @@ type Q3Sweep struct {
 	Chosen             cacheeval.Chosen
 	// ChosenThreshold is Chosen.Threshold to four decimals.
 	ChosenThreshold string
+	// ChosenPerSet is the hit rate each pair set keeps at the chosen
+	// threshold, and ExactPerSet what the exact layer alone serves, both
+	// "`set` rate; ...".
+	ChosenPerSet, ExactPerSet string
 	// MinNegatives is the fewest negatives with no false hit whose Wilson
 	// upper bound is at most the target.
 	MinNegatives int
@@ -173,18 +177,20 @@ func buildQ3Sweep(s cacheeval.Summary) *Q3Sweep {
 		if j.Found {
 			row.Threshold, row.Mean = threshold(j.Threshold), pct1(j.MeanHitRate)
 			q.AtFloor = q.AtFloor || j.Threshold == gridFloor
-			var parts []string
-			for i, p := range j.PerSet {
-				name := strconv.Itoa(i)
-				if i < len(s.Sets) {
-					name = s.Sets[i]
-				}
-				parts = append(parts, "`"+name+"` "+rate(p.HitRate))
-			}
-			row.PerSet = strings.Join(parts, "; ")
+			row.PerSet = perSet(s.Sets, j.PerSet)
 		}
 		q.Joints = append(q.Joints, row)
 	}
+	for _, j := range s.Joints {
+		if j.Found && j.Guard && j.Model == s.Chosen.Model && j.Threshold == s.Chosen.Threshold {
+			q.ChosenPerSet = perSet(s.Sets, j.PerSet)
+		}
+	}
+	var exact []string
+	for _, b := range s.Baselines {
+		exact = append(exact, "`"+b.Set+"` "+rate(b.ExactHitRate))
+	}
+	q.ExactPerSet = strings.Join(exact, "; ")
 	for _, sp := range s.Spreads {
 		q.Spreads = append(q.Spreads, Q3Spread{Model: sp.Model, Set: sp.Set, Positives: spread(sp.Positives), Negatives: spread(sp.Negatives)})
 	}
@@ -331,4 +337,17 @@ func minNegatives(target float64) int {
 
 func spread(q cacheeval.Quantiles) string {
 	return fmt.Sprintf("%.3f / %.3f / %.3f (%.3f)", q.P10, q.P50, q.P90, q.Max)
+}
+
+// perSet formats the hit rate of each set at one threshold.
+func perSet(sets []string, points []cacheeval.SweepPoint) string {
+	var parts []string
+	for i, p := range points {
+		name := strconv.Itoa(i)
+		if i < len(sets) {
+			name = sets[i]
+		}
+		parts = append(parts, "`"+name+"` "+rate(p.HitRate))
+	}
+	return strings.Join(parts, "; ")
 }

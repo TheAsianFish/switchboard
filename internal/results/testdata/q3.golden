@@ -55,8 +55,8 @@ Each distinct text is embedded once per model through the gateway's own
 Ollama client (`/api/embed`) and every pair is scored by the cosine of its
 two embeddings, rounded to six decimals in the raw files. A pair hits at
 threshold t when its cosine is at least t and, with the number guard on,
-both sides contain the same numbers (`cache.SameNumbers`, which also reads
-spelled-out numbers). The threshold is swept from 0.5000 to 0.99 in steps
+both sides contain the same numbers in the same order (`cache.SameNumbers`,
+which also reads spelled-out numbers). The threshold is swept from 0.5000 to 0.99 in steps
 of 0.0025 and on to 1.0000 in steps of 0.0001, where the pair sets separate if they
 do at all. Hit rate is over the positives, false-hit rate over the
 negatives, both with Wilson 95% intervals in brackets. Two thresholds are
@@ -92,9 +92,10 @@ the positives, no threshold can serve one without the other.
 | `nomic-embed-text` | `paws-wiki` | on | 0.8025 | 100.0% (83.9–100.0) | 0.0% (0.0–0.9) | 0.8025 | 100.0% (83.9–100.0) | 0.0% (0.0–0.9) |
 | `nomic-embed-text` | `gsm8k-perturb` | on | 0.8025 | 100.0% (83.9–100.0) | 0.0% (0.0–0.9) | 0.8025 | 100.0% (83.9–100.0) | 0.0% (0.0–0.9) |
 
-**Exact-match baseline.** The floor a semantic cache has to beat: an exact
-cache keyed on the trimmed text (what the gateway's exact layer does) and
-one that also collapses whitespace and folds case.
+**Exact-match baseline.** The floor a semantic cache has to beat: the
+gateway's exact layer (`cache.KeysFor`, which normalises line endings and
+trailing whitespace only) and an exact cache that also collapses
+whitespace and folds case.
 
 | Pair set | Exact hit rate | Exact false-hit rate | Normalised hit rate | Normalised false-hit rate |
 |----------|---------------:|---------------------:|--------------------:|--------------------------:|
@@ -113,6 +114,7 @@ every pair set, and the hit rate each set keeps there.
 | `nomic-embed-text` | on | 0.8025 | `paws-wiki` 100.0% (83.9–100.0); `gsm8k-perturb` 100.0% (83.9–100.0) | 100.0% |
 
 **Shipped default.** The gateway ships with `nomic-embed-text` at threshold 0.8025 with the number guard on.
+There the semantic layer serves this share of the true paraphrases: `paws-wiki` 100.0% (83.9–100.0); `gsm8k-perturb` 100.0% (83.9–100.0); the exact layer alone serves `paws-wiki` 5.0% (0.9–23.6); `gsm8k-perturb` 5.0% (0.9–23.6).
 Rule: For each embedding model, the joint threshold with the number guard on (the lowest threshold whose Wilson 95% upper bound on the false-hit rate is at most 1% on every pair set); the model with the higher mean hit rate at its joint threshold; ties go to the smaller model (fewer dimensions).
 
 **Embedding latency.** What a semantic lookup adds before it reaches
