@@ -550,3 +550,95 @@ func TestIndexFailureKeepsExactLayer(t *testing.T) {
 		}
 	})
 }
+
+// settingKV counts Sets, and fails Gets while down is set.
+type settingKV struct {
+	cache.KV
+	mu   sync.Mutex
+	down bool
+	sets int
+}
+
+func (s *settingKV) Get(ctx context.Context, k string) ([]byte, bool, error) {
+	s.mu.Lock()
+	down := s.down
+	s.mu.Unlock()
+	if down {
+		return nil, false, errors.New("connection refused")
+	}
+	return s.KV.Get(ctx, k)
+}
+
+func (s *settingKV) Set(ctx context.Context, k string, v []byte, ttl time.Duration) error {
+	s.mu.Lock()
+	s.sets++
+	s.mu.Unlock()
+	return s.KV.Set(ctx, k, v, ttl)
+}
+
+// Only a miss is filled: a skip, a hit and a failed lookup write nothing,
+// so a hit is never overwritten by a reply to another request.
+func TestFillOnlyMisses(t *testing.T) {
+	t.Parallel()
+	other := &core.Response{Text: "Lyon.", StopReason: core.StopEndTurn}
+	base := req("m", "", "What is the capital of France?")
+	tests := []struct {
+		name   string
+		want   cache.Status
+		lookup func(c *cache.Cache, kv *settingKV) *cache.Lookup
+	}{
+		{"skip", cache.StatusSkip, func(*cache.Cache, *settingKV) *cache.Lookup { return cache.Skip("off") }},
+		{"cache off", cache.StatusSkip, func(c *cache.Cache, _ *settingKV) *cache.Lookup {
+			return c.Lookup(context.Background(), "a", target, cache.ModeOff, base)
+		}},
+		{"hit-exact", cache.StatusExact, func(c *cache.Cache, _ *settingKV) *cache.Lookup {
+			return c.Lookup(context.Background(), "a", target, cache.ModeSemantic, base)
+		}},
+		{"hit-semantic", cache.StatusSemantic, func(c *cache.Cache, _ *settingKV) *cache.Lookup {
+			return c.Lookup(context.Background(), "a", target, cache.ModeSemantic, req("m", "", "France: what is the capital of?"))
+		}},
+		{"error", cache.StatusError, func(c *cache.Cache, kv *settingKV) *cache.Lookup {
+			kv.mu.Lock()
+			kv.down = true
+			kv.mu.Unlock()
+			defer func() { kv.mu.Lock(); kv.down = false; kv.mu.Unlock() }()
+			return c.Lookup(context.Background(), "a", target, cache.ModeSemantic, base)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			clk := &clock{t: time.Unix(1_700_000_000, 0)}
+			kv := &settingKV{KV: cache.NewMemoryKV(10, clk.now)}
+			idx := &failingIndex{}
+			c := cache.New(cache.Options{
+				KV: kv,
+				NewIndex: func(d int) (cache.Index, error) {
+					idx.Index = cache.NewMemoryIndex(d, 10, clk.now)
+					return idx, nil
+				},
+				Embedder:  &embed.Fake{Dims: 64},
+				Threshold: 0.9,
+				TTL:       time.Hour,
+				Now:       clk.now,
+			})
+			fill(t, c, "a", cache.ModeSemantic, base)
+			if kv.sets != 1 || idx.adds != 1 {
+				t.Fatalf("after the first fill: %d sets, %d adds", kv.sets, idx.adds)
+			}
+			l := tt.lookup(c, kv)
+			if l.Status != tt.want || l.Fillable() {
+				t.Fatalf("lookup %+v, want an unfillable %s", l, tt.want)
+			}
+			c.Fill(context.Background(), l, other)
+			c.Wait()
+			if kv.sets != 1 || idx.adds != 1 {
+				t.Errorf("Fill on a %s lookup wrote: %d sets, %d adds, want 1 and 1", l.Status, kv.sets, idx.adds)
+			}
+			clk.add(time.Minute) // past any back-off
+			if l := c.Lookup(context.Background(), "a", target, cache.ModeExact, base); l.Response == nil || l.Response.Text != answer.Text {
+				t.Errorf("stored reply after the Fill: %+v, want %q", l, answer.Text)
+			}
+		})
+	}
+}
