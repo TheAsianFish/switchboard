@@ -60,7 +60,9 @@ func Disabled(prov core.Provider) bool {
 type missingKey struct{ provider, env string }
 
 func (m missingKey) err() error {
-	return core.Errorf(core.KindUpstream, "provider %q is not available: the gateway has no %s", m.provider, m.env)
+	// The client learns the provider is unconfigured; the variable name is
+	// in the startup warning, not in responses.
+	return core.Errorf(core.KindUpstream, "provider %q is not configured on this gateway", m.provider)
 }
 
 func (m missingKey) Complete(context.Context, *core.Request) (*core.Response, error) {

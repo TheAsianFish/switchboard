@@ -7,6 +7,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"sort"
@@ -101,6 +102,7 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	resp, err := rt.Provider.Complete(ctx, up)
 	elapsed := p.now().Sub(start)
 	if err != nil {
+		err = upstreamError(rt, err)
 		logCall(ctx, rt, false, elapsed, 0, core.Usage{}, err)
 		return nil, err
 	}
@@ -118,10 +120,24 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 	start := p.now()
 	s, err := rt.Provider.Stream(ctx, up)
 	if err != nil {
+		err = upstreamError(rt, err)
 		logCall(ctx, rt, true, p.now().Sub(start), 0, core.Usage{}, err)
 		return nil, err
 	}
 	return &stream{inner: s, ctx: ctx, route: rt, model: req.Model, start: start, now: p.now}, nil
+}
+
+// upstreamError keeps a provider's refusal of the gateway's own credentials
+// from looking like a problem with the client's key. An upstream 401 or 403
+// reaching the client as 401 would send them debugging a key that works,
+// and the upstream's message can quote part of the gateway's key; the
+// detail stays in the cause for the log.
+func upstreamError(rt Route, err error) error {
+	e := core.AsError(err)
+	if e.Kind != core.KindAuthentication && e.Kind != core.KindPermission {
+		return err
+	}
+	return core.Wrap(core.KindUpstream, err, fmt.Sprintf("provider %q rejected the gateway's credentials", rt.ProviderName))
 }
 
 // stream rewrites the model name back to the client's and logs the call
@@ -134,6 +150,9 @@ type stream struct {
 	start time.Time
 	now   func() time.Time
 
+	// mu guards ttft and usage: Close may run on another goroutine than
+	// Next, for example to abort a blocked read.
+	mu     sync.Mutex
 	ttft   time.Duration
 	usage  core.Usage
 	logged sync.Once
@@ -142,11 +161,20 @@ type stream struct {
 func (s *stream) Next() (core.Event, error) {
 	ev, err := s.inner.Next()
 	if err != nil {
-		if !errors.Is(err, io.EOF) {
+		switch {
+		case errors.Is(err, io.EOF):
+		case s.ctx.Err() != nil:
+			// The client went away and its cancelled context failed the
+			// upstream read: that is an abandoned stream, not an upstream
+			// failure.
+			s.finish(errStreamAbandoned)
+		default:
+			err = upstreamError(s.route, err)
 			s.finish(err)
 		}
 		return ev, err
 	}
+	s.mu.Lock()
 	switch ev.Kind {
 	case core.EventStart:
 		ev.Model = s.model
@@ -157,6 +185,9 @@ func (s *stream) Next() (core.Event, error) {
 		}
 	case core.EventStop:
 		s.usage = ev.Usage
+	}
+	s.mu.Unlock()
+	if ev.Kind == core.EventStop {
 		s.finish(nil)
 	}
 	return ev, nil
@@ -173,7 +204,10 @@ var errStreamAbandoned = errors.New("stream closed before it finished")
 
 func (s *stream) finish(err error) {
 	s.logged.Do(func() {
-		logCall(s.ctx, s.route, true, s.now().Sub(s.start), s.ttft, s.usage, err)
+		s.mu.Lock()
+		ttft, usage := s.ttft, s.usage
+		s.mu.Unlock()
+		logCall(s.ctx, s.route, true, s.now().Sub(s.start), ttft, usage, err)
 	})
 }
 

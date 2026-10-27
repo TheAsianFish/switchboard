@@ -3,8 +3,10 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/TheAsianFish/switchboard/internal/auth"
@@ -165,5 +167,111 @@ func TestOpen(t *testing.T) {
 	resp, err := gw.Complete(ctx, &core.Request{Model: "anything"})
 	if err != nil || resp.Model != "anything" {
 		t.Fatalf("resp = %+v, err = %v", resp, err)
+	}
+}
+
+// scripted is a provider that fails or blocks as a test needs.
+type scripted struct {
+	err    error
+	stream core.Stream
+}
+
+func (s scripted) Complete(context.Context, *core.Request) (*core.Response, error) { return nil, s.err }
+func (s scripted) Stream(context.Context, *core.Request) (core.Stream, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.stream, nil
+}
+
+func TestUpstreamCredentialErrorsAreNotTheClients(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []core.ErrorKind{core.KindAuthentication, core.KindPermission} {
+		upstream := core.Errorf(kind, "upstream: Incorrect API key provided: sk-proj-abc*****wxyz")
+		p := New(auth.NewKeys([]config.Key{{Name: "k", Key: "sk"}}), []Route{
+			{Model: "m", ProviderName: "openai", Upstream: "m", Provider: scripted{err: upstream}},
+		})
+		ctx, _ := p.Authenticate(context.Background(), "sk")
+		for name, call := range map[string]func() error{
+			"complete": func() error { _, err := p.Complete(ctx, &core.Request{Model: "m"}); return err },
+			"stream":   func() error { _, err := p.Stream(ctx, &core.Request{Model: "m"}); return err },
+		} {
+			e := core.AsError(call())
+			if e.Kind != core.KindUpstream || strings.Contains(e.Message, "sk-proj") || !errors.Is(e, upstream) {
+				t.Errorf("%v %s: got %v (message %q)", kind, name, e.Kind, e.Message)
+			}
+		}
+	}
+}
+
+// blocking blocks in Next until closed, like an upstream read.
+type blocking struct{ closed chan struct{} }
+
+func (b *blocking) Next() (core.Event, error) {
+	<-b.closed
+	return core.Event{}, errors.New("read on closed connection")
+}
+func (b *blocking) Close() error { close(b.closed); return nil }
+
+// endless yields a start event and then deltas forever, with nothing that
+// orders its reads against a concurrent Close.
+type endless struct{ n atomic.Int64 }
+
+func (e *endless) Next() (core.Event, error) {
+	if e.n.Add(1) == 1 {
+		return core.Event{Kind: core.EventStart, Usage: core.Usage{InputTokens: 1}}, nil
+	}
+	return core.Event{Kind: core.EventDelta, Text: "x"}, nil
+}
+func (e *endless) Close() error { return nil }
+
+func TestStreamCloseFromAnotherGoroutine(t *testing.T) {
+	t.Parallel()
+	p := New(auth.NewKeys([]config.Key{{Name: "k", Key: "sk"}}), []Route{
+		{Model: "m", ProviderName: "x", Upstream: "m", Provider: scripted{stream: &endless{}}},
+	})
+	ctx, _ := p.Authenticate(context.Background(), "sk")
+	s, err := p.Stream(ctx, &core.Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _ = s.Next()
+			}
+		}
+	}()
+	// Close logs the call, reading what Next writes; -race catches it if
+	// that state is not guarded.
+	_ = s.Close()
+	close(stop)
+	<-done
+}
+
+func TestStreamClientGoneIsAbandoned(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	base, cancel := context.WithCancel(context.Background())
+	inner := &blocking{closed: make(chan struct{})}
+	p := New(auth.NewKeys([]config.Key{{Name: "k", Key: "sk"}}), []Route{
+		{Model: "m", ProviderName: "x", Upstream: "m", Provider: scripted{stream: inner}},
+	})
+	ctx := telemetry.WithRequest(base, slog.New(slog.NewJSONHandler(&buf, nil)), "r")
+	ctx, _ = p.Authenticate(ctx, "sk")
+	s, _ := p.Stream(ctx, &core.Request{Model: "m"})
+	cancel()
+	close(inner.closed) // the cancelled context fails the upstream read
+	if _, err := s.Next(); err == nil {
+		t.Fatal("want the read error")
+	}
+	if !strings.Contains(buf.String(), `"outcome":"abandoned"`) || strings.Contains(buf.String(), `"level":"WARN"`) {
+		t.Errorf("log = %s", buf.String())
 	}
 }
