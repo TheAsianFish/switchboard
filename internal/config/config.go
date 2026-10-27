@@ -1,0 +1,228 @@
+// Package config loads switchboard.yaml and applies SWITCHBOARD_*
+// environment overrides. Provider secrets are never read from the file:
+// the file names the environment variable that holds each one.
+package config
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Provider types.
+const (
+	TypeAnthropic    = "anthropic"
+	TypeOpenAICompat = "openaicompat"
+	TypeFake         = "fake"
+)
+
+// Config is the whole gateway configuration.
+type Config struct {
+	Listen    string     `yaml:"listen"`
+	Log       Log        `yaml:"log"`
+	Providers []Provider `yaml:"providers"`
+	Models    []Model    `yaml:"models"`
+	Keys      []Key      `yaml:"keys"`
+}
+
+// Log configures the process logger.
+type Log struct {
+	Format string `yaml:"format"` // json or text
+	Level  string `yaml:"level"`  // debug, info, warn, error
+}
+
+// Provider is one upstream backend.
+type Provider struct {
+	Name string `yaml:"name"`
+	Type string `yaml:"type"`
+	// BaseURL is the upstream's base URL. For openaicompat it includes the
+	// /v1 prefix; for anthropic it is empty for api.anthropic.com.
+	BaseURL string `yaml:"base_url"`
+	// APIKeyEnv names the environment variable holding the upstream key.
+	APIKeyEnv string `yaml:"api_key_env"`
+	// Timeout bounds one upstream call, stream included.
+	Timeout time.Duration `yaml:"timeout"`
+	// DefaultMaxTokens is sent when a request has none and the upstream
+	// requires one (Anthropic).
+	DefaultMaxTokens int `yaml:"default_max_tokens"`
+	// Fake configures a fake provider.
+	Fake FakeProvider `yaml:"fake"`
+
+	// APIKey is resolved from APIKeyEnv at load time; never from the file.
+	APIKey string `yaml:"-"`
+}
+
+// FakeProvider shapes the replies of an in-process fake backend.
+type FakeProvider struct {
+	Latency       time.Duration `yaml:"latency"`
+	Tokens        int           `yaml:"tokens"`
+	TokenInterval time.Duration `yaml:"token_interval"`
+}
+
+// Model maps a client-facing model name to a provider.
+type Model struct {
+	Name     string `yaml:"name"`
+	Provider string `yaml:"provider"`
+	// Upstream is the provider's own name for the model; defaults to Name.
+	Upstream string `yaml:"upstream"`
+}
+
+// Key is a client API key. Exactly one of Key and SHA256 is set; SHA256 is
+// the hex digest of the key, so a deployed file need not hold the key.
+type Key struct {
+	Name   string `yaml:"name"`
+	Key    string `yaml:"key"`
+	SHA256 string `yaml:"sha256"`
+	// Models restricts the key to these model names; empty allows all.
+	Models []string `yaml:"models"`
+}
+
+// Defaults applied before the file is read.
+const (
+	DefaultListen  = "127.0.0.1:8080"
+	DefaultTimeout = 10 * time.Minute
+)
+
+// Load reads the file at path (which may be empty for an all-defaults
+// config) and applies environment overrides from getenv.
+func Load(path string, getenv func(string) string) (*Config, error) {
+	cfg := &Config{Listen: DefaultListen, Log: Log{Format: "json", Level: "info"}}
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read config: %w", err)
+		}
+		dec := yaml.NewDecoder(bytes.NewReader(data))
+		dec.KnownFields(true)
+		// An empty file decodes to io.EOF and leaves the defaults.
+		if err := dec.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+	}
+	applyEnv(cfg, getenv)
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if p.Timeout == 0 {
+			p.Timeout = DefaultTimeout
+		}
+		if p.APIKeyEnv != "" {
+			p.APIKey = getenv(p.APIKeyEnv)
+		}
+	}
+	for i := range cfg.Models {
+		if cfg.Models[i].Upstream == "" {
+			cfg.Models[i].Upstream = cfg.Models[i].Name
+		}
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// applyEnv applies SWITCHBOARD_* overrides. Per-provider base URLs can be
+// overridden as SWITCHBOARD_PROVIDER_<NAME>_BASE_URL, with the name upper
+// cased and non-alphanumerics replaced by underscores, which is how compose
+// points the same file at a container hostname.
+func applyEnv(cfg *Config, getenv func(string) string) {
+	set := func(dst *string, name string) {
+		if v := getenv(name); v != "" {
+			*dst = v
+		}
+	}
+	set(&cfg.Listen, "SWITCHBOARD_LISTEN")
+	set(&cfg.Log.Format, "SWITCHBOARD_LOG_FORMAT")
+	set(&cfg.Log.Level, "SWITCHBOARD_LOG_LEVEL")
+	for i := range cfg.Providers {
+		set(&cfg.Providers[i].BaseURL, "SWITCHBOARD_PROVIDER_"+envName(cfg.Providers[i].Name)+"_BASE_URL")
+	}
+}
+
+func envName(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r - 'a' + 'A'
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
+			return '_'
+		}
+	}, s)
+}
+
+// Validate checks references and required fields, reporting every problem
+// at once.
+func (c *Config) Validate() error {
+	var errs []error
+	providers := map[string]bool{}
+	for i, p := range c.Providers {
+		switch {
+		case p.Name == "":
+			errs = append(errs, fmt.Errorf("providers[%d]: name is required", i))
+		case providers[p.Name]:
+			errs = append(errs, fmt.Errorf("providers[%d]: duplicate name %q", i, p.Name))
+		}
+		providers[p.Name] = true
+		switch p.Type {
+		case TypeAnthropic, TypeFake:
+		case TypeOpenAICompat:
+			if p.BaseURL == "" {
+				errs = append(errs, fmt.Errorf("provider %q: base_url is required for openaicompat", p.Name))
+			}
+		default:
+			errs = append(errs, fmt.Errorf("provider %q: type %q is not one of anthropic, openaicompat, fake", p.Name, p.Type))
+		}
+	}
+	models := map[string]bool{}
+	for i, m := range c.Models {
+		switch {
+		case m.Name == "":
+			errs = append(errs, fmt.Errorf("models[%d]: name is required", i))
+		case models[m.Name]:
+			errs = append(errs, fmt.Errorf("models[%d]: duplicate name %q", i, m.Name))
+		case !providers[m.Provider]:
+			errs = append(errs, fmt.Errorf("model %q: unknown provider %q", m.Name, m.Provider))
+		}
+		models[m.Name] = true
+	}
+	keyNames := map[string]bool{}
+	for i, k := range c.Keys {
+		if k.Name == "" {
+			errs = append(errs, fmt.Errorf("keys[%d]: name is required", i))
+		} else if keyNames[k.Name] {
+			errs = append(errs, fmt.Errorf("keys[%d]: duplicate name %q", i, k.Name))
+		}
+		keyNames[k.Name] = true
+		if (k.Key == "") == (k.SHA256 == "") {
+			errs = append(errs, fmt.Errorf("key %q: set exactly one of key and sha256", k.Name))
+		}
+		if k.SHA256 != "" && !isHex64(k.SHA256) {
+			errs = append(errs, fmt.Errorf("key %q: sha256 must be 64 hex characters", k.Name))
+		}
+		for _, m := range k.Models {
+			if !models[m] {
+				errs = append(errs, fmt.Errorf("key %q: unknown model %q", k.Name, m))
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func isHex64(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return false
+		}
+	}
+	return true
+}

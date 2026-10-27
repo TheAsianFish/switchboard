@@ -1,0 +1,61 @@
+{
+  "config": {
+    "label": "direct-stream-500",
+    "url": "http://127.0.0.1:9101",
+    "format": "openai",
+    "model": "fake",
+    "stream": true,
+    "rate": 500,
+    "duration_seconds": 60,
+    "warmup_seconds": 5,
+    "timeout_seconds": 30,
+    "max_in_flight": 1024,
+    "max_tokens": 0
+  },
+  "started_at": "2026-10-27T00:32:36.286614308Z",
+  "wall_seconds": 65.186,
+  "requests": 30000,
+  "warmup_requests": 2500,
+  "offered_rps": 500,
+  "achieved_rps": 500,
+  "peak_in_flight": 93,
+  "outcomes": {
+    "ok": 30000
+  },
+  "latency": {
+    "count": 30000,
+    "mean_ms": 177.916,
+    "p50_ms": 177.797,
+    "p90_ms": 179.698,
+    "p99_ms": 181.464,
+    "p999_ms": 186.307,
+    "max_ms": 188.975
+  },
+  "ttft": {
+    "count": 30000,
+    "mean_ms": 21.175,
+    "p50_ms": 21.097,
+    "p90_ms": 21.987,
+    "p99_ms": 22.476,
+    "p999_ms": 23.003,
+    "max_ms": 23.982
+  },
+  "send_delay": {
+    "count": 30000,
+    "mean_ms": 0.521,
+    "p50_ms": 0.491,
+    "p90_ms": 0.994,
+    "p99_ms": 1.222,
+    "p999_ms": 1.372,
+    "max_ms": 1.936
+  },
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "AMD EPYC 7763 64-Core Processor",
+    "kernel": "6.17.0-1022-azure"
+  }
+}

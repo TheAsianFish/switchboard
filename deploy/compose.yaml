@@ -1,0 +1,20 @@
+# make dev: one gateway replica in front of Ollama. Redis, Jaeger and
+# Prometheus join this file as the milestones that need them land.
+services:
+  switchboard:
+    build: ..
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SWITCHBOARD_LOG_FORMAT: text
+    depends_on:
+      - ollama
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+volumes:
+  ollama:

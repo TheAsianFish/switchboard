@@ -8,13 +8,45 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  check:
+  lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - name: Placeholder until M1 adds the Go module
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: make fmt
+      - name: go vet
+        run: make vet
+      # Built from source with the module's Go: a prebuilt golangci-lint
+      # compiled with an older Go refuses to lint a go 1.27 module.
+      - uses: actions/cache@v6
+        with:
+          path: bin
+          key: golangci-${{ runner.os }}-${{ hashFiles('go.mod', 'Makefile') }}
+      - name: golangci-lint
         run: |
-          test -f PLAN.md
-          echo "lint, vet and tests arrive with M1"
+          test -x bin/golangci-lint || make tools
+          make lint
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test -race
+        run: make test
+      - name: build
+        run: make build

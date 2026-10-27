@@ -1,0 +1,10 @@
+{
+  "commit": "1bca260",
+  "date": "2026-10-27T00:21:44Z",
+  "fake_provider": {
+    "latency": "20ms",
+    "tokens": 30,
+    "token_interval": "5ms"
+  },
+  "command": "RATES='50 200 500' DURATION=60s WARMUP=5s eval/bench/q1.sh"
+}

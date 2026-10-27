@@ -1,0 +1,40 @@
+# Switchboard configuration. Copy to switchboard.yaml and edit.
+# SWITCHBOARD_* environment variables override these settings; provider
+# secrets are only ever read from the environment variable named here.
+
+listen: 127.0.0.1:8080
+log:
+  format: text   # json in production
+  level: info
+
+providers:
+  # Ollama's OpenAI-compatible endpoint (also vLLM, llama.cpp, ...).
+  - name: ollama
+    type: openaicompat
+    base_url: http://localhost:11434/v1
+    timeout: 5m
+  # The Anthropic API through the official Go SDK.
+  - name: anthropic
+    type: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    default_max_tokens: 4096   # sent when an OpenAI-format client omits max_tokens
+    timeout: 10m
+  # A deterministic backend for trying the gateway without any model.
+  - name: fake
+    type: fake
+
+models:
+  - name: qwen2.5:0.5b
+    provider: ollama
+  - name: claude-haiku-5-5
+    provider: anthropic
+  - name: claude-opus-5-5
+    provider: anthropic
+  - name: fake
+    provider: fake
+
+keys:
+  # A plain key for a laptop. In a deployed file prefer sha256, the hex
+  # digest of the key: printf %s "$KEY" | sha256sum
+  - name: dev
+    key: sk-switchboard-dev
