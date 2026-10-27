@@ -4,7 +4,7 @@ BIN := $(CURDIR)/bin
 GOLANGCI := $(BIN)/golangci-lint
 export GOTOOLCHAIN ?= auto
 
-.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits sdk-smoke record-fixtures results docker clean
+.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits eval-cache eval-cache-data sdk-smoke record-fixtures results docker clean
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -48,6 +48,13 @@ bench: ## Q1: gateway overhead through the fake provider (about 12 minutes)
 
 test-limits: ## Q2: over-admission and shared budget across three replicas in compose (about 12 minutes)
 	eval/limits/run.sh
+
+eval-cache: ## Q3: semantic cache threshold sweep (Ollama with all-minilm and nomic-embed-text) and FLAT vs HNSW in a throwaway redis:8
+	go run ./cmd/switchboard eval cache
+	scripts/with-redis.sh go run ./cmd/switchboard eval cache-index
+
+eval-cache-data: ## rebuild the Q3 pair sets in eval/cache/data (Ollama with qwen2.5:3b, about 2.5 h on a laptop CPU; resumes)
+	go run ./cmd/switchboard eval cache-data
 
 sdk-smoke: build ## unmodified OpenAI and Anthropic Python SDKs streaming through the gateway (needs Ollama)
 	eval/sdk/smoke.sh

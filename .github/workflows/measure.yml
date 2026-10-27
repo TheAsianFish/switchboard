@@ -9,7 +9,7 @@ on:
       target:
         description: make target to run
         type: choice
-        options: [test-limits, bench]
+        options: [test-limits, bench, eval-cache]
         default: test-limits
 
 permissions:
@@ -25,6 +25,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # The cache eval embeds about 17,000 texts with two small models on
+      # the runner's CPU (a few minutes); the models are pulled first.
+      - name: Ollama for eval-cache
+        if: inputs.target == 'eval-cache'
+        run: |
+          docker run -d --name ollama -p 127.0.0.1:11434:11434 ollama/ollama:0.40.11
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/version && break; sleep 1; done
+          docker exec ollama ollama pull all-minilm
+          docker exec ollama ollama pull nomic-embed-text
       - name: make ${{ inputs.target }}
         run: make ${{ inputs.target }}
       - uses: actions/upload-artifact@v7
