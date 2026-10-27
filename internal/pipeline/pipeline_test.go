@@ -125,7 +125,7 @@ func TestStreamRewritesModelAndLogsOnce(t *testing.T) {
 	if n := strings.Count(out, `"msg":"llm call"`); n != 1 {
 		t.Fatalf("logged %d call lines, want 1:\n%s", n, out)
 	}
-	for _, want := range []string{`"request_id":"req_test"`, `"key":"all"`, `"output_tokens":5`, `"ttft_ms"`} {
+	for _, want := range []string{`"request_id":"req_test"`, `"key":"all"`, `"output_tokens":5`, `"ttft_ms"`, `"cache_write_tokens":`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log line lacks %s:\n%s", want, out)
 		}

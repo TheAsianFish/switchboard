@@ -228,6 +228,7 @@ func logCall(ctx context.Context, rt Route, stream bool, total, ttft time.Durati
 		slog.Int("input_tokens", u.InputTokens),
 		slog.Int("output_tokens", u.OutputTokens),
 		slog.Int("cache_read_tokens", u.CacheReadTokens),
+		slog.Int("cache_write_tokens", u.CacheWriteTokens),
 	)
 	log := telemetry.Logger(ctx)
 	switch {
