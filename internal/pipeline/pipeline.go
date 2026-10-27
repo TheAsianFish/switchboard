@@ -187,8 +187,8 @@ func (p *Pipeline) lookup(ctx context.Context, adm *admission, req, up *core.Req
 	default:
 		keyed := *req
 		keyed.MaxTokens = up.MaxTokens
-		up := cache.Upstream{Provider: adm.route.ProviderName, Model: adm.route.Upstream}
-		lk = p.policy.Cache.Lookup(ctx, adm.pr.Tenant, up, adm.cache.Mode, &keyed)
+		route := cache.Upstream{Provider: adm.route.ProviderName, Model: adm.route.Upstream}
+		lk = p.policy.Cache.Lookup(ctx, adm.pr.Tenant, route, adm.cache.Mode, &keyed)
 	}
 	cache.ReportFrom(ctx).Set(lk)
 	return telemetry.WithAttrs(ctx, "cache", string(lk.Status)), lk
