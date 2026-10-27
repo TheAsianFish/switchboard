@@ -16,6 +16,8 @@ const (
 	OutcomeAbandoned       = "abandoned"
 	OutcomeRateLimited     = "rate_limited"
 	OutcomeBudgetExhausted = "budget_exhausted"
+	// OutcomeCacheHit is a request answered from the response cache.
+	OutcomeCacheHit = "cache_hit"
 )
 
 // Metrics are the gateway's Prometheus series. Key labels carry the key's
@@ -32,6 +34,12 @@ type Metrics struct {
 	refusals  *prometheus.CounterVec
 	degraded  *prometheus.GaugeVec
 	storeErrs *prometheus.CounterVec
+
+	cacheLookups *prometheus.CounterVec
+	cacheLatency *prometheus.HistogramVec
+	cacheFills   *prometheus.CounterVec
+	cacheErrs    *prometheus.CounterVec
+	cacheSaved   *prometheus.CounterVec
 }
 
 // NewMetrics registers the gateway's series on a fresh registry, with the
@@ -41,7 +49,7 @@ func NewMetrics(runtime bool) *Metrics {
 		reg: prometheus.NewRegistry(),
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "switchboard_requests_total",
-			Help: "Requests by key, model and outcome (ok, error, abandoned, rate_limited, budget_exhausted).",
+			Help: "Requests by key, model and outcome (ok, error, abandoned, rate_limited, budget_exhausted, cache_hit).",
 		}, []string{"key", "model", "outcome"}),
 		tokens: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "switchboard_tokens_total",
@@ -72,8 +80,30 @@ func NewMetrics(runtime bool) *Metrics {
 			Name: "switchboard_store_errors_total",
 			Help: "Failed calls to the shared store that were not answered by a fallback, by component and operation.",
 		}, []string{"component", "op"}),
+		cacheLookups: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "switchboard_cache_lookups_total",
+			Help: "Response cache lookups by result (hit-exact, hit-semantic, miss, skip, error).",
+		}, []string{"result"}),
+		cacheLatency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "switchboard_cache_lookup_seconds",
+			Help:    "Time spent in a cache layer per lookup: exact (one store read) or semantic (embedding plus vector search).",
+			Buckets: []float64{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5},
+		}, []string{"layer"}),
+		cacheFills: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "switchboard_cache_fills_total",
+			Help: "Replies written to the response cache, by result (ok, error).",
+		}, []string{"result"}),
+		cacheErrs: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "switchboard_cache_errors_total",
+			Help: "Failed cache operations by operation (get, set, search, add, embed, index); the request still goes upstream.",
+		}, []string{"op"}),
+		cacheSaved: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "switchboard_cache_saved_dollars_total",
+			Help: "What the replies served from the cache cost when they were first generated, in US dollars, by key and model.",
+		}, []string{"key", "model"}),
 	}
-	m.reg.MustRegister(m.requests, m.tokens, m.dollars, m.unpriced, m.duration, m.refusals, m.degraded, m.storeErrs)
+	m.reg.MustRegister(m.requests, m.tokens, m.dollars, m.unpriced, m.duration, m.refusals, m.degraded, m.storeErrs,
+		m.cacheLookups, m.cacheLatency, m.cacheFills, m.cacheErrs, m.cacheSaved)
 	if runtime {
 		m.reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	}
@@ -155,4 +185,44 @@ func (m *Metrics) StoreError(component, op string) {
 		return
 	}
 	m.storeErrs.WithLabelValues(component, op).Inc()
+}
+
+// CacheLookup records one cache lookup's result.
+func (m *Metrics) CacheLookup(result string) {
+	if m == nil {
+		return
+	}
+	m.cacheLookups.WithLabelValues(result).Inc()
+}
+
+// CacheLatency records the time one cache layer took.
+func (m *Metrics) CacheLatency(layer string, d time.Duration) {
+	if m == nil {
+		return
+	}
+	m.cacheLatency.WithLabelValues(layer).Observe(d.Seconds())
+}
+
+// CacheFill records one write to the cache.
+func (m *Metrics) CacheFill(result string) {
+	if m == nil {
+		return
+	}
+	m.cacheFills.WithLabelValues(result).Inc()
+}
+
+// CacheError records a failed cache operation.
+func (m *Metrics) CacheError(op string) {
+	if m == nil {
+		return
+	}
+	m.cacheErrs.WithLabelValues(op).Inc()
+}
+
+// CacheSaved records the original cost of a reply served from the cache.
+func (m *Metrics) CacheSaved(key, model string, dollars float64) {
+	if m == nil {
+		return
+	}
+	m.cacheSaved.WithLabelValues(key, model).Add(dollars)
 }
