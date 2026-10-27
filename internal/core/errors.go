@@ -23,6 +23,9 @@ const (
 	KindOverloaded
 	KindTimeout
 	KindUpstream
+	// KindBudgetExceeded: the caller's key has spent its budget. Unlike a
+	// rate limit, waiting a few seconds does not help.
+	KindBudgetExceeded
 )
 
 func (k ErrorKind) String() string {
@@ -43,6 +46,8 @@ func (k ErrorKind) String() string {
 		return "timeout"
 	case KindUpstream:
 		return "upstream"
+	case KindBudgetExceeded:
+		return "budget_exceeded"
 	default:
 		return "internal"
 	}

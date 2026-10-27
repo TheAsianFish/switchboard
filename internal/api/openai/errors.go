@@ -18,6 +18,7 @@ const (
 	typeInvalidRequest = "invalid_request_error"
 	typePermission     = "permission_error"
 	typeRateLimit      = "rate_limit_error"
+	typeQuota          = "insufficient_quota"
 	typeServer         = "server_error"
 )
 
@@ -54,6 +55,9 @@ func classify(e *core.Error) (int, errorObject) {
 		}
 	case core.KindRateLimited:
 		status, obj.Type, code = http.StatusTooManyRequests, typeRateLimit, "rate_limit_exceeded"
+	case core.KindBudgetExceeded:
+		// What OpenAI itself sends when an account is out of credit.
+		status, obj.Type, code = http.StatusTooManyRequests, typeQuota, "insufficient_quota"
 	case core.KindOverloaded:
 		status, obj.Type, code = http.StatusServiceUnavailable, typeServer, "overloaded"
 	case core.KindTimeout:
@@ -81,6 +85,11 @@ func writeError(w http.ResponseWriter, ctx context.Context, err error) {
 	logError(ctx, "request failed", status, e)
 	if e.RetryAfter > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(e.RetryAfter.Seconds()))))
+	}
+	if e.Kind == core.KindBudgetExceeded {
+		// The OpenAI SDKs retry every 429 unless told not to; a spent
+		// budget does not come back in a few seconds.
+		w.Header().Set("X-Should-Retry", "false")
 	}
 	writeJSON(w, status, errorBody{Error: obj})
 }

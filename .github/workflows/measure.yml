@@ -1,0 +1,33 @@
+name: measure
+
+# Benchmarks and load tests, run by hand only: they take minutes and the
+# per-PR workflow stays the fast offline gate. Raw results are uploaded as an
+# artifact; committing them (and re-rendering RESULTS.md) stays a local step.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: make target to run
+        type: choice
+        options: [test-limits, bench]
+        default: test-limits
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: make ${{ inputs.target }}
+        run: make ${{ inputs.target }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: results-${{ inputs.target }}
+          path: eval/results/

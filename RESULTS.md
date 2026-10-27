@@ -50,6 +50,89 @@ time spent in the gateway (compare the send delays in the raw files).
 - Command: `RATES='50 200 500' DURATION=60s WARMUP=5s eval/bench/q1.sh`.
 - Cost: $0 (no paid API; the fake provider only).
 
+## Q2: shared limits and budgets across three replicas
+
+When three replicas share one rate limit through Redis, how many requests
+slip past it under load, and how many when Redis is down? Does a budget the
+same three replicas share hold, and does the gateway's spend match what the
+provider says it served? Command: `make test-limits` (`eval/limits/run.sh`),
+raw files in `eval/results/q2-limits/`.
+
+**Method.** Compose runs three `switchboard serve` replicas behind nginx
+(round robin), Redis 8 without persistence, and `switchboard fake-provider`,
+which keeps a ledger of every request that reached it: arrival time, model
+and the usage it reported. One key is limited to 100 requests per 60 s, burst 20;
+`switchboard bench` offers it 5 requests per second (300 per minute) for 180 s through the load
+balancer, open loop. Admitted means present in the provider's ledger, so a
+request counts as admitted only if it really got past the limit. The bound
+is what a limit with that rate and burst may admit in any window of length
+W: burst + rate × W / period. Over-admission is the most admitted in any
+window of length W beyond that bound, taken over every W from 1 s to 60 s;
+the 60 s window alone (PLAN.md's first definition) is shown too. It
+understates a fixed-window counter: at a steady overload the counter spends
+each window's allowance in the first third of the window and refuses the
+rest, so its excess is concentrated in short windows, and a 60 s window
+sees it only where it straddles a window boundary (a run that starts
+exactly on a boundary shows none at 60 s; see
+`TestWorstFindsFixedWindowBurst`). Fixed windows are aligned to Redis's
+clock, not to the start of the run. In the outage runs Redis is killed and restarted mid-run
+(`docker compose kill`, then `start`); while it is down each replica
+enforces a third of the limit on its own. `no-shared-store` runs the
+replicas without Redis, each enforcing the full limit, the per-replica
+alternative PLAN.md rejected. Redis runs without persistence, so after a
+restart it comes back empty and a fixed-window counter hands out a fresh
+allowance in the middle of a window.
+
+That bound is GCRA's promise, and the fixed window is not built to keep
+it: by design it may admit up to twice its rate across a boundary. What a
+fixed window does promise is at most the rate in each of its own windows,
+so the table also counts admissions per limiter window, aligned to the
+Unix clock as the script aligns them to Redis's `TIME` (both containers
+read the host's clock). With one counter shared by the three replicas, no
+window may exceed the rate; per-replica counters would allow three times
+it. Arrival is recorded at the provider, a few milliseconds after
+admission, so a request admitted at the very end of a window can land in
+the next one.
+
+| Scenario | Store | Algorithm | Offered | Admitted | Refused (429) | Other errors | Most in one limiter window (rate) | Worst W (s) | Admitted in it | Bound at W | Over at W | Admitted in worst 60 s | Bound at 60 s | Over at 60 s | Latency p50 / p99 of admitted (ms) |
+|----------|-------|-----------|--------:|---------:|--------------:|-------------:|----------------------------------:|------------:|---------------:|-----------:|----------:|-----------------------:|--------------:|-------------:|-----------------------------------:|
+| fixed-window | redis | fixed_window | 900 | 366 | 534 | 0 | 100 (100) | 20 | 100 | 53 | 47 | 167 | 120 | 47 | 22.4 / 24.2 |
+| fixed-window-redis-outage | redis | fixed_window | 900 | 533 | 367 | 0 | 183 (100) | 37 | 183 | 81 | 102 | 183 | 120 | 63 | 22.3 / 123.4 |
+| no-shared-store | none | fixed_window | 900 | 900 | 0 | 0 | 300 (100) | 60 | 301 | 120 | 181 | 301 | 120 | 181 | 22.0 / 23.3 |
+
+Admitted per limiter window, in order (`*`: a window the run covers only in part):
+
+- `fixed-window`: 100* · 100 · 100 · 66*
+- `fixed-window-redis-outage`: 100* · 175 · 183 · 75*
+- `no-shared-store`: 200* · 300 · 300 · 100*
+
+Phases of `fixed-window-redis-outage` (seconds from the start of the run; bound over the
+whole phase, and the worst window inside it):
+
+| Phase | From (s) | To (s) | Admitted | Bound over the phase | Over | Worst W (s) | Admitted in it | Bound at W | Over at W |
+|-------|---------:|-------:|---------:|---------------------:|-----:|------------:|---------------:|-----------:|----------:|
+| before the outage | 0 | 60.003 | 175 | 120 | 55 | 60 | 175 | 120 | 55 |
+| Redis down | 60.003 | 120.329 | 178 | 120 | 58 | 60 | 177 | 120 | 57 |
+| after Redis is back | 120.329 | 179.829 | 180 | 119 | 61 | 59 | 178 | 118 | 60 |
+
+**Shared budget.** A second key has a total budget of $0.10 on a model
+priced at $3 in and $15 out per million tokens.
+`switchboard bench` offered 20 requests per second (600
+requests, `max_tokens` 64, so each reservation is the worst case of 64
+output tokens and is settled to the 30 per request the fake provider returned) through
+the same three replicas. The provider's ledger is priced independently of
+the gateway's cost code, with exact rationals.
+
+| Admitted | Refused | Incomplete | Ledger tokens (in / out) | Spend from the provider's ledger | Spend in the gateway's Redis ledger | Difference | Left reserved | Sum of the replicas' `switchboard_cost_dollars_total` (3 of 3 scraped) | Gateway matches the ledger to the cent | Metrics match to the cent | Spend within the budget |
+|---------:|--------:|-----------:|-------------------------:|---------------------------------:|------------------------------------:|-----------:|--------------:|------------------:|:-------:|:-------:|:-------:|
+| 213 | 387 | 0 | 1065 / 6390 | $0.099045000 | $0.099045000 | $0.000000000 | $0.000000000 | $0.099045000 | yes | yes | yes |
+
+- Hardware: AMD EPYC 9V45 96-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 6.17.0-1022-azure, go1.27.0 (generator, nginx, the three replicas, Redis and the fake provider on one machine).
+- Commit: `d967c73`, run 2026-10-27.
+- Command: `make test-limits`.
+- Cost: $0 (fake provider only).
+- Not in this run: `gcra`, `gcra-redis-outage` (a scenario is skipped when its algorithm is not implemented yet; `make test-limits` runs it as soon as it is).
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -77,8 +160,9 @@ Recorded 2026-10-27 on the machine in Q1. Cost: $0 (local Ollama only).
 - Q1 per-feature breakdown (limits, budget, exact and semantic cache miss
   paths, router, tracing toggled one at a time; CPU and RSS per replica at
   500 req/s): M6, `make bench`.
-- Q2 shared limits across three replicas, Redis up and down:
-  `make test-limits`.
+- Q2 with GCRA: `ALGORITHMS=gcra make test-limits` once the GCRA limiter
+  is implemented (`internal/ratelimit/gcra.go`; its contract tests skip
+  until then).
 - Q3 semantic cache threshold sweep: `make eval-cache` (needs Ollama).
 - Q4 hedging: `make bench-hedge` (the live part needs `ANTHROPIC_API_KEY`).
 - Q5 router frontier: `make eval-router`.

@@ -6,9 +6,11 @@ package fake
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,8 +39,46 @@ type Provider struct {
 	calls atomic.Int64
 	seq   atomic.Int64
 
-	mu   sync.Mutex
-	last *core.Request
+	mu     sync.Mutex
+	last   *core.Request
+	ledger []Entry
+}
+
+// Entry is one request in the provider's ledger: when it arrived and the
+// usage the provider reported for it. It is the ground truth the limits
+// test checks the gateway against: what actually reached the provider and
+// what it said each request used.
+type Entry struct {
+	// Time is when the request arrived.
+	Time   time.Time `json:"time"`
+	Model  string    `json:"model"`
+	Stream bool      `json:"stream"`
+	// InputTokens and OutputTokens are the usage reported to the caller;
+	// for a stream closed early, the output sent so far.
+	InputTokens  int  `json:"input_tokens"`
+	OutputTokens int  `json:"output_tokens"`
+	Completed    bool `json:"completed"`
+}
+
+// Ledger returns a copy of every request received since the last reset.
+func (p *Provider) Ledger() []Entry {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]Entry(nil), p.ledger...)
+}
+
+// ResetLedger empties the ledger.
+func (p *Provider) ResetLedger() {
+	p.mu.Lock()
+	p.ledger = nil
+	p.mu.Unlock()
+}
+
+func (p *Provider) settle(i int, output int, completed bool) {
+	p.mu.Lock()
+	p.ledger[i].OutputTokens = output
+	p.ledger[i].Completed = completed
+	p.mu.Unlock()
 }
 
 // New returns a fake provider with cfg.
@@ -64,23 +104,27 @@ func (p *Provider) LastRequest() *core.Request {
 	return &c
 }
 
-func (p *Provider) record(req *core.Request) string {
+// record notes a request and returns its reply id and ledger index.
+func (p *Provider) record(req *core.Request) (string, int) {
 	p.calls.Add(1)
 	c := *req
 	c.Messages = append([]core.Message(nil), req.Messages...)
 	p.mu.Lock()
 	p.last = &c
+	p.ledger = append(p.ledger, Entry{Time: time.Now(), Model: req.Model, Stream: req.Stream, InputTokens: InputTokens(req)})
+	i := len(p.ledger) - 1
 	p.mu.Unlock()
-	return fmt.Sprintf("fake-%d", p.seq.Add(1))
+	return fmt.Sprintf("fake-%d", p.seq.Add(1)), i
 }
 
 // Complete implements core.Provider.
 func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Response, error) {
-	id := p.record(req)
+	id, entry := p.record(req)
 	if err := sleep(ctx, p.cfg.Latency); err != nil {
 		return nil, err
 	}
 	words, stop := p.reply(req)
+	p.settle(entry, len(words), true)
 	return &core.Response{
 		ID:         id,
 		Model:      req.Model,
@@ -92,9 +136,11 @@ func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Respo
 
 // Stream implements core.Provider.
 func (p *Provider) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
-	id := p.record(req)
+	id, entry := p.record(req)
 	words, stop := p.reply(req)
 	return &stream{
+		p:     p,
+		entry: entry,
 		ctx:   ctx,
 		cfg:   p.cfg,
 		id:    id,
@@ -150,6 +196,8 @@ func InputTokens(req *core.Request) int {
 }
 
 type stream struct {
+	p     *Provider
+	entry int
 	ctx   context.Context
 	cfg   Config
 	id    string
@@ -180,10 +228,12 @@ func (s *stream) Next() (core.Event, error) {
 			}
 		}
 		w := s.words[s.state-1]
+		s.p.settle(s.entry, s.state, false)
 		s.state++
 		return core.Event{Kind: core.EventDelta, Text: w}, nil
 	case s.state == len(s.words)+1:
 		s.state++
+		s.p.settle(s.entry, len(s.words), true)
 		return core.Event{Kind: core.EventStop, StopReason: s.stop, Usage: core.Usage{InputTokens: s.input, OutputTokens: len(s.words)}}, nil
 	default:
 		return core.Event{}, io.EOF
@@ -207,4 +257,21 @@ func sleep(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
+}
+
+// LedgerHandler serves the ledger: GET returns {"entries": [...]}, POST to
+// .../reset empties it. `switchboard fake-provider` mounts it at /ledger.
+func (p *Provider) LedgerHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /ledger", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Entries []Entry `json:"entries"`
+		}{Entries: p.Ledger()})
+	})
+	mux.HandleFunc("POST /ledger/reset", func(w http.ResponseWriter, _ *http.Request) {
+		p.ResetLedger()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	return mux
 }

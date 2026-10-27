@@ -4,6 +4,8 @@
 //	switchboard fake-provider   run the deterministic fake backend
 //	switchboard bench           drive load at a target and record latency
 //	switchboard eval results    render RESULTS.md from eval/results/
+//	switchboard eval limits     Q2: over-admission from the fake provider's ledger
+//	switchboard eval budget     Q2: shared budget spend against the ledger
 //	switchboard version         print the build version
 package main
 
@@ -14,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -24,6 +27,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/bench"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/core"
+	"github.com/TheAsianFish/switchboard/internal/limitseval"
 	"github.com/TheAsianFish/switchboard/internal/pipeline"
 	"github.com/TheAsianFish/switchboard/internal/provider"
 	"github.com/TheAsianFish/switchboard/internal/provider/fake"
@@ -39,6 +43,8 @@ commands:
   fake-provider   run the deterministic fake backend
   bench           drive load at a target and record latency
   eval results    render RESULTS.md from eval/results/
+  eval limits     Q2: over-admission from the fake provider's ledger
+  eval budget     Q2: shared budget spend against the ledger
   version         print the build version
 `
 
@@ -65,7 +71,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && args[1] == "results" {
 			return results.Main(args[2:], stdout, stderr)
 		}
-		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results [flags]")
+		if len(args) > 1 && (args[1] == "limits" || args[1] == "budget") {
+			return limitseval.Main(ctx, args[1:], stdout, stderr)
+		}
+		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget [flags]")
 		return 2
 	case "version":
 		_, _ = fmt.Fprintln(stdout, version())
@@ -126,8 +135,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	slog.SetDefault(log)
 
-	built := make(map[string]core.Provider, len(cfg.Providers))
-	routes := make([]pipeline.Route, 0, len(cfg.Models))
+	built := make(map[string]coreProvider, len(cfg.Providers))
 	for _, p := range cfg.Providers {
 		prov, err := provider.Build(p)
 		if err != nil {
@@ -139,18 +147,41 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		}
 		built[p.Name] = prov
 	}
-	for _, m := range cfg.Models {
-		routes = append(routes, pipeline.Route{Model: m.Name, ProviderName: m.Provider, Upstream: m.Upstream, Provider: built[m.Provider]})
-	}
 	if len(cfg.Keys) == 0 {
 		log.Warn("no API keys configured; every request will be refused")
 	}
-	gw := pipeline.New(auth.NewKeys(cfg.Keys), routes)
+	metrics := telemetry.NewMetrics(true)
+	pol, closePolicy, err := buildPolicy(ctx, cfg, metrics, log)
+	if err != nil {
+		return err
+	}
+	defer closePolicy()
+	gw := pipeline.New(auth.NewKeys(cfg.Keys), routes(cfg, built, log), pol)
 	log.Info("gateway configured",
 		slog.String("config", *path), slog.Int("providers", len(cfg.Providers)),
 		slog.Int("models", len(cfg.Models)), slog.Int("keys", len(cfg.Keys)), slog.String("version", version()))
-	return server.Run(ctx, cfg.Listen, server.Handler(gw, log), log, nil)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	adminErr := make(chan error, 1)
+	go func() {
+		err := server.Run(ctx, cfg.AdminListen, adminHandler(metrics), log, nil)
+		if err != nil {
+			cancel() // the gateway without its metrics is not worth running
+		}
+		adminErr <- err
+	}()
+	err = server.Run(ctx, cfg.Listen, server.Handler(gw, log), log, nil)
+	cancel()
+	if aerr := <-adminErr; aerr != nil {
+		return fmt.Errorf("admin listener: %w", aerr)
+	}
+	return err
 }
+
+// coreProvider is the provider interface, named here to keep signatures
+// short.
+type coreProvider = core.Provider
 
 func defaultConfigPath() string {
 	if p := os.Getenv("SWITCHBOARD_CONFIG"); p != "" {
@@ -178,13 +209,15 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	gw := pipeline.Open{
-		Provider: fake.New(fake.Config{Latency: *latency, Tokens: *tokens, TokenInterval: *interval}),
-		Names:    []string{"fake"},
-	}
+	fp := fake.New(fake.Config{Latency: *latency, Tokens: *tokens, TokenInterval: *interval})
+	gw := pipeline.Open{Provider: fp, Names: []string{"fake"}}
+	mux := http.NewServeMux()
+	mux.Handle("/ledger", fp.LedgerHandler())
+	mux.Handle("/ledger/", fp.LedgerHandler())
+	mux.Handle("/", server.Handler(gw, log))
 	log.Warn("fake provider starting", slog.String("listen", *listen), slog.Duration("latency", *latency),
 		slog.Int("tokens", *tokens), slog.Duration("token_interval", *interval))
-	return server.Run(ctx, *listen, server.Handler(gw, log), log, nil)
+	return server.Run(ctx, *listen, mux, log, nil)
 }
 
 func envOr(name, def string) string {

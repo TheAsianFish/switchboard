@@ -4,7 +4,7 @@ BIN := $(CURDIR)/bin
 GOLANGCI := $(BIN)/golangci-lint
 export GOTOOLCHAIN ?= auto
 
-.PHONY: help tools check fmt vet lint test build test-integration dev bench sdk-smoke record-fixtures results docker clean
+.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits sdk-smoke record-fixtures results docker clean
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -30,14 +30,24 @@ test:
 build: ## build ./bin/switchboard
 	CGO_ENABLED=0 go build -trimpath -o $(BIN)/switchboard ./cmd/switchboard
 
-test-integration: ## tests against a real redis:8 (from M2)
-	go test -race -count=1 -tags integration ./...
+test-integration: ## Lua scripts against a real redis:8 ($$SWITCHBOARD_TEST_REDIS_URL, or a throwaway container)
+	@if [ -n "$$SWITCHBOARD_TEST_REDIS_URL" ]; then \
+		go test -race -count=1 -tags integration ./...; \
+	else \
+		scripts/with-redis.sh go test -race -count=1 -tags integration ./...; \
+	fi
 
-dev: ## gateway + Ollama in compose (Redis, Jaeger, Prometheus join in later milestones)
-	docker compose -f deploy/compose.yaml up --build
+dev: ## one gateway, Redis, Ollama and the fake provider in compose
+	docker compose -f deploy/compose.yaml --profile dev up --build
+
+fleet: ## three gateways behind nginx sharing Redis, plus Ollama and the fake provider
+	docker compose -f deploy/compose.yaml --profile fleet up --build
 
 bench: ## Q1: gateway overhead through the fake provider (about 12 minutes)
 	eval/bench/q1.sh
+
+test-limits: ## Q2: over-admission and shared budget across three replicas in compose (about 12 minutes)
+	eval/limits/run.sh
 
 sdk-smoke: build ## unmodified OpenAI and Anthropic Python SDKs streaming through the gateway (needs Ollama)
 	eval/sdk/smoke.sh

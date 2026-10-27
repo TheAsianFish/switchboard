@@ -10,10 +10,14 @@ latency tail, an exact and a semantic cache with a measured false-hit rate, a
 and model, OpenTelemetry traces, Prometheus metrics and a small admin page.
 Every feature ships with the benchmark or eval that says what it is worth.
 
-**Status: M1 of 7.** The streaming spine works: both front ends, the
-Anthropic, OpenAI-compatible and fake providers, API keys, structured logs,
-the load generator and the first overhead number. Limits, budgets, the cache,
-hedging, the router and the admin page follow (see [PLAN.md](PLAN.md)).
+**Status: M2 of 7.** The streaming spine (M1) and shared state (M2) work:
+both front ends; the Anthropic, OpenAI-compatible and fake providers; per-key
+request and token rate limits and dollar budgets shared by every replica
+through Redis, with a degrade policy for when Redis is down; cost accounting
+from a price table; and Prometheus metrics. Compose runs three replicas
+behind nginx, and `make test-limits` measures how many requests get past a
+shared limit. The cache, hedging, the router and the admin page follow (see
+[PLAN.md](PLAN.md)).
 Every measured number lives in [RESULTS.md](RESULTS.md), which is rendered
 from the raw files under `eval/results/`.
 
@@ -54,8 +58,31 @@ or an OpenAI client talking to Claude (set `ANTHROPIC_API_KEY` on the
 gateway, never in the file). No model at all? The `fake` model in the example
 config answers deterministically.
 
-Docker: `make docker` builds a distroless image; `make dev` runs it
-next to Ollama with compose.
+Limits and budgets are per key, prices per model (Claude models fall back to
+built-in list prices):
+
+```yaml
+redis: {url: "redis://127.0.0.1:6379/0"}   # without it, limits are per process
+keys:
+  - name: team-a
+    key: sk-team-a
+    limits:
+      requests: {rate: 60, per: 1m, burst: 10}
+      tokens: {rate: 200000, per: 1m, burst: 50000}
+    budget: {usd: "5.00", period: monthly}
+models:
+  - {name: qwen2.5:0.5b, provider: ollama, price: {input: 0, output: 0}}
+```
+
+A refused request gets each API's own error: `429 rate_limit_error` with
+`Retry-After` for a rate limit, and for a spent budget OpenAI's `429
+insufficient_quota` or Anthropic's `402 billing_error`. Per-key requests,
+tokens and dollars are on `/metrics`, served on a separate loopback
+listener (`admin_listen`, default `127.0.0.1:9090`).
+
+Docker: `make docker` builds a distroless image. `make dev` runs one replica
+with Redis, Ollama and the fake provider in compose, and `make fleet` runs
+three replicas behind nginx sharing one Redis.
 
 ## Architecture
 
@@ -65,15 +92,21 @@ flowchart LR
     O[OpenAI SDK]
     A[Anthropic SDK]
   end
-  subgraph gw["switchboard serve"]
+  LB[nginx<br/>round robin]
+  subgraph gw["switchboard serve (×3)"]
     FO[api/openai<br/>/v1/chat/completions]
     FA[api/anthropic<br/>/v1/messages]
-    P[pipeline<br/>auth · route · log]
+    P[pipeline<br/>auth · route · limits · budget<br/>provider · settle · log]
+    M[admin listener<br/>/metrics]
     FO --> P
     FA --> P
+    P --> M
   end
-  O --> FO
-  A --> FA
+  O --> LB
+  A --> LB
+  LB --> FO
+  LB --> FA
+  P <-->|Lua: fixed window or GCRA,<br/>reserve / settle| R[(Redis 8)]
   P --> PA[provider/anthropic<br/>anthropic-sdk-go]
   P --> PO[provider/openaicompat<br/>Ollama · vLLM · llama.cpp]
   P --> PF[provider/fake]
@@ -99,7 +132,36 @@ the client's own error format. Usage is normalised once (`input`,
 total) and the Anthropic one (uncached input apart from cache reads)
 convert without loss.
 
-How that is checked:
+**The hard part in M2: replicas that agree on limits and budgets at
+request speed, and stay sane when the store dies.** Every limit check and
+every budget reservation is one Lua script in Redis, so the read, the
+decision and the write are atomic across replicas, and the scripts read
+Redis's own clock, so replicas with skewed clocks still agree on time. A
+request reserves its worst-case cost (estimated input plus `max_tokens`;
+a request without one is sent upstream with the model's
+`max_output_tokens`, so the worst case is a real cap) before it is sent and
+settles the provider's real usage afterwards. That way
+three replicas spending at once cannot together pass the budget, and a
+reservation held by a replica that dies expires instead of leaking. The
+token limit is charged on the same estimate and corrected afterwards. When
+Redis is unreachable, each replica falls back to a local limiter at a third
+of the limit, a small grace amount of budget, and a pending list of spend
+that is charged to Redis once it is back. Money is an integer count of
+nanodollars, so the gateway's ledger can be compared with the provider's to
+the cent.
+
+Q2 measures it in compose: three replicas behind nginx, one key at three
+times its limit, and the fake provider's ledger as the ground truth of what
+got through. It turned out that the obvious measure, admissions per 60 s
+window, understates the fixed-window baseline at a steady overload. The
+baseline spends each minute's allowance in the first third of the minute
+and then refuses everything, so its excess sits in short windows, and a
+60 s window sees it only where it straddles a minute boundary. So the
+harness measures every window length from 1 s to 60 s. RESULTS.md has the
+table, including what a Redis restart without persistence does to a
+fixed-window counter.
+
+How the M1 streaming path is checked:
 
 - recorded real streams from Ollama in both formats replay through the
   providers (`internal/provider/testdata/`);
@@ -118,6 +180,11 @@ How that is checked:
 | Read the first event before writing headers | Errors before the first token keep their status code, so SDK retry logic and (later) gateway retries work. | Commit to 200 immediately: every upstream failure becomes a broken stream. |
 | Keys looked up by SHA-256 digest | A deployed config can hold digests, not keys, and lookups for both take the same path. | Plain-text compare: secrets in the file. |
 | The fake provider is a real server | `bench` and, later, the chaos run measure across processes, the way production runs. | An in-process mock: hides the network hop the overhead number is about. |
+| Every limit and budget decision is one Lua script that reads Redis's clock | Atomic across replicas in one round trip; skewed replica clocks do not matter. | Read-modify-write from Go: races between replicas. Replica clocks: skew moves windows. |
+| Reserve the worst case, settle the real cost | Concurrent requests on any replica cannot together overspend; unsettled holds expire after a crash. | Charge after the reply: N replicas overspend by N requests' worth at the edge. |
+| Degrade to per-replica limits at rate ÷ replicas when Redis is down | The fleet stays near its limit during an outage instead of failing every request or admitting all of them. | Fail closed: a Redis blip becomes an outage. Fail open: unlimited spend. |
+| Integer nanodollars, prices to a tenth of a cent per MTok | Ledgers sum exactly over millions of requests, so spend can be checked to the cent. | Float dollars: rounding drift in the totals. |
+| Metrics on a separate loopback listener | Per-key names and spend never reach the public port. | `/metrics` on the API port. |
 | Open-loop load generator | Requests leave on schedule whether or not earlier ones finished, so a slow target cannot hide its queueing (coordinated omission). | Closed-loop workers: under-report the tail. |
 
 ## Development
@@ -125,11 +192,13 @@ How that is checked:
 See [CONTRIBUTING.md](CONTRIBUTING.md). `make check` is the per-PR gate
 (gofmt, go vet, golangci-lint, `go test -race`), offline and well under two
 minutes. `make bench` reruns the overhead benchmark, `make sdk-smoke` the SDK
-check against Ollama, and `make results` re-renders RESULTS.md.
+check against Ollama, `make test-limits` the three-replica limit and budget
+test in compose (about 12 minutes), `make test-integration` the Lua scripts
+against a real Redis 8, and `make results` re-renders RESULTS.md.
 
 ## Roadmap
 
-M2 shared limits and budgets through Redis · M3 exact and semantic cache ·
+GCRA limiter and its Q2 numbers · M3 exact and semantic cache ·
 M4 retries, hedging, tool calls and tracing · M5 the evaluated router ·
 M6 admin page, chaos run and the per-feature overhead breakdown · M7 release.
 

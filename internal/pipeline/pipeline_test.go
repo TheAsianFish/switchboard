@@ -26,7 +26,7 @@ func newPipeline(t *testing.T) (*Pipeline, *fake.Provider) {
 	return New(keys, []Route{
 		{Model: "small", ProviderName: "fake", Upstream: "fake-small", Provider: f},
 		{Model: "big", ProviderName: "fake", Upstream: "fake-big", Provider: f},
-	}), f
+	}, Policy{}), f
 }
 
 func TestResolve(t *testing.T) {
@@ -190,7 +190,7 @@ func TestUpstreamCredentialErrorsAreNotTheClients(t *testing.T) {
 		upstream := core.Errorf(kind, "upstream: Incorrect API key provided: sk-proj-abc*****wxyz")
 		p := New(auth.NewKeys([]config.Key{{Name: "k", Key: "sk"}}), []Route{
 			{Model: "m", ProviderName: "openai", Upstream: "m", Provider: scripted{err: upstream}},
-		})
+		}, Policy{})
 		ctx, _ := p.Authenticate(context.Background(), "sk")
 		for name, call := range map[string]func() error{
 			"complete": func() error { _, err := p.Complete(ctx, &core.Request{Model: "m"}); return err },
@@ -229,7 +229,7 @@ func TestStreamCloseFromAnotherGoroutine(t *testing.T) {
 	t.Parallel()
 	p := New(auth.NewKeys([]config.Key{{Name: "k", Key: "sk"}}), []Route{
 		{Model: "m", ProviderName: "x", Upstream: "m", Provider: scripted{stream: &endless{}}},
-	})
+	}, Policy{})
 	ctx, _ := p.Authenticate(context.Background(), "sk")
 	s, err := p.Stream(ctx, &core.Request{Model: "m"})
 	if err != nil {
@@ -262,7 +262,7 @@ func TestStreamClientGoneIsAbandoned(t *testing.T) {
 	inner := &blocking{closed: make(chan struct{})}
 	p := New(auth.NewKeys([]config.Key{{Name: "k", Key: "sk"}}), []Route{
 		{Model: "m", ProviderName: "x", Upstream: "m", Provider: scripted{stream: inner}},
-	})
+	}, Policy{})
 	ctx := telemetry.WithRequest(base, slog.New(slog.NewJSONHandler(&buf, nil)), "r")
 	ctx, _ = p.Authenticate(ctx, "sk")
 	s, _ := p.Stream(ctx, &core.Request{Model: "m"})

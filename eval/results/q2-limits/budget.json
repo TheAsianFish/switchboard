@@ -1,0 +1,42 @@
+{
+  "scenario": "budget",
+  "commit": "d967c73",
+  "date": "2026-10-27T07:41:21Z",
+  "command": "make test-limits",
+  "replicas": 3,
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+    "kernel": "6.17.0-1022-azure"
+  },
+  "key": "budget",
+  "limit_nanodollars": 100000000,
+  "offered_per_second": 20,
+  "offered": 600,
+  "outcomes": {
+    "http_429": 387,
+    "ok": 213
+  },
+  "admitted": 213,
+  "incomplete": 0,
+  "max_tokens": 64,
+  "price": {
+    "input_per_mtok": "3",
+    "output_per_mtok": "15"
+  },
+  "ledger_input_tokens": 1065,
+  "ledger_output_tokens": 6390,
+  "ledger_nanodollars": 99045000,
+  "gateway_spent_nanodollars": 99045000,
+  "gateway_reserved_nanodollars": 0,
+  "metrics_dollars": 0.099045,
+  "diff_nanodollars": 0,
+  "matches_to_cent": true,
+  "metrics_match_to_cent": true,
+  "within_budget": true,
+  "scraped_replicas": 3
+}

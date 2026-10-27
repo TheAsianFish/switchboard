@@ -161,3 +161,103 @@ func TestShippedImageConfig(t *testing.T) {
 		}
 	}
 }
+
+const shared = `
+redis: {url: "redis://redis:6379/0", timeout: 50ms}
+ratelimit: {algorithm: fixed_window, replicas: 3}
+budget: {grace_usd: 0.25}
+providers:
+  - {name: fake, type: fake}
+  - {name: anthropic, type: anthropic}
+models:
+  - {name: fake, provider: fake, price: {input: 3, output: "15.00", long_above: 1000, long: {input: 6, output: 30}}}
+  - {name: claude-haiku-5-5, provider: anthropic}
+  - {name: local, provider: fake}
+keys:
+  - name: team
+    key: sk-team
+    models: [fake, claude-haiku-5-5]
+    limits:
+      requests: {rate: 100, per: 1m, burst: 20}
+      tokens: {rate: 100000, per: 1m, burst: 20000}
+    budget: {usd: 5.00, period: monthly}
+`
+
+func TestLoadShared(t *testing.T) {
+	t.Parallel()
+	cfg, err := Load(writeFile(t, shared), env(map[string]string{"SWITCHBOARD_RATELIMIT_REPLICAS": "5"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Redis.URL != "redis://redis:6379/0" || cfg.Redis.Timeout != 50*time.Millisecond || cfg.Redis.KeyPrefix != DefaultKeyPrefix {
+		t.Errorf("redis = %+v", cfg.Redis)
+	}
+	if cfg.RateLimit.Replicas != 5 || cfg.RateLimit.RetryInterval != DefaultRetryInterval {
+		t.Errorf("ratelimit = %+v", cfg.RateLimit)
+	}
+	if cfg.Budget.GraceUSD != "0.25" || cfg.AdminListen != DefaultAdminListen {
+		t.Errorf("budget = %+v, admin %q", cfg.Budget, cfg.AdminListen)
+	}
+	k := cfg.Keys[0]
+	if k.Limits.Requests == nil || *k.Limits.Requests != (Rate{Rate: 100, Per: time.Minute, Burst: 20}) {
+		t.Errorf("requests limit = %+v", k.Limits.Requests)
+	}
+	if k.Budget == nil || k.Budget.USD != "5.00" || k.Budget.Period != "monthly" {
+		t.Errorf("budget = %+v", k.Budget)
+	}
+	p, ok, err := cfg.Models[0].ResolvedPrice()
+	if err != nil || !ok || p.Base.Input != 3000 || p.Base.Output != 15000 || p.LongAbove != 1000 || p.Long.Output != 30000 {
+		t.Errorf("fake price = %+v, %v, %v", p, ok, err)
+	}
+	if p, ok, _ := cfg.Models[1].ResolvedPrice(); !ok || p.Base.Input != 100 {
+		t.Errorf("haiku default price = %+v, %v", p, ok)
+	}
+	if _, ok, _ := cfg.Models[2].ResolvedPrice(); ok {
+		t.Error("a model with no price and no list price should be unpriced")
+	}
+	if cfg.Models[0].MaxOutputTokens != DefaultOutputEstimate {
+		t.Errorf("max_output_tokens default = %d", cfg.Models[0].MaxOutputTokens)
+	}
+}
+
+func TestValidateShared(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, replace, with, want string
+	}{
+		{"algorithm", "algorithm: fixed_window", "algorithm: leaky", `"leaky" is not one of`},
+		{"replicas", "replicas: 3", "replicas: 0", "replicas must be at least 1"},
+		{"redis timeout", "timeout: 50ms", "timeout: -1s", "redis.timeout must be positive"},
+		{"grace", "grace_usd: 0.25", "grace_usd: -1", "budget.grace_usd"},
+		{"hold outlives the call", "grace_usd: 0.25", "grace_usd: 0.25, reservation_ttl: 5m", `must be longer than provider "fake"'s timeout (10m0s)`},
+		{"limit", "rate: 100, per: 1m", "rate: 0, per: 1m", "limits.requests needs a positive"},
+		{"too fine", "rate: 100000, per: 1m", "rate: 100000000, per: 1m", "faster than one unit per microsecond"},
+		{"budget usd", "usd: 5.00", "usd: 5.0000000001", "budget.usd"},
+		{"period", "period: monthly", "period: weekly", `"weekly" is not one of`},
+		{"price", `output: "15.00"`, `output: "15.0001"`, "price output"},
+		{"long half", "long_above: 1000, ", "", "long_above and long must be set together"},
+		{"unpriced reach", "models: [fake, claude-haiku-5-5]", "models: [fake, local]", `may use model "local", which has no price`},
+		{"unpriced by default", "    models: [fake, claude-haiku-5-5]\n", "", `may use model "local"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			body := strings.Replace(shared, tt.replace, tt.with, 1)
+			if body == shared {
+				t.Fatalf("replacement %q not found", tt.replace)
+			}
+			_, err := Load(writeFile(t, body), env(nil))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("err = %v, want it to contain %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestReplicasFromEnvMustParse(t *testing.T) {
+	t.Parallel()
+	_, err := Load(writeFile(t, shared), env(map[string]string{"SWITCHBOARD_RATELIMIT_REPLICAS": "three"}))
+	if err == nil || !strings.Contains(err.Error(), "SWITCHBOARD_RATELIMIT_REPLICAS") {
+		t.Errorf("err = %v, want it to name SWITCHBOARD_RATELIMIT_REPLICAS", err)
+	}
+}

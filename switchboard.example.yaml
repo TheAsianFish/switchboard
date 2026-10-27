@@ -3,6 +3,7 @@
 # secrets are only ever read from the environment variable named here.
 
 listen: 127.0.0.1:8080
+admin_listen: 127.0.0.1:9090   # /metrics; keep it off the public interface
 log:
   format: text   # json in production
   level: info
@@ -23,18 +24,39 @@ providers:
   - name: fake
     type: fake
 
+# Limits and budgets are shared through Redis when redis.url is set (compose
+# sets SWITCHBOARD_REDIS_URL); without it they are per process.
+redis:
+  url: ""
+  timeout: 100ms
+ratelimit:
+  algorithm: fixed_window   # or gcra
+  replicas: 1               # while Redis is down each replica enforces 1/replicas of every limit
+budget:
+  grace_usd: 0.10           # per replica and key while Redis is down
+
 models:
+  # Prices are dollars per million tokens. Claude models fall back to the
+  # built-in list prices; a model with no price is not counted in spend and
+  # keys with a budget may not use it.
   - name: qwen2.5:0.5b
     provider: ollama
+    price: {input: 0, output: 0}
   - name: claude-haiku-5-5
     provider: anthropic
   - name: claude-opus-5-5
     provider: anthropic
   - name: fake
     provider: fake
+    price: {input: 0, output: 0}
 
 keys:
   # A plain key for a laptop. In a deployed file prefer sha256, the hex
   # digest of the key: printf %s "$KEY" | sha256sum
   - name: dev
     key: sk-switchboard-dev
+    # Optional, per key:
+    # limits:
+    #   requests: {rate: 60, per: 1m, burst: 10}
+    #   tokens: {rate: 200000, per: 1m, burst: 50000}
+    # budget: {usd: "5.00", period: monthly}   # total, daily or monthly

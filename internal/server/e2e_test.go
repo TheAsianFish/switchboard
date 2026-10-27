@@ -57,7 +57,7 @@ func newStack(t *testing.T) stack {
 	gw := pipeline.New(auth.NewKeys([]config.Key{{Name: "e2e", Key: gatewayKey}}), []pipeline.Route{
 		{Model: "via-chat-completions", ProviderName: "fake-openai", Upstream: "fake", Provider: viaOpenAI},
 		{Model: "via-messages", ProviderName: "fake-anthropic", Upstream: "fake", Provider: viaMessages},
-	})
+	}, pipeline.Policy{})
 	front := httptest.NewServer(server.Handler(gw, discard))
 	t.Cleanup(front.Close)
 	return stack{gateway: front.URL}

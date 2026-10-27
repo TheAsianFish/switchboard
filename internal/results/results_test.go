@@ -207,3 +207,77 @@ func TestLoadSDK(t *testing.T) {
 		t.Errorf("missing dir = %v, %v", none, err)
 	}
 }
+
+func TestRenderQ2(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	q2 := filepath.Join(dir, Q2Dir)
+	if err := os.Mkdir(q2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A copy of a real run's raw files.
+	for _, name := range []string{"fixed-window.json", "fixed-window-redis-outage.json", "no-shared-store.json", "budget.json"} {
+		b, err := os.ReadFile(filepath.Join("testdata", "q2", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(q2, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var buf bytes.Buffer
+	if err := Render(dir, tmplPath, &buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"| fixed-window | redis | fixed_window | 900 | 366 | 534 | 0 | 100 (100) | 20 | 100 | 53 | 47 | 167 | 120 | 47 | 22.4 / 24.2 |",
+		"| Redis down | 60.003 | 120.329 | 178 | 120 | 58 |",
+		"- `fixed-window`: 100* · 100 · 100 · 66*",
+		"total budget of $0.10",
+		"| $0.099045000 | $0.099045000 | $0.000000000 |",
+		"Not in this run: `gcra`, `gcra-redis-outage`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render lacks %q", want)
+		}
+	}
+	golden(t, "q2.golden", buf.Bytes())
+}
+
+// Result files written before the per-window counts and latency were
+// recorded still render, with those cells marked as missing.
+func TestRenderQ2WithoutLimiterWindows(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	q2 := filepath.Join(dir, Q2Dir)
+	if err := os.Mkdir(q2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join("testdata", "q2", "fixed-window.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r map[string]any
+	if err := json.Unmarshal(b, &r); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"limiter_windows", "most_in_limiter_window", "latency_ok", "admitted_at_seconds"} {
+		delete(r, k)
+	}
+	if b, err = json.Marshal(r); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(q2, "fixed-window.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Render(dir, tmplPath, &buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"| 0 | — (100) | 20 |", "| — / — |", "- `fixed-window`: not recorded"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("render lacks %q", want)
+		}
+	}
+}
