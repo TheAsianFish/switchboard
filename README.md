@@ -200,14 +200,16 @@ close to a cosine of 1 that few true paraphrases still hit. On GSM8K a
 question with one number changed scores *higher* than a real
 paraphrase, so no threshold below 1 separates them. A number guard (the
 same numbers in the same order) removes those false hits without any
-threshold. The shipped threshold is the one a rule fixed before the run
-picked from the sweep, and a test fails if the config and the eval
-disagree. The conclusion in RESULTS.md: at a 1% false-hit target the
-semantic layer adds only a little over exact matching on adversarial
-text, so caching is off unless a key turns it on, and the next step is a
-reranking stage rather than a lower threshold. Every lookup is filtered to
-one context, where FLAT and HNSW are equally fast and FLAT is exact, so the
-index is FLAT.
+threshold. The shipped threshold is the one a rule fixed before the full
+run picked from the sweep, and a test fails if the config and the eval
+disagree. The conclusion in RESULTS.md: at a 1% false-hit rate per
+negative pair, about one in eight semantic hits served on PAWS-Wiki is
+still wrong, and only about 6% of true paraphrases hit, so caching is off
+unless a key turns it on, and the next step is a reranking stage rather
+than a lower threshold. Every lookup is filtered to one context; on the
+small contexts measured FLAT and HNSW are equally fast, FLAT is exact and
+builds in a second, and its unfiltered worst case at 100,000 entries
+(about 5–9 ms) is still below the embedding call, so the index is FLAT.
 
 How the M1 streaming path is checked:
 
@@ -232,7 +234,7 @@ How the M1 streaming path is checked:
 | Reserve the worst case, settle the real cost | Concurrent requests on any replica cannot together overspend; unsettled holds expire after a crash. | Charge after the reply: N replicas overspend by N requests' worth at the edge. |
 | Degrade to per-replica limits at rate ÷ replicas when Redis is down | The fleet stays near its limit during an outage instead of failing every request or admitting all of them. | Fail closed: a Redis blip becomes an outage. Fail open: unlimited spend. |
 | Exact key over the whole request, semantic match on the last user turn only within the same context hash | A cached reply can never cross a tenant, a system prompt, earlier turns or sampling parameters, and similarity is only asked of short texts, where embeddings work. | Embedding the whole conversation: multi-turn similarity is unreliable and a false hit serves another conversation's answer. |
-| Semantic threshold chosen by a rule fixed before the run (Wilson upper bound of false hits ≤ 1% on every pair set) | A semantic cache with an unmeasured false-hit rate is a correctness bug; the rule makes the shipped number the eval's, and a test keeps them equal. | A vendor default (0.9–0.97) measured on someone else's traffic. |
+| Semantic threshold chosen by a rule fixed before the full run (Wilson upper bound of false hits ≤ 1% on every pair set) | A semantic cache with an unmeasured false-hit rate is a correctness bug; the rule makes the shipped number the eval's, and a test keeps them equal. | A vendor default (0.9–0.97) measured on someone else's traffic. |
 | Number guard: a semantic hit needs the same numbers in the same order | Changing one number in a math question moves its embedding less than rewording it does. | Trusting the threshold alone: no threshold separates them (RESULTS.md, Q3). |
 | Cache lookup after admission; a hit refunds tokens and budget | A hit cannot be used to dodge the request limit, and costs nothing it did not use. | Lookup first: hits bypass rate limits. Charging hits: bills for replies nobody generated. |
 | Cache key uses the `max_tokens` sent upstream, not the client's | A reply the gateway capped for a budgeted key must not answer an uncapped request. | The client's request alone: a truncated reply leaks across keys of one tenant. |
