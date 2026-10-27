@@ -271,6 +271,13 @@ func TestErrorKinds(t *testing.T) {
 				if got := w.Header().Get("Retry-After"); got != tt.retryAfter {
 					t.Errorf("Retry-After = %q, want %q", got, tt.retryAfter)
 				}
+				noRetry := ""
+				if core.AsError(tt.err).Kind == core.KindBudgetExceeded {
+					noRetry = "false"
+				}
+				if got := w.Header().Get("X-Should-Retry"); got != noRetry {
+					t.Errorf("X-Should-Retry = %q, want %q", got, noRetry)
+				}
 			})
 		}
 	}

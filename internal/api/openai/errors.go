@@ -86,6 +86,11 @@ func writeError(w http.ResponseWriter, ctx context.Context, err error) {
 	if e.RetryAfter > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(e.RetryAfter.Seconds()))))
 	}
+	if e.Kind == core.KindBudgetExceeded {
+		// The OpenAI SDKs retry every 429 unless told not to; a spent
+		// budget does not come back in a few seconds.
+		w.Header().Set("X-Should-Retry", "false")
+	}
 	writeJSON(w, status, errorBody{Error: obj})
 }
 
