@@ -501,3 +501,24 @@ func TestAbandonedCallIsChargedItsPrompt(t *testing.T) {
 		t.Errorf("spent %v reserved %v, want %v spent and nothing reserved", bal.Spent, bal.Reserved, want)
 	}
 }
+
+// A budget refusal must undo the token-limit charge as well as the
+// request-limit one.
+func TestBudgetRefusalRefundsTokens(t *testing.T) {
+	t.Parallel()
+	tokens := ratelimit.Limit{Rate: 1000, Period: time.Minute, Burst: 1000}
+	p, lim, _, _ := single(t, config.Key{
+		Name: "k", Key: "sk",
+		Limits: config.Limits{Tokens: &config.Rate{Rate: 1000, Per: time.Minute, Burst: 1000}},
+		Budget: &config.KeyBudget{USD: "0.000001", Period: "total"},
+	}, fake.New(fake.Config{Tokens: 5}))
+	ctx, _ := p.Authenticate(context.Background(), "sk")
+	_, err := p.Complete(ctx, &core.Request{Model: "m", Messages: []core.Message{{Role: core.RoleUser, Text: "hi"}}})
+	if core.AsError(err).Kind != core.KindBudgetExceeded {
+		t.Fatalf("err = %v, want budget exceeded", err)
+	}
+	d, _ := lim.Allow(context.Background(), "tok:k", tokens, 1)
+	if d.Remaining != 999 {
+		t.Errorf("token limit remaining = %d, want 999", d.Remaining)
+	}
+}
