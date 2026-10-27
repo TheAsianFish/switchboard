@@ -234,7 +234,15 @@ every pair set, and the hit rate each set keeps there.
 {{- end}}
 
 **Shipped default.** {{if .Chosen.Model}}The gateway ships with `{{.Chosen.Model}}` at threshold {{.ChosenThreshold}} with the number guard on.
-There the semantic layer serves this share of the true paraphrases: {{.ChosenPerSet}}; the exact layer alone serves {{.ExactPerSet}}.{{else}}No model met the rule.{{end}}
+There the semantic layer serves this share of the true paraphrases: {{.ChosenPerSet}}; the exact layer alone serves {{.ExactPerSet}}.
+The false-hit rate is over negatives; what a client sees is the share of
+served hits that are wrong, which at this threshold is {{.ChosenWrong}}.
+That share depends on each set's mix of positives and negatives, and a
+lookup that searches several stored prompts gets several chances at a
+false hit, so the per-pair rate is a floor for a populated cache, not a
+bound. The exact layer's PAWS hits are the dataset's identical-text pairs,
+not repeat traffic; a few of those are labelled negative, which sets a
+floor under every cache's false-hit rate on that set.{{else}}No model met the rule.{{end}}
 Rule: {{.Chosen.Rule}}
 {{- if .Latency}}
 
@@ -285,14 +293,26 @@ FLAT against HNSW not measured yet. Run `make eval-cache` (Redis 8), then `make 
   the number guard rejects every GSM8K negative by construction: on that
   set the guard's false-hit side is the design, not a measurement. Its
   cost is measured: the positives kept their numbers in any order, the
-  guard wants them in the same order, so a paraphrase that moves a
-  number loses its hit (the guarded hit rate at the lowest threshold is
-  the share that kept the order).
+  guard wants them in the same order and the same spelling, so a
+  paraphrase that moves a number, or turns "third" into "3" or "50.00"
+  into "50", loses its hit. The twins change one number by a small
+  step, so how close they embed is partly how the set was built; math
+  near-misses without a changed number ("more" against "less", "+"
+  against "-") are not in the set, and the guard would pass them.
+- The threshold is chosen and reported on the same pairs; there is no
+  held-out split. The upper bound still holds for the chosen threshold
+  (hits only fall as the threshold rises, so scanning down from 1 is a
+  fixed-sequence test), but the point estimates there are optimistic.
+  PAWS pairs reuse sentences, so the pairs are not fully independent.
 - The paraphrases come from one small local model and one generation
   setting; real users reword more freely.
 - The index check uses random unit vectors, not embeddings of prompts, so
   its recall says how well HNSW finds the nearest of uniformly spread
-  points; real embeddings cluster.
+  points; real embeddings cluster. Its filtered queries see about ten
+  entries per context; single-turn traffic with one model, system prompt
+  and parameters shares one context, which can be far larger, so the
+  filtered latencies hold for small contexts and the unfiltered ones are
+  the bound for a large one.
 - Every number comes from one machine, with Ollama and Redis sharing its
   CPU.
 {{else}}

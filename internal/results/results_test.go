@@ -384,3 +384,16 @@ func TestLoadQ3Partial(t *testing.T) {
 		t.Error("index file without runs accepted")
 	}
 }
+
+func TestWrongServed(t *testing.T) {
+	t.Parallel()
+	points := []cacheeval.SweepPoint{
+		{HitRate: cacheeval.Rate{K: 197, N: 3536}, FalseHitRate: cacheeval.Rate{K: 28, N: 4464}},
+		{HitRate: cacheeval.Rate{K: 0, N: 329}, FalseHitRate: cacheeval.Rate{K: 0, N: 500}},
+	}
+	got := wrongServed([]string{"paws-wiki", "gsm8k-perturb"}, points)
+	want := "`paws-wiki` 12.4% (28 of 225); `gsm8k-perturb` — (0 of 0)"
+	if got != want {
+		t.Errorf("wrongServed = %q, want %q", got, want)
+	}
+}

@@ -54,6 +54,9 @@ type Q3Sweep struct {
 	// threshold, and ExactPerSet what the exact layer alone serves, both
 	// "`set` rate; ...".
 	ChosenPerSet, ExactPerSet string
+	// ChosenWrong is, per pair set, the share of the hits served at the
+	// chosen threshold that were negatives: "`set` 12.4% (28 of 225)".
+	ChosenWrong string
 	// MinNegatives is the fewest negatives with no false hit whose Wilson
 	// upper bound is at most the target.
 	MinNegatives int
@@ -199,6 +202,7 @@ func buildQ3Sweep(s cacheeval.Summary) *Q3Sweep {
 	for _, j := range s.Joints {
 		if j.Found && j.Guard && j.Model == s.Chosen.Model && j.Threshold == s.Chosen.Threshold {
 			q.ChosenPerSet = perSet(s.Sets, j.PerSet)
+			q.ChosenWrong = wrongServed(s.Sets, j.PerSet)
 		}
 	}
 	var exact []string
@@ -384,4 +388,24 @@ func perSet(sets []string, points []cacheeval.SweepPoint) string {
 		parts = append(parts, "`"+name+"` "+rate(p.HitRate))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// wrongServed is, per pair set, how many of the hits served at one
+// threshold were false hits. It depends on the set's mix of positives and
+// negatives, unlike the false-hit rate, which is over negatives only.
+func wrongServed(sets []string, points []cacheeval.SweepPoint) string {
+	var out []string
+	for i, p := range points {
+		name := strconv.Itoa(i)
+		if i < len(sets) {
+			name = sets[i]
+		}
+		served := p.HitRate.K + p.FalseHitRate.K
+		share := "—"
+		if served > 0 {
+			share = pct1(float64(p.FalseHitRate.K) / float64(served))
+		}
+		out = append(out, fmt.Sprintf("`%s` %s (%d of %d)", name, share, p.FalseHitRate.K, served))
+	}
+	return strings.Join(out, "; ")
 }
