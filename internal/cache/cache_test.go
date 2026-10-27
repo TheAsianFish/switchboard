@@ -3,6 +3,7 @@ package cache_test
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -640,5 +641,50 @@ func TestFillOnlyMisses(t *testing.T) {
 				t.Errorf("stored reply after the Fill: %+v, want %q", l, answer.Text)
 			}
 		})
+	}
+}
+
+// tableEmbedder returns a fixed vector per text.
+type tableEmbedder map[string][]float32
+
+func (tableEmbedder) Model() string { return "table" }
+func (e tableEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i, t := range texts {
+		out[i] = e[t]
+	}
+	return out, nil
+}
+
+// The threshold is the lowest similarity served: a match exactly at it is
+// a hit, one just above it a miss.
+func TestThresholdIsInclusive(t *testing.T) {
+	t.Parallel()
+	// Cosine of (1, 0) and (3, 4) is 3/5, exactly 0.6 in float64.
+	emb := tableEmbedder{"stored": {1, 0}, "asked": {3, 4}}
+	for _, tt := range []struct {
+		threshold float64
+		want      cache.Status
+	}{
+		{0.6, cache.StatusSemantic},
+		{math.Nextafter(0.6, 1), cache.StatusMiss},
+	} {
+		clk := &clock{t: time.Unix(1_700_000_000, 0)}
+		c := cache.New(cache.Options{
+			KV:        cache.NewMemoryKV(10, clk.now),
+			NewIndex:  func(d int) (cache.Index, error) { return cache.NewMemoryIndex(d, 10, clk.now), nil },
+			Embedder:  emb,
+			Threshold: tt.threshold,
+			TTL:       time.Hour,
+			Now:       clk.now,
+		})
+		fill(t, c, "a", cache.ModeSemantic, req("m", "", "stored"))
+		l := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, req("m", "", "asked"))
+		if l.Status != tt.want {
+			t.Errorf("threshold %v: status %s (similarity %v), want %s", tt.threshold, l.Status, l.Similarity, tt.want)
+		}
+		if tt.want == cache.StatusSemantic && l.Similarity != 0.6 {
+			t.Errorf("similarity = %v, want exactly 0.6", l.Similarity)
+		}
 	}
 }
