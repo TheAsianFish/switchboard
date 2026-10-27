@@ -41,16 +41,20 @@ type Semantic struct {
 	MatchNumbers *bool `yaml:"match_numbers"`
 }
 
-// Cache defaults. The semantic threshold, model and index are
-// placeholders until `make eval-cache` measures them.
+// Cache defaults. The semantic defaults are the ones `make eval-cache`
+// chose (eval/results/q3-cache/summary.json, RESULTS.md Q3); a test
+// keeps them in step with that file.
 const (
 	DefaultCacheTTL        = 24 * time.Hour
 	DefaultCacheMaxEntries = 10000
 	DefaultCacheTimeout    = 250 * time.Millisecond
 	DefaultEmbedURL        = "http://localhost:11434"
-	DefaultEmbedModel      = "all-minilm"
-	DefaultCacheThreshold  = 0.95
-	DefaultCacheIndex      = "flat"
+	DefaultEmbedModel      = "nomic-embed-text"
+	DefaultCacheThreshold  = 0.9989
+	// FLAT, not HNSW: every gateway lookup is filtered to one context,
+	// where both are equally fast and FLAT is exact, builds without
+	// background work and is smaller (RESULTS.md, Q3).
+	DefaultCacheIndex = "flat"
 )
 
 func defaultCache() Cache {

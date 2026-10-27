@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -82,5 +84,31 @@ func TestValidateCache(t *testing.T) {
 				t.Fatalf("err = %v, want it to mention %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// The semantic defaults are the ones `make eval-cache` chose: the model,
+// threshold and number guard in eval/results/q3-cache/summary.json.
+// Re-running the eval and changing the defaults go together.
+func TestSemanticDefaultsAreTheEvals(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("../../eval/results/q3-cache/summary.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		Chosen struct {
+			Model     string  `json:"model"`
+			Threshold float64 `json:"threshold"`
+			Guard     bool    `json:"guard"`
+		} `json:"chosen"`
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	c := defaultCache()
+	if c.Semantic.Model != s.Chosen.Model || c.Semantic.Threshold != s.Chosen.Threshold || *c.Semantic.MatchNumbers != s.Chosen.Guard {
+		t.Errorf("defaults: model %q threshold %v guard %v; the eval chose model %q threshold %v guard %v",
+			c.Semantic.Model, c.Semantic.Threshold, *c.Semantic.MatchNumbers, s.Chosen.Model, s.Chosen.Threshold, s.Chosen.Guard)
 	}
 }
