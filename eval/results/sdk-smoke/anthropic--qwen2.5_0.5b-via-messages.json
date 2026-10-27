@@ -1,0 +1,31 @@
+{
+  "backend": "ollama /v1/messages (anthropic provider)",
+  "complete": {
+    "response_model": "qwen2.5:0.5b-via-messages",
+    "stop_reason": "end_turn",
+    "text": "Three primary colours are red, yellow, and blue.",
+    "usage": {
+      "input_tokens": 1,
+      "output_tokens": 12
+    }
+  },
+  "max_tokens": 64,
+  "model": "qwen2.5:0.5b-via-messages",
+  "passed": true,
+  "prompt": "Name three primary colours, comma separated.",
+  "python": "3.12.3",
+  "recorded_at": "2026-10-26T23:47:45Z",
+  "sdk": "anthropic-python",
+  "sdk_version": "2.3.0",
+  "stream": {
+    "chunks": 5,
+    "stop_reason": "end_turn",
+    "text": "Red, Yellow, Blue",
+    "total_ms": 116.8,
+    "ttft_ms": 29.6,
+    "usage": {
+      "input_tokens": 1,
+      "output_tokens": 6
+    }
+  }
+}
