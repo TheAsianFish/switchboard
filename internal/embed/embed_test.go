@@ -22,11 +22,12 @@ func ollama(t *testing.T, status int, reply string, delay time.Duration) *httpte
 			t.Errorf("request %s %s, want POST /api/embed", r.Method, r.URL.Path)
 		}
 		var req struct {
-			Model    string   `json:"model"`
-			Input    []string `json:"input"`
-			Truncate *bool    `json:"truncate"`
+			Model     string   `json:"model"`
+			Input     []string `json:"input"`
+			Truncate  *bool    `json:"truncate"`
+			KeepAlive string   `json:"keep_alive"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Model != "all-minilm" || len(req.Input) == 0 || req.Truncate == nil || *req.Truncate {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Model != "all-minilm" || len(req.Input) == 0 || req.Truncate == nil || *req.Truncate || req.KeepAlive == "" {
 			t.Errorf("body %+v, %v", req, err)
 		}
 		select {

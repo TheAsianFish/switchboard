@@ -41,7 +41,16 @@ type embedRequest struct {
 	// to the model's context (256 tokens for all-minilm), and two long
 	// prompts that differ only after the cut would embed the same.
 	Truncate bool `json:"truncate"`
+	// KeepAlive keeps the model loaded between calls. Ollama unloads an
+	// idle model after five minutes by default, and reloading it takes
+	// longer than a lookup's timeout, so after every quiet spell the
+	// first lookups would time out.
+	KeepAlive string `json:"keep_alive"`
 }
+
+// keepAlive is how long Ollama keeps the embedding model loaded after a
+// call. The small embedding models take tens of megabytes.
+const keepAlive = "24h"
 
 type embedResponse struct {
 	Embeddings [][]float32 `json:"embeddings"`
@@ -59,7 +68,7 @@ func (o *Ollama) Embed(ctx context.Context, texts []string) ([][]float32, error)
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	body, err := json.Marshal(embedRequest{Model: o.Name, Input: texts})
+	body, err := json.Marshal(embedRequest{Model: o.Name, Input: texts, KeepAlive: keepAlive})
 	if err != nil {
 		return nil, fmt.Errorf("embed: %w", err)
 	}
