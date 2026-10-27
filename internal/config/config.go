@@ -82,7 +82,9 @@ type Model struct {
 	Price *Price `yaml:"price"`
 	// MaxOutputTokens is the output a request without max_tokens is
 	// assumed to produce when it is admitted and reserved; the default is
-	// DefaultOutputEstimate.
+	// DefaultOutputEstimate. For a key with a token limit or a budget it
+	// is also sent upstream as the request's max_tokens, so the
+	// reservation bounds the real cost.
 	MaxOutputTokens int `yaml:"max_output_tokens"`
 }
 

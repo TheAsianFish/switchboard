@@ -111,6 +111,12 @@ func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (Route, *core
 	}
 	up := *req
 	up.Model = rt.Upstream
+	if up.MaxTokens == 0 && adm.charged() {
+		// The admission assumed this much output; sending it as the cap
+		// keeps the real cost within the reservation instead of leaving
+		// it to the upstream's own default, or to no cap at all.
+		up.MaxTokens = adm.estimate.OutputTokens
+	}
 	return rt, &up, adm, nil
 }
 

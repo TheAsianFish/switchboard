@@ -44,6 +44,12 @@ type admission struct {
 	start       time.Time
 }
 
+// charged reports whether the admission was charged on its output
+// estimate, against a token limit or a budget.
+func (a *admission) charged() bool {
+	return (a.tokens != 0 || a.reservation != nil) && a.estimate.OutputTokens > 0
+}
+
 func requestsKey(pr *auth.Principal) string { return "req:" + pr.Name }
 func tokensKey(pr *auth.Principal) string   { return "tok:" + pr.Name }
 

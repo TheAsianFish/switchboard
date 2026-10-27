@@ -388,3 +388,48 @@ func TestRefundsSurviveClientCancel(t *testing.T) {
 		t.Errorf("request limit remaining = %d, want 9: the refund was lost", d.Remaining)
 	}
 }
+
+// capturing records the request the provider was sent.
+type capturing struct {
+	core.Provider
+	mu  sync.Mutex
+	got []core.Request
+}
+
+func (c *capturing) Complete(ctx context.Context, req *core.Request) (*core.Response, error) {
+	c.mu.Lock()
+	c.got = append(c.got, *req)
+	c.mu.Unlock()
+	return c.Provider.Complete(ctx, req)
+}
+
+// A request without max_tokens is reserved on the model's output estimate;
+// that estimate is only a bound on the cost if the upstream is held to it.
+func TestChargedRequestsAreCappedAtTheirEstimate(t *testing.T) {
+	t.Parallel()
+	msgs := []core.Message{{Role: core.RoleUser, Text: "hi"}}
+	for _, tc := range []struct {
+		name      string
+		key       config.Key
+		maxTokens int
+		want      int
+	}{
+		{"budget, no max_tokens", config.Key{Name: "k", Key: "sk", Budget: &config.KeyBudget{USD: "1", Period: "total"}}, 0, 64},
+		{"token limit, no max_tokens", config.Key{Name: "k", Key: "sk", Limits: config.Limits{Tokens: &config.Rate{Rate: 1000, Per: time.Minute, Burst: 1000}}}, 0, 64},
+		{"budget, own max_tokens", config.Key{Name: "k", Key: "sk", Budget: &config.KeyBudget{USD: "1", Period: "total"}}, 10, 10},
+		{"nothing charged", config.Key{Name: "k", Key: "sk"}, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			prov := &capturing{Provider: fake.New(fake.Config{Tokens: 5})}
+			p, _, _, _ := single(t, tc.key, prov)
+			ctx, _ := p.Authenticate(context.Background(), "sk")
+			if _, err := p.Complete(ctx, &core.Request{Model: "m", MaxTokens: tc.maxTokens, Messages: msgs}); err != nil {
+				t.Fatal(err)
+			}
+			if got := prov.got[0].MaxTokens; got != tc.want {
+				t.Errorf("upstream max_tokens = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
