@@ -1,0 +1,114 @@
+{
+  "scenario": "fixed-window-redis-outage",
+  "commit": "d8626ad",
+  "date": "2026-10-27T07:00:09Z",
+  "command": "make test-limits",
+  "replicas": 3,
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+    "kernel": "6.17.0-1022-azure"
+  },
+  "algorithm": "fixed_window",
+  "store": "redis",
+  "limit": {
+    "rate": 100,
+    "period_seconds": 60,
+    "burst": 20
+  },
+  "offered_per_second": 5,
+  "duration_seconds": 179.829439402,
+  "offered": 900,
+  "outcomes": {
+    "http_429": 455,
+    "ok": 445
+  },
+  "admitted": 445,
+  "whole_run": {
+    "name": "whole run",
+    "from_seconds": 0,
+    "to_seconds": 179.829,
+    "admitted": 445,
+    "bound": 319,
+    "over": 126,
+    "worst_window": {
+      "window_seconds": 31,
+      "start_seconds": 110.805,
+      "admitted": 153,
+      "bound": 71,
+      "over": 82
+    },
+    "window_60s": {
+      "window_seconds": 60,
+      "start_seconds": 112.205,
+      "admitted": 154,
+      "bound": 120,
+      "over": 34
+    }
+  },
+  "phases": [
+    {
+      "name": "before the outage",
+      "from_seconds": 0,
+      "to_seconds": 60.003,
+      "admitted": 146,
+      "bound": 120,
+      "over": 26,
+      "worst_window": {
+        "window_seconds": 20,
+        "start_seconds": 0.006,
+        "admitted": 100,
+        "bound": 53,
+        "over": 47
+      },
+      "window_60s": {
+        "window_seconds": 60,
+        "start_seconds": 0.006,
+        "admitted": 146,
+        "bound": 120,
+        "over": 26
+      }
+    },
+    {
+      "name": "Redis down",
+      "from_seconds": 60.003,
+      "to_seconds": 120.328,
+      "admitted": 148,
+      "bound": 120,
+      "over": 28,
+      "worst_window": {
+        "window_seconds": 20,
+        "start_seconds": 60.006,
+        "admitted": 100,
+        "bound": 53,
+        "over": 47
+      },
+      "window_60s": {
+        "window_seconds": 60,
+        "start_seconds": 60.006,
+        "admitted": 147,
+        "bound": 120,
+        "over": 27
+      }
+    },
+    {
+      "name": "after Redis is back",
+      "from_seconds": 120.328,
+      "to_seconds": 179.829,
+      "admitted": 151,
+      "bound": 119,
+      "over": 32,
+      "worst_window": {
+        "window_seconds": 21,
+        "start_seconds": 120.406,
+        "admitted": 105,
+        "bound": 55,
+        "over": 50
+      }
+    }
+  ]
+}

@@ -55,8 +55,9 @@ func Busiest(times []time.Time, w time.Duration, from, to time.Time) (int, time.
 // Worst is the window, among lengths 1 s to max in whole seconds, where
 // admissions exceed the limit's bound by the most, between from and to.
 // Looking at every length matters: at a steady overload a fixed-window
-// counter spends its whole allowance at the start of each window, so it
-// can stay under the bound over 60 s and still be far over it at 20 s.
+// counter spends its whole allowance at the start of each window, so its
+// excess is concentrated in short windows, and over 60 s it shows only
+// where the window straddles a boundary.
 func Worst(times []time.Time, l ratelimit.Limit, max time.Duration, from, to time.Time) Window {
 	sorted := slices.Clone(times)
 	slices.SortFunc(sorted, func(a, b time.Time) int { return a.Compare(b) })

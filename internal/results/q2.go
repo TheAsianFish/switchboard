@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/TheAsianFish/switchboard/internal/cost"
 	"github.com/TheAsianFish/switchboard/internal/limitseval"
@@ -203,6 +202,11 @@ func budgetRow(b limitseval.BudgetResult) *Q2Budget {
 	return q
 }
 
+// dollars formats an amount to the cent when it is whole cents, with all
+// nine decimals otherwise.
 func dollars(n cost.Nanos) string {
-	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("$%.9f", n.USD()), "0"), ".")
+	if n%cost.Cent == 0 {
+		return fmt.Sprintf("$%.2f", n.USD())
+	}
+	return n.String()
 }

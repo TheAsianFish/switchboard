@@ -207,3 +207,39 @@ func TestLoadSDK(t *testing.T) {
 		t.Errorf("missing dir = %v, %v", none, err)
 	}
 }
+
+func TestRenderQ2(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	q2 := filepath.Join(dir, Q2Dir)
+	if err := os.Mkdir(q2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A copy of a real run's raw files.
+	for _, name := range []string{"fixed-window.json", "fixed-window-redis-outage.json", "no-shared-store.json", "budget.json"} {
+		b, err := os.ReadFile(filepath.Join("testdata", "q2", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(q2, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var buf bytes.Buffer
+	if err := Render(dir, tmplPath, &buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"| fixed-window | redis | fixed_window | 900 | 337 | 563 | 0 | 20 | 100 | 53 | 47 | 138 | 120 | 18 |",
+		"| Redis down | 60.003 | 120.328 | 148 | 120 | 28 |",
+		"total budget of $0.10",
+		"| $0.099045000 | $0.099045000 | $0.000000000 |",
+		"Not in this run: `gcra`, `gcra-redis-outage`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render lacks %q", want)
+		}
+	}
+	golden(t, "q2.golden", buf.Bytes())
+}

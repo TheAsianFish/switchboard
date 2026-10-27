@@ -67,14 +67,20 @@ request counts as admitted only if it really got past the limit. The bound
 is what a limit with that rate and burst may admit in any window of length
 W: burst + rate × W / period. Over-admission is the most admitted in any
 window of length W beyond that bound, taken over every W from 1 s to 60 s;
-the 60 s window alone (PLAN.md's first definition) is shown too, because at
-a steady overload a fixed-window counter spends its allowance at the start
-of each minute and stays under the 60 s bound while being far over it at
-shorter windows. In the outage runs Redis is killed and restarted mid-run
+the 60 s window alone (PLAN.md's first definition) is shown too. It
+understates a fixed-window counter: at a steady overload the counter spends
+each window's allowance in the first third of the window and refuses the
+rest, so its excess is concentrated in short windows, and a 60 s window
+sees it only where it straddles a window boundary (a run that starts
+exactly on a boundary shows none at 60 s; see
+`TestWorstFindsFixedWindowBurst`). Fixed windows are aligned to Redis's
+clock, not to the start of the run. In the outage runs Redis is killed and restarted mid-run
 (`docker compose kill`, then `start`); while it is down each replica
 enforces a third of the limit on its own. `no-shared-store` runs the
 replicas without Redis, each enforcing the full limit, the per-replica
-alternative PLAN.md rejected.
+alternative PLAN.md rejected. Redis runs without persistence, so after a
+restart it comes back empty and a fixed-window counter hands out a fresh
+allowance in the middle of a window.
 
 | Scenario | Store | Algorithm | Offered | Admitted | Refused (429) | Other errors | Worst W (s) | Admitted in it | Bound at W | Over at W | Admitted in worst 60 s | Bound at 60 s | Over at 60 s |
 |----------|-------|-----------|--------:|---------:|--------------:|-------------:|------------:|---------------:|-----------:|----------:|-----------------------:|--------------:|-------------:|

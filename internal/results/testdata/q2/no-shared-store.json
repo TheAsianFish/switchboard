@@ -1,0 +1,52 @@
+{
+  "scenario": "no-shared-store",
+  "commit": "d8626ad",
+  "date": "2026-10-27T07:03:14Z",
+  "command": "make test-limits",
+  "replicas": 3,
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+    "kernel": "6.17.0-1022-azure"
+  },
+  "algorithm": "fixed_window",
+  "store": "none",
+  "limit": {
+    "rate": 100,
+    "period_seconds": 60,
+    "burst": 20
+  },
+  "offered_per_second": 5,
+  "duration_seconds": 179.828823805,
+  "offered": 900,
+  "outcomes": {
+    "ok": 900
+  },
+  "admitted": 900,
+  "whole_run": {
+    "name": "whole run",
+    "from_seconds": 0,
+    "to_seconds": 179.829,
+    "admitted": 900,
+    "bound": 319,
+    "over": 581,
+    "worst_window": {
+      "window_seconds": 60,
+      "start_seconds": 0.006,
+      "admitted": 301,
+      "bound": 120,
+      "over": 181
+    },
+    "window_60s": {
+      "window_seconds": 60,
+      "start_seconds": 0.006,
+      "admitted": 301,
+      "bound": 120,
+      "over": 181
+    }
+  }
+}
