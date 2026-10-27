@@ -421,3 +421,19 @@ func TestDegradingConcurrent(t *testing.T) {
 		}
 	}
 }
+
+// A request the full limit would take but this replica's share cannot is
+// the outage's fault: it is refused as a wait, never as impossible.
+func TestDegradingShareTooSmallIsAWait(t *testing.T) {
+	t.Parallel()
+	f := newDegradeFixture(3)
+	f.primary.set(errStore, false)
+	l := ratelimit.Limit{Rate: 1000, Period: time.Minute, Burst: 1000}
+	d, err := f.d.Allow(f.ctx, "tok", l, 505) // more than the local 333
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Allowed || d.RetryAfter != ratelimit.DefaultRetryInterval {
+		t.Errorf("decision %+v, want a refusal retrying after the probe interval", d)
+	}
+}
