@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/TheAsianFish/switchboard/internal/budget"
+	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/cost"
@@ -25,6 +26,14 @@ type Principal struct {
 	Requests, Tokens *ratelimit.Limit
 	// Budget is the key's dollar allowance; nil means none.
 	Budget *budget.Budget
+	// Tenant is the cache namespace: keys with the same configured tenant
+	// share cached replies, and no lookup ever crosses tenants. It is
+	// "tenant:" and the tenant, or "key:" and the key's name for a key
+	// without one, so a tenant named like another key never shares that
+	// key's entries.
+	Tenant string
+	// Cache is the most caching the key's requests get.
+	Cache cache.Mode
 }
 
 // Allows reports whether the principal may use model.
@@ -39,6 +48,7 @@ type Keys struct {
 
 // NewKeys builds the table from configured keys. Plain keys are hashed on
 // load so that lookups for plain and pre-hashed keys take the same path.
+// A key without a cache mode gets none (config.Load fills in cache.mode).
 func NewKeys(keys []config.Key) *Keys {
 	t := &Keys{byDigest: make(map[[sha256.Size]byte]*Principal, len(keys))}
 	for _, k := range keys {
@@ -52,7 +62,13 @@ func NewKeys(keys []config.Key) *Keys {
 			}
 			copy(digest[:], b)
 		}
-		p := &Principal{Name: k.Name, Requests: limit(k.Limits.Requests), Tokens: limit(k.Limits.Tokens), Budget: keyBudget(k.Budget)}
+		p := &Principal{Name: k.Name, Requests: limit(k.Limits.Requests), Tokens: limit(k.Limits.Tokens), Budget: keyBudget(k.Budget), Tenant: "tenant:" + k.Tenant}
+		if k.Tenant == "" {
+			p.Tenant = "key:" + k.Name
+		}
+		if k.Cache != "" {
+			p.Cache, _ = cache.ParseMode(k.Cache) // config.Validate rejects bad modes
+		}
 		if len(k.Models) > 0 {
 			p.models = make(map[string]bool, len(k.Models))
 			for _, m := range k.Models {

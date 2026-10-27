@@ -20,6 +20,9 @@ x-gateway: &gateway
     SWITCHBOARD_REDIS_URL: redis://redis:6379/0
     SWITCHBOARD_ADMIN_LISTEN: 0.0.0.0:9090
     SWITCHBOARD_PROVIDER_OLLAMA_BASE_URL: http://ollama:11434/v1
+    # The semantic cache embeds prompts with the same Ollama (pull
+    # all-minilm into it first).
+    SWITCHBOARD_CACHE_EMBED_URL: http://ollama:11434
 
 x-replica-env: &replica-env
   <<: *gateway-env

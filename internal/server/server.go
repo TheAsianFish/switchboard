@@ -13,6 +13,7 @@ import (
 
 	anthropicapi "github.com/TheAsianFish/switchboard/internal/api/anthropic"
 	openaiapi "github.com/TheAsianFish/switchboard/internal/api/openai"
+	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
@@ -60,7 +61,9 @@ func jsonSafe(s string) string {
 
 // withRequestContext gives every request an id (the caller's X-Request-Id
 // when it is sane, otherwise a fresh one), a logger that stamps it, an
-// access log line and panic recovery.
+// access log line and panic recovery. It also carries the client's cache
+// directive in and the cache's report out as response headers, so the
+// front ends need not know about the cache.
 func withRequestContext(base *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-Id")
@@ -72,7 +75,8 @@ func withRequestContext(base *slog.Logger, next http.Handler) http.Handler {
 		w.Header().Set("X-Request-Id", id)
 		w.Header().Set("Request-Id", id)
 		ctx := telemetry.WithRequest(r.Context(), base, id)
-		rec := &recorder{ResponseWriter: w}
+		ctx, report := cache.WithRequest(ctx, r.Header.Get(cache.DirectiveHeader))
+		rec := &recorder{ResponseWriter: w, report: report}
 		start := time.Now()
 		defer func() {
 			log := telemetry.Logger(ctx)
@@ -130,11 +134,14 @@ type recorder struct {
 	status      int
 	wroteHeader bool
 	bytes       int64
+	// report adds the cache headers just before the status line goes out.
+	report *cache.Report
 }
 
 func (r *recorder) WriteHeader(code int) {
 	if !r.wroteHeader {
 		r.status, r.wroteHeader = code, true
+		r.report.WriteHeaders(r.Header())
 	}
 	r.ResponseWriter.WriteHeader(code)
 }
@@ -142,6 +149,7 @@ func (r *recorder) WriteHeader(code int) {
 func (r *recorder) Write(b []byte) (int, error) {
 	if !r.wroteHeader {
 		r.status, r.wroteHeader = http.StatusOK, true
+		r.report.WriteHeaders(r.Header())
 	}
 	n, err := r.ResponseWriter.Write(b)
 	r.bytes += int64(n)
@@ -152,6 +160,7 @@ func (r *recorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		if !r.wroteHeader {
 			r.status, r.wroteHeader = http.StatusOK, true
+			r.report.WriteHeaders(r.Header())
 		}
 		f.Flush()
 	}

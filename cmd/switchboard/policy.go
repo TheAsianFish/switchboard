@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/TheAsianFish/switchboard/internal/budget"
+	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/cost"
+	"github.com/TheAsianFish/switchboard/internal/embed"
 	"github.com/TheAsianFish/switchboard/internal/pipeline"
 	"github.com/TheAsianFish/switchboard/internal/ratelimit"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
@@ -37,11 +40,12 @@ func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, 
 	if cfg.Redis.URL == "" {
 		pol.Limiter, _ = ratelimit.NewMemory(alg, time.Now)
 		pol.Ledger = budget.NewMemory(ttl, time.Now)
+		pol.Cache, pol.CacheMaxTemperature = buildCache(cfg, nil, m, log), cfg.Cache.MaxTemperature
 		if cfg.RateLimit.Replicas > 1 {
 			log.Warn("redis.url is not set: every replica enforces the full limits and budgets on its own",
 				slog.Int("replicas", cfg.RateLimit.Replicas))
 		}
-		return pol, func() {}, nil
+		return pol, waitFills(pol.Cache), nil
 	}
 
 	opts, err := redis.ParseURL(cfg.Redis.URL)
@@ -77,6 +81,8 @@ func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, 
 		OnState:       func(d bool) { m.Degraded("budget", d) },
 	})
 
+	pol.Cache, pol.CacheMaxTemperature = buildCache(cfg, rdb, m, log), cfg.Cache.MaxTemperature
+
 	pctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	if err := rdb.Ping(pctx).Err(); err != nil {
@@ -88,7 +94,75 @@ func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, 
 	}
 	log.Info("shared limits and budgets", slog.String("algorithm", alg), slog.Int("replicas", cfg.RateLimit.Replicas),
 		slog.String("grace", grace.String()))
-	return pol, func() { _ = rdb.Close() }, nil
+	wait := waitFills(pol.Cache)
+	return pol, func() { wait(); _ = rdb.Close() }, nil
+}
+
+// waitFills stops new cache writes at shutdown and lets those in flight
+// finish before the store goes away.
+func waitFills(c *cache.Cache) func() {
+	return func() {
+		if c != nil {
+			c.Close()
+		}
+	}
+}
+
+// buildCache builds the response cache, or returns nil when no key may use
+// it. Entries live in Redis when rdb is set, so every replica serves what
+// any of them stored; otherwise in this process. The vector index is
+// created on the first embedding, once its dimension is known.
+func buildCache(cfg *config.Config, rdb *redis.Client, m *telemetry.Metrics, log *slog.Logger) *cache.Cache {
+	semantic, enabled := false, false
+	for _, k := range cfg.Keys {
+		mode, _ := cache.ParseMode(k.Cache) // validated
+		enabled = enabled || mode != cache.ModeOff
+		semantic = semantic || mode == cache.ModeSemantic
+	}
+	if !enabled {
+		return nil
+	}
+	c := cfg.Cache
+	opts := cache.Options{
+		TTL:          c.TTL,
+		Timeout:      c.Timeout,
+		Threshold:    c.Semantic.Threshold,
+		MatchNumbers: c.Semantic.MatchNumbers == nil || *c.Semantic.MatchNumbers,
+		Metrics:      m,
+	}
+	if rdb != nil {
+		opts.KV = cache.NewRedisKV(rdb, cfg.Redis.KeyPrefix)
+		opts.RetryInterval = cfg.RateLimit.RetryInterval
+	} else {
+		opts.KV = cache.NewMemoryKV(c.MaxEntries, time.Now)
+	}
+	if semantic {
+		opts.Embedder = &embed.Ollama{BaseURL: c.Semantic.EmbedURL, Name: c.Semantic.Model, Timeout: c.Timeout}
+		opts.NewIndex = func(dims int) (cache.Index, error) {
+			if rdb == nil {
+				return cache.NewMemoryIndex(dims, c.MaxEntries, time.Now), nil
+			}
+			return cache.NewRedisIndex(rdb, cache.RedisIndexOptions{
+				Prefix: cfg.Redis.KeyPrefix, Name: fmt.Sprintf("%s:%d", slug(c.Semantic.Model), dims),
+				Dims: dims, Algorithm: strings.ToUpper(c.Semantic.Index),
+			})
+		}
+	}
+	log.Info("response cache", slog.String("default_mode", c.Mode), slog.Bool("semantic", semantic),
+		slog.String("embed_model", c.Semantic.Model), slog.Float64("threshold", c.Semantic.Threshold),
+		slog.String("index", c.Semantic.Index), slog.Bool("shared", rdb != nil))
+	return cache.New(opts)
+}
+
+// slug keeps letters, digits and dots of an embedding model's name, so it
+// can be part of a Redis index name.
+func slug(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' {
+			return r
+		}
+		return '-'
+	}, s)
 }
 
 // adminHandler serves the loopback admin listener: /metrics now, the admin

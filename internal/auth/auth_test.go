@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/core"
 )
@@ -51,5 +52,27 @@ func TestLookup(t *testing.T) {
 	ctx := WithPrincipal(context.Background(), p)
 	if FromContext(ctx) != p || FromContext(context.Background()) != nil {
 		t.Error("context round trip")
+	}
+}
+
+func TestTenantAndCacheMode(t *testing.T) {
+	t.Parallel()
+	keys := NewKeys([]config.Key{
+		{Name: "a", Key: "sk-a"},
+		{Name: "b", Key: "sk-b", Tenant: "team", Cache: "semantic"},
+		{Name: "c", Key: "sk-c", Tenant: "a"},
+	})
+	a, _ := keys.Lookup("sk-a")
+	b, _ := keys.Lookup("sk-b")
+	c, _ := keys.Lookup("sk-c")
+	if a.Tenant != "key:a" || a.Cache != cache.ModeOff {
+		t.Errorf("a: tenant %q cache %s, want its own name and off", a.Tenant, a.Cache)
+	}
+	if b.Tenant != "tenant:team" || b.Cache != cache.ModeSemantic {
+		t.Errorf("b: tenant %q cache %s", b.Tenant, b.Cache)
+	}
+	// A tenant named like a key does not share that key's entries.
+	if c.Tenant == a.Tenant {
+		t.Errorf("tenant %q collides with key a", c.Tenant)
 	}
 }
