@@ -1,12 +1,15 @@
 // Command switchboard is the gateway and its tooling in one binary.
 //
-//	switchboard serve           run the gateway
-//	switchboard fake-provider   run the deterministic fake backend
-//	switchboard bench           drive load at a target and record latency
-//	switchboard eval results    render RESULTS.md from eval/results/
-//	switchboard eval limits     Q2: over-admission from the fake provider's ledger
-//	switchboard eval budget     Q2: shared budget spend against the ledger
-//	switchboard version         print the build version
+//	switchboard serve             run the gateway
+//	switchboard fake-provider     run the deterministic fake backend
+//	switchboard bench             drive load at a target and record latency
+//	switchboard eval results      render RESULTS.md from eval/results/
+//	switchboard eval limits       Q2: over-admission from the fake provider's ledger
+//	switchboard eval budget       Q2: shared budget spend against the ledger
+//	switchboard eval cache-data   Q3: build the cache pair sets (needs Ollama)
+//	switchboard eval cache        Q3: semantic cache threshold sweep (needs Ollama)
+//	switchboard eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
+//	switchboard version           print the build version
 package main
 
 import (
@@ -25,6 +28,7 @@ import (
 
 	"github.com/TheAsianFish/switchboard/internal/auth"
 	"github.com/TheAsianFish/switchboard/internal/bench"
+	"github.com/TheAsianFish/switchboard/internal/cacheeval"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/limitseval"
@@ -39,13 +43,16 @@ import (
 const usage = `usage: switchboard <command> [flags]
 
 commands:
-  serve           run the gateway (config: --config or SWITCHBOARD_CONFIG)
-  fake-provider   run the deterministic fake backend
-  bench           drive load at a target and record latency
-  eval results    render RESULTS.md from eval/results/
-  eval limits     Q2: over-admission from the fake provider's ledger
-  eval budget     Q2: shared budget spend against the ledger
-  version         print the build version
+  serve             run the gateway (config: --config or SWITCHBOARD_CONFIG)
+  fake-provider     run the deterministic fake backend
+  bench             drive load at a target and record latency
+  eval results      render RESULTS.md from eval/results/
+  eval limits       Q2: over-admission from the fake provider's ledger
+  eval budget       Q2: shared budget spend against the ledger
+  eval cache-data   Q3: build the cache pair sets (needs Ollama)
+  eval cache        Q3: semantic cache threshold sweep (needs Ollama)
+  eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
+  version           print the build version
 `
 
 func main() {
@@ -74,7 +81,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && (args[1] == "limits" || args[1] == "budget") {
 			return limitseval.Main(ctx, args[1:], stdout, stderr)
 		}
-		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget [flags]")
+		if len(args) > 1 && (args[1] == "cache-data" || args[1] == "cache" || args[1] == "cache-index") {
+			return cacheeval.Main(ctx, args[1:], stdout, stderr)
+		}
+		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache|cache-index [flags]")
 		return 2
 	case "version":
 		_, _ = fmt.Fprintln(stdout, version())

@@ -1,0 +1,105 @@
+{
+  "commit": "b4befc6",
+  "date": "2026-10-27T16:06:17Z",
+  "command": "switchboard eval cache-index",
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+    "kernel": "6.17.0-1022-azure"
+  },
+  "redis_version": "8.10.3",
+  "entries": 100000,
+  "dims": 384,
+  "queries": 1000,
+  "contexts": 10000,
+  "vectors": "random unit (normalised Gaussian), entries and queries independent, seed 1",
+  "runs": [
+    {
+      "algorithm": "FLAT",
+      "build_seconds": 1.222859076,
+      "unfiltered": {
+        "p50_ms": 4.869,
+        "p99_ms": 6.614,
+        "mean_ms": 4.914
+      },
+      "filtered": {
+        "p50_ms": 0.139,
+        "p99_ms": 0.189,
+        "mean_ms": 0.141
+      },
+      "recall_at_1": 1,
+      "filtered_recall_at_1": 1,
+      "index_size_mb": 151.65371704101562
+    },
+    {
+      "algorithm": "HNSW",
+      "params": {
+        "EF_CONSTRUCTION": 200,
+        "EF_RUNTIME": 10,
+        "M": 16
+      },
+      "build_seconds": 26.240965391,
+      "unfiltered": {
+        "p50_ms": 0.185,
+        "p99_ms": 0.242,
+        "mean_ms": 0.188
+      },
+      "filtered": {
+        "p50_ms": 0.138,
+        "p99_ms": 0.161,
+        "mean_ms": 0.138
+      },
+      "recall_at_1": 0.026,
+      "filtered_recall_at_1": 1,
+      "index_size_mb": 177.80653381347656
+    },
+    {
+      "algorithm": "HNSW",
+      "params": {
+        "EF_CONSTRUCTION": 200,
+        "EF_RUNTIME": 100,
+        "M": 16
+      },
+      "build_seconds": 26.240965391,
+      "unfiltered": {
+        "p50_ms": 0.508,
+        "p99_ms": 0.65,
+        "mean_ms": 0.512
+      },
+      "filtered": {
+        "p50_ms": 0.136,
+        "p99_ms": 0.165,
+        "mean_ms": 0.135
+      },
+      "recall_at_1": 0.137,
+      "filtered_recall_at_1": 1,
+      "index_size_mb": 177.80653381347656
+    },
+    {
+      "algorithm": "HNSW",
+      "params": {
+        "EF_CONSTRUCTION": 200,
+        "EF_RUNTIME": 1000,
+        "M": 16
+      },
+      "build_seconds": 26.240965391,
+      "unfiltered": {
+        "p50_ms": 3.335,
+        "p99_ms": 4.158,
+        "mean_ms": 3.383
+      },
+      "filtered": {
+        "p50_ms": 0.137,
+        "p99_ms": 0.183,
+        "mean_ms": 0.14
+      },
+      "recall_at_1": 0.649,
+      "filtered_recall_at_1": 1,
+      "index_size_mb": 177.80653381347656
+    }
+  ]
+}

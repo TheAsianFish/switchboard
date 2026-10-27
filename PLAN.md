@@ -372,9 +372,67 @@ Changes made while building:
     run works in compose for the baseline, with and without Redis, and
     through an outage.
 
+- **M3.**
+  - The GSM8K positives are checked as the plan says (the local model's
+    answer to its own paraphrase must equal the gold answer), and also
+    for keeping every number, in any order. The paraphrasing and solving
+    model is `qwen2.5:3b` (greedy first, then up to two sampled retries);
+    the twin changes one integer that the worked solution uses (never a
+    year or part of a grouped number) by +1 under 10 and +20% above.
+  - A number guard was added to the semantic layer: a hit needs the same
+    numbers in the same order. GSM8K twins score a higher cosine than
+    real paraphrases (RESULTS.md, the spread table), so no threshold
+    separates them. The guard compares order, signs, leading zeros and
+    decimals, so it errs towards a miss. The pair builder keeps its
+    looser, order-free check, so the eval measures what the guard costs
+    on true paraphrases.
+  - The threshold grid is 0.5 to 0.99 in steps of 0.0025, then to 1 in
+    steps of 0.0001, because on both pair sets everything happens above
+    0.99. The spread of positive and negative cosines per set is
+    reported alongside.
+  - The shipped default is picked by a rule fixed before the full run: for
+    each model, the lowest threshold whose Wilson 95% upper bound on false
+    hits is at most 1% on every pair set, with the guard on; the model with
+    the higher mean hit rate there. `TestSemanticDefaultsAreTheEvals`
+    fails if the config defaults and `summary.json` disagree.
+  - The FLAT against HNSW check measures filtered queries (one context,
+    the gateway's shape) as well as unfiltered ones, with recall for
+    both, and HNSW at EF_RUNTIME 10, 100 and 1000 on one build.
+  - Tenants: a key's entries are namespaced by its `tenant` (or by its own
+    name), as "tenant:…" or "key:…", so a tenant named like a key never
+    shares that key's entries.
+  - A hit counts against the request limit and refunds its token charge
+    and budget reservation. A key whose budget is spent is refused even
+    when the answer is cached: the cache is a saving, not a way around a
+    budget.
+  - The cache key hashes the `max_tokens` sent upstream, which for a key
+    with a budget is the model's `max_output_tokens` when the client sent
+    none.
+  - Ollama is called with `truncate: false` (a long prompt skips the
+    semantic layer instead of embedding a truncated prefix) and
+    `keep_alive` (an unloaded model made the first lookups after an idle
+    spell time out).
+  - Done-criteria evidence (RESULTS.md, Q3, `make eval-cache` at
+    `b4befc6`): the cross-tenant and cross-context leak tests pass in
+    `make check` (`TestLookupLayers`, `TestCacheThroughPipeline`,
+    `cachetest.Index` on the in-memory index) and in `make
+    test-integration` (`cachetest.Index` on Redis 8 with FLAT and HNSW);
+    the eval runs end to end on a 4-vCPU laptop-class machine with Ollama
+    in about seven minutes, and its pair sets rebuild with `make
+    eval-cache-data`; the shipped model, threshold and guard are
+    `summary.json`'s `chosen`, enforced by
+    `TestSemanticDefaultsAreTheEvals`.
+  - Finding: no embedding threshold keeps false hits under 1% at a useful
+    hit rate on these pair sets. PAWS-Wiki needs a cosine so close to 1
+    that the semantic layer serves only a few percent of true
+    paraphrases there, and GSM8K twins sit above the paraphrases until
+    the number guard removes them. The semantic layer therefore ships at
+    the measured threshold but off by default, and a reranking stage is
+    on the roadmap rather than a lower threshold.
+
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
-- [ ] M3: Exact and semantic cache — canonical request hash cache; `embed` client for Ollama `/api/embed` with a fake; vector index interface with Redis HNSW/FLAT and in-memory FLAT implementations; cacheability rules (temperature, explicit header, context hash) and tenant namespacing; cached streams replayed in the client's wire format; `make eval-cache` with the PAWS-Wiki and GSM8K-perturbation pair sets, the threshold sweep and the FLAT vs HNSW latency check; RESULTS.md cache section answering Q3. Done when the cross-tenant and cross-context leak tests pass, the eval runs end to end on a laptop with Ollama, and the chosen threshold is the one the eval produced.
+- [x] M3: Exact and semantic cache — canonical request hash cache; `embed` client for Ollama `/api/embed` with a fake; vector index interface with Redis HNSW/FLAT and in-memory FLAT implementations; cacheability rules (temperature, explicit header, context hash) and tenant namespacing; cached streams replayed in the client's wire format; `make eval-cache` with the PAWS-Wiki and GSM8K-perturbation pair sets, the threshold sweep and the FLAT vs HNSW latency check; RESULTS.md cache section answering Q3. Done when the cross-tenant and cross-context leak tests pass, the eval runs end to end on a laptop with Ollama, and the chosen threshold is the one the eval produced.
 - [ ] M4: Resilience and observability — retries with backoff on retryable statuses, hedged requests bounded by time-to-first-token and a per-tenant hedge budget, per-provider circuit breaker and health; tool-call and `stop_reason` translation in both wire formats; OpenTelemetry spans per pipeline stage exported over OTLP to Jaeger in compose, trace id in the response headers; `make bench-hedge` answering Q4 on the synthetic tail and on a real provider where a key exists. Done when a trace shows every stage and the hedge, and the hedging numbers are in RESULTS.md with their cost.
 - [ ] M5: Evaluated router — committed eval set (GSM8K + MMLU, 600 questions); `switchboard eval router label` runs every candidate through the gateway and records correctness, usage, dollars and latency (replays from recordings at $0); feature extraction and the per-candidate logistic models trained in Go; `model: "auto"` with a configurable quality target; `make eval-router` with 5-fold cross-validation, the four baselines and the random-mix line; RESULTS.md router section answering Q5 (live labels when a key exists, otherwise the Ollama candidate and "To measure"). Done when the router's held-out frontier is plotted against the line and the gateway serves `auto` from the trained weights.
 - [ ] M6: Admin page, chaos and the overhead breakdown — admin JSON API on the loopback listener (keys, limits, spend, cache stats, router decisions, recent requests with trace links); React + TypeScript page embedded in the binary with Vitest tests; `chaos/run.sh` with the phased kill schedule and per-phase report; `make bench` extended to the per-feature breakdown. RESULTS.md answers Q1 in full and Q6. Done when the chaos run completes on a laptop with a report, the admin page shows a live fleet, and `make ui-check` is in CI.

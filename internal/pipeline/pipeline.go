@@ -1,8 +1,8 @@
 // Package pipeline is the per-request chain between the front ends and the
-// providers: auth → route → rate limits → budget reservation → provider →
-// settlement (usage to dollars, token-limit and budget correction, metrics)
-// → log. Caching and hedging slot in between in later milestones without
-// the front ends changing.
+// providers: auth → route → rate limits → budget reservation → cache
+// lookup → provider → settlement (usage to dollars, token-limit and budget
+// correction, metrics) → cache fill → log. Hedging slots in between in a
+// later milestone without the front ends changing.
 package pipeline
 
 import (
@@ -12,10 +12,12 @@ import (
 	"io"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/TheAsianFish/switchboard/internal/auth"
+	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/cost"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
@@ -97,6 +99,17 @@ func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (Route, *core
 	if !pr.Allows(req.Model) {
 		return Route{}, nil, nil, core.Errorf(core.KindPermission, "this API key may not use model %q", req.Model)
 	}
+	var dec cache.Decision
+	if p.policy.Cache != nil {
+		// Decided before admission so that a malformed directive is
+		// refused without charging the key's limits.
+		d, err := cache.Decide(pr.Cache, cache.ReportFrom(ctx).Directive(), req, p.policy.CacheMaxTemperature)
+		if err != nil {
+			p.policy.Metrics.Call(pr.Name, rt.Model, telemetry.OutcomeError)
+			return Route{}, nil, nil, err
+		}
+		dec = d
+	}
 	adm, err := p.admit(ctx, pr, rt, req)
 	if err != nil {
 		switch core.AsError(err).Kind {
@@ -109,6 +122,7 @@ func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (Route, *core
 		}
 		return Route{}, nil, nil, err
 	}
+	adm.cache = dec
 	up := *req
 	up.Model = rt.Upstream
 	if up.MaxTokens == 0 && adm.charged() {
@@ -125,6 +139,13 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	rt, up, adm, err := p.resolve(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	ctx, lk := p.lookup(ctx, adm, req, up)
+	if lk.Response != nil {
+		resp := lk.Response
+		resp.Model = req.Model
+		p.serveHit(ctx, adm, resp, false)
+		return resp, nil
 	}
 	start := p.now()
 	resp, err := rt.Provider.Complete(ctx, up)
@@ -146,7 +167,43 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	resp.Model = req.Model
 	p.settle(ctx, adm, resp.Usage, len(resp.Text), false, telemetry.OutcomeOK)
 	logCall(ctx, rt, false, elapsed, elapsed, resp.Usage, nil)
+	if lk.Fillable() {
+		p.policy.Cache.Fill(ctx, lk, resp)
+	}
 	return resp, nil
+}
+
+// lookup consults the response cache and records what it found for the
+// response headers and the log. The key is the client's request with the
+// output cap that was really sent upstream: a reply the gateway capped at
+// a key's max_output_tokens must not answer a request that had no cap.
+func (p *Pipeline) lookup(ctx context.Context, adm *admission, req, up *core.Request) (context.Context, *cache.Lookup) {
+	var lk *cache.Lookup
+	switch {
+	case p.policy.Cache == nil:
+		return ctx, cache.Skip("no cache")
+	case adm.cache.Mode == cache.ModeOff:
+		lk = cache.Skip(adm.cache.Reason)
+	default:
+		keyed := *req
+		keyed.MaxTokens = up.MaxTokens
+		route := cache.Upstream{Provider: adm.route.ProviderName, Model: adm.route.Upstream}
+		lk = p.policy.Cache.Lookup(ctx, adm.pr.Tenant, route, adm.cache.Mode, &keyed)
+	}
+	cache.ReportFrom(ctx).Set(lk)
+	return telemetry.WithAttrs(ctx, "cache", string(lk.Status)), lk
+}
+
+// serveHit settles a request answered from the cache. It costs nothing:
+// the token-limit charge and the budget reservation are returned in full.
+// The request still counted against the request limit, which bounds how
+// often a key may ask, whatever answers.
+func (p *Pipeline) serveHit(ctx context.Context, adm *admission, resp *core.Response, stream bool) {
+	p.settle(ctx, adm, core.Usage{}, 0, stream, telemetry.OutcomeCacheHit)
+	if adm.route.Priced {
+		p.policy.Metrics.CacheSaved(adm.pr.Name, adm.route.Model, adm.route.Price.Of(resp.Usage).USD())
+	}
+	logCall(ctx, adm.route, stream, p.now().Sub(adm.start), 0, core.Usage{}, nil)
 }
 
 // Stream implements core.Gateway.
@@ -154,6 +211,15 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 	rt, up, adm, err := p.resolve(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	ctx, lk := p.lookup(ctx, adm, req, up)
+	if lk.Response != nil {
+		// Replayed as canonical events, so the front end renders it in
+		// the client's own wire format whichever format filled it.
+		resp := lk.Response
+		resp.Model = req.Model
+		p.serveHit(ctx, adm, resp, true)
+		return &core.SliceStream{Events: core.ResponseEvents(resp, cache.Chunks(resp.Text))}, nil
 	}
 	start := p.now()
 	s, err := rt.Provider.Stream(ctx, up)
@@ -163,7 +229,7 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 		logCall(ctx, rt, true, p.now().Sub(start), 0, core.Usage{}, err)
 		return nil, err
 	}
-	return &stream{inner: s, ctx: ctx, p: p, adm: adm, route: rt, model: req.Model, start: start, now: p.now}, nil
+	return &stream{inner: s, ctx: ctx, p: p, adm: adm, route: rt, model: req.Model, start: start, now: p.now, lookup: lk}, nil
 }
 
 // upstreamError keeps a provider's refusal of the gateway's own credentials
@@ -191,12 +257,18 @@ type stream struct {
 	start time.Time
 	now   func() time.Time
 
-	// mu guards ttft, usage and chars: Close may run on another goroutine
-	// than Next, for example to abort a blocked read.
+	// lookup is the cache lookup; on a miss the stream's text is
+	// collected so a complete reply can be stored.
+	lookup *cache.Lookup
+
+	// mu guards ttft, usage, chars, text and stop: Close may run on
+	// another goroutine than Next, for example to abort a blocked read.
 	mu     sync.Mutex
 	ttft   time.Duration
 	usage  core.Usage
 	chars  int
+	text   strings.Builder
+	stop   core.StopReason
 	logged sync.Once
 }
 
@@ -229,8 +301,12 @@ func (s *stream) Next() (core.Event, error) {
 			s.ttft = s.now().Sub(s.start)
 		}
 		s.chars += len(ev.Text)
+		if s.lookup.Fillable() {
+			s.text.WriteString(ev.Text)
+		}
 	case core.EventStop:
 		s.usage = ev.Usage
+		s.stop = ev.StopReason
 	}
 	s.mu.Unlock()
 	if ev.Kind == core.EventStop {
@@ -257,7 +333,7 @@ var errNoStop = core.Errorf(core.KindUpstream, "stream ended without a stop even
 func (s *stream) finish(err error) {
 	s.logged.Do(func() {
 		s.mu.Lock()
-		ttft, usage, chars := s.ttft, s.usage, s.chars
+		ttft, usage, chars, text, stop := s.ttft, s.usage, s.chars, s.text.String(), s.stop
 		s.mu.Unlock()
 		outcome := telemetry.OutcomeOK
 		switch {
@@ -268,6 +344,11 @@ func (s *stream) finish(err error) {
 		}
 		s.p.settle(s.ctx, s.adm, usage, chars, true, outcome)
 		logCall(s.ctx, s.route, true, s.now().Sub(s.start), ttft, usage, err)
+		if err == nil && s.lookup.Fillable() {
+			// Only a stream that reached its stop event is a whole reply.
+			u, _ := s.adm.fillUsage(usage, chars)
+			s.p.policy.Cache.Fill(s.ctx, s.lookup, &core.Response{Text: text, StopReason: stop, Usage: u})
+		}
 	})
 }
 

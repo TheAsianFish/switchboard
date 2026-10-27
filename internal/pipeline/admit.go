@@ -9,20 +9,27 @@ import (
 
 	"github.com/TheAsianFish/switchboard/internal/auth"
 	"github.com/TheAsianFish/switchboard/internal/budget"
+	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/cost"
 	"github.com/TheAsianFish/switchboard/internal/ratelimit"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
 
-// Policy is the shared-state part of the pipeline: limits, budgets and
-// metrics. A zero Policy enforces nothing and records nothing.
+// Policy is the shared-state part of the pipeline: limits, budgets, the
+// response cache and metrics. A zero Policy enforces nothing, caches
+// nothing and records nothing.
 type Policy struct {
 	// Limiter enforces the keys' request and token limits.
 	Limiter ratelimit.Limiter
 	// Ledger enforces the keys' budgets.
 	Ledger  budget.Ledger
 	Metrics *telemetry.Metrics
+	// Cache is the response cache; nil disables it.
+	Cache *cache.Cache
+	// CacheMaxTemperature is the highest temperature cached without the
+	// client's X-Switchboard-Cache header.
+	CacheMaxTemperature float64
 	// SettleTimeout bounds the store calls made after a reply, which run
 	// even when the client has gone; zero means DefaultSettleTimeout.
 	SettleTimeout time.Duration
@@ -42,6 +49,8 @@ type admission struct {
 	tokens      int64
 	reservation *budget.Reservation
 	start       time.Time
+	// cache is the cache mode the request gets.
+	cache cache.Decision
 }
 
 // charged reports whether the admission was charged on its output
@@ -174,15 +183,7 @@ func (p *Pipeline) settle(ctx context.Context, a *admission, u core.Usage, outCh
 	defer cancel()
 	estimated := false
 	if outcome == telemetry.OutcomeOK || outChars > 0 {
-		// Part of the usage was never reported: a stream abandoned before
-		// its stop event, or a server that does not send usage. Bill on
-		// the estimate rather than for nothing.
-		if u.PromptTokens() == 0 {
-			u.InputTokens, estimated = a.estimate.InputTokens, true
-		}
-		if u.OutputTokens == 0 && outChars > 0 {
-			u.OutputTokens, estimated = cost.EstimateOutputFromText(outChars), true
-		}
+		u, estimated = a.fillUsage(u, outChars)
 	}
 	key, model := a.pr.Name, a.route.Model
 	if a.tokens != 0 {
@@ -207,6 +208,21 @@ func (p *Pipeline) settle(ctx context.Context, a *admission, u core.Usage, outCh
 	if estimated {
 		telemetry.Logger(ctx).Info("usage estimated", slog.Int("input_tokens", u.InputTokens), slog.Int("output_tokens", u.OutputTokens))
 	}
+}
+
+// fillUsage completes usage the provider never reported (a stream
+// abandoned before its stop event, or a server that does not send usage)
+// from the admission's estimate and the length of the text, so it is
+// billed, and cached, on the estimate rather than as nothing.
+func (a *admission) fillUsage(u core.Usage, outChars int) (core.Usage, bool) {
+	estimated := false
+	if u.PromptTokens() == 0 {
+		u.InputTokens, estimated = a.estimate.InputTokens, true
+	}
+	if u.OutputTokens == 0 && outChars > 0 {
+		u.OutputTokens, estimated = cost.EstimateOutputFromText(outChars), true
+	}
+	return u, estimated
 }
 
 func (p *Pipeline) settleTimeout() time.Duration {

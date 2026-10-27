@@ -37,6 +37,7 @@ type Config struct {
 	Redis       Redis        `yaml:"redis"`
 	RateLimit   RateLimit    `yaml:"ratelimit"`
 	Budget      BudgetPolicy `yaml:"budget"`
+	Cache       Cache        `yaml:"cache"`
 }
 
 // Log configures the process logger.
@@ -101,6 +102,11 @@ type Key struct {
 	Limits Limits `yaml:"limits"`
 	// Budget is the key's dollar allowance; none by default.
 	Budget *KeyBudget `yaml:"budget"`
+	// Tenant groups keys that share cached replies; it defaults to the
+	// key's name, so by default no two keys see each other's entries.
+	Tenant string `yaml:"tenant"`
+	// Cache overrides cache.mode for this key: off, exact or semantic.
+	Cache string `yaml:"cache"`
 }
 
 // Defaults applied before the file is read.
@@ -120,6 +126,7 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		Redis:       Redis{Timeout: DefaultRedisTimeout, KeyPrefix: DefaultKeyPrefix},
 		RateLimit:   RateLimit{Algorithm: "fixed_window", Replicas: 1, RetryInterval: DefaultRetryInterval},
 		Budget:      BudgetPolicy{GraceUSD: DefaultGraceUSD, ReservationTTL: 15 * time.Minute},
+		Cache:       defaultCache(),
 	}
 	if path != "" {
 		data, err := os.ReadFile(path)
@@ -153,6 +160,11 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 			cfg.Models[i].MaxOutputTokens = DefaultOutputEstimate
 		}
 	}
+	for i := range cfg.Keys {
+		if cfg.Keys[i].Cache == "" {
+			cfg.Keys[i].Cache = cfg.Cache.Mode
+		}
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -175,6 +187,8 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	set(&cfg.AdminListen, "SWITCHBOARD_ADMIN_LISTEN")
 	set(&cfg.Redis.URL, "SWITCHBOARD_REDIS_URL")
 	set(&cfg.RateLimit.Algorithm, "SWITCHBOARD_RATELIMIT_ALGORITHM")
+	set(&cfg.Cache.Mode, "SWITCHBOARD_CACHE_MODE")
+	set(&cfg.Cache.Semantic.EmbedURL, "SWITCHBOARD_CACHE_EMBED_URL")
 	if v := getenv("SWITCHBOARD_RATELIMIT_REPLICAS"); v != "" {
 		// A typo must not fall back to the file's count: with too few
 		// replicas, each one takes too big a share during an outage.
@@ -261,6 +275,7 @@ func (c *Config) Validate() error {
 		}
 	}
 	errs = append(errs, c.validateShared(byName)...)
+	errs = append(errs, c.validateCache()...)
 	return errors.Join(errs...)
 }
 

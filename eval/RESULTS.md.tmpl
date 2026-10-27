@@ -136,6 +136,188 @@ the gateway's cost code, with exact rationals.
 {{else}}
 Not measured yet. Run `make test-limits` (Docker), then `make results`.
 {{end}}
+## Q3: semantic cache false hits
+
+At what cosine similarity threshold does the semantic cache's false-hit
+rate fall under 1%, how much hit rate survives there, and does the answer
+depend on the embedding model and the kind of prompt? Command:
+`make eval-cache` (`switchboard eval cache` for the sweep,
+`switchboard eval cache-index` for the index check), raw files in
+`eval/results/q3-cache/`.
+{{with .Q3}}{{with .Sweep}}
+**Method.** Two labelled pair sets, committed under `eval/cache/data/`. A
+positive is a pair where serving one side's cached answer for the other is
+right; a negative is one where it is wrong.
+
+- `paws-wiki`: the PAWS-Wiki labelled (final) test split{{if .Data.PAWSRows}}, {{.Data.PAWSRows}} sentence pairs{{end}}.
+  Both sentences share almost all their words; label 1 (a paraphrase) is a
+  positive, label 0 (the words swapped or reordered so the meaning changes)
+  a negative.
+- `gsm8k-perturb`: {{if .Data.Model}}{{.Data.GSMSampled}} GSM8K test questions sampled (seed {{.Data.Seed}}) from the
+  {{.Data.GSMEligible}} that have a number their worked solution uses{{else}}GSM8K test questions{{end}}. Every
+  question gives a negative: the question against its twin, the same text
+  with one such number changed, so the answer changes. A positive is the
+  question against a paraphrase written by the local model{{if .Data.Model}} `{{.Data.Model}}`{{end}},
+  kept only if it contains the same numbers, in any order, and the same model,
+  asked to solve the paraphrase, gets the gold answer{{if .Data.Model}} ({{.Data.NumbersOK}} paraphrases kept their
+  numbers, {{.Data.AnswerOK}} of those were solved correctly: {{.Data.Positives}} positives against
+  {{.Data.Negatives}} negatives){{end}}.
+
+Each distinct text is embedded once per model through the gateway's own
+Ollama client (`/api/embed`) and every pair is scored by the cosine of its
+two embeddings, rounded to six decimals in the raw files. A pair hits at
+threshold t when its cosine is at least t and, with the number guard on,
+both sides contain the same numbers in the same order (`cache.SameNumbers`,
+which also reads spelled-out numbers). The threshold is swept from 0.5000 to {{.FineFrom}} in steps
+of {{.Step}} and on to 1.0000 in steps of {{.FineStep}}, where the pair sets separate if they
+do at all. Hit rate is over the positives, false-hit rate over the
+negatives, both with Wilson 95% intervals in brackets. Two thresholds are
+reported per row: the lowest whose observed false-hit rate is at most
+{{.Target}}, and the lowest whose Wilson upper bound is; the second is the one the
+gateway uses, and it can only be met with at least {{.MinNegatives}} negatives and no
+false hit among them.
+
+| Pair set | Positives | Negatives |
+|----------|----------:|----------:|
+{{- range .Sets}}
+| `{{.Name}}` | {{.Positives}} | {{.Negatives}} |
+{{- end}}
+
+**Where the pairs sit.** Cosine similarity of the positives and of the
+negatives, as p10 / median / p90 (max). Where the negatives sit as high as
+the positives, no threshold can serve one without the other.
+
+| Model | Pair set | Positives | Negatives |
+|-------|----------|-----------|-----------|
+{{- range .Spreads}}
+| `{{.Model}}` | `{{.Set}}` | {{.Positives}} | {{.Negatives}} |
+{{- end}}
+
+**At a guessed threshold.** Hit rate / false-hit rate without the number
+guard at fixed thresholds, the range vendor defaults sit in and above it.
+
+| Model | Pair set |{{range .RefThresholds}} {{.}} |{{end}}
+|-------|----------|{{range .RefThresholds}}------:|{{end}}
+{{- range .Reference}}
+| `{{.Model}}` | `{{.Set}}` |{{range .Cells}} {{.}} |{{end}}
+{{- end}}
+
+| Model | Pair set | Number guard | Threshold (false-hit rate ≤ {{.Target}}) | Hit rate there | False-hit rate there | Threshold (upper bound ≤ {{.Target}}) | Hit rate there | False-hit rate there |
+|-------|----------|:------------:|------------------------:|---------------:|---------------------:|------------------------:|---------------:|---------------------:|
+{{- range .Rows}}
+| `{{.Model}}` | `{{.Set}}` | {{.Guard}} | {{.Point}} | {{.PointHit}} | {{.PointFalse}} | {{.Upper}} | {{.UpperHit}} | {{.UpperFalse}} |
+{{- end}}
+{{- if .AtFloor}}
+
+\* The lowest threshold swept; a lower one might meet the target too.
+{{- end}}
+
+**Exact-match baseline.** The floor a semantic cache has to beat: the
+gateway's exact layer (`cache.KeysFor`, which normalises line endings and
+trailing whitespace only) and an exact cache that also collapses
+whitespace and folds case.
+
+| Pair set | Exact hit rate | Exact false-hit rate | Normalised hit rate | Normalised false-hit rate |
+|----------|---------------:|---------------------:|--------------------:|--------------------------:|
+{{- range .Baseline}}
+| `{{.Set}}` | {{.ExactHit}} | {{.ExactFalse}} | {{.NormHit}} | {{.NormFalse}} |
+{{- end}}
+
+**One threshold for both kinds of prompt.** The highest of a model's
+per-set thresholds at the upper bound, so the false-hit target holds on
+every pair set, and the hit rate each set keeps there.
+
+| Model | Number guard | Joint threshold | Hit rate per set | Mean hit rate |
+|-------|:------------:|----------------:|------------------|--------------:|
+{{- range .Joints}}
+| `{{.Model}}` | {{.Guard}} | {{.Threshold}} | {{.PerSet}} | {{.Mean}} |
+{{- end}}
+
+**Shipped default.** {{if .Chosen.Model}}The gateway ships with `{{.Chosen.Model}}` at threshold {{.ChosenThreshold}} with the number guard on.
+There the semantic layer serves this share of the true paraphrases: {{.ChosenPerSet}}; the exact layer alone serves {{.ExactPerSet}}.
+The false-hit rate is over negatives; what a client sees is the share of
+served hits that are wrong, which at this threshold is {{.ChosenWrong}}.
+That share depends on each set's mix of positives and negatives, and a
+lookup that searches several stored prompts gets several chances at a
+false hit, so the per-pair rate is a floor for a populated cache, not a
+bound. The exact layer's PAWS hits are the dataset's identical-text pairs,
+not repeat traffic; a few of those are labelled negative, which sets a
+floor under every cache's false-hit rate on that set.{{else}}No model met the rule.{{end}}
+Rule: {{.Chosen.Rule}}
+{{- if .Latency}}
+
+**Embedding latency.** What a semantic lookup adds before it reaches
+Redis: one prompt per call, as the gateway sends it, timed in the client
+after untimed warm-up calls, nearest-rank percentiles.
+
+| Model | Dimensions | Calls (after warm-up) | p50 (ms) | p99 (ms) | Mean (ms) |
+|-------|-----------:|----------------------:|---------:|---------:|----------:|
+{{- range .Latency}}
+| `{{.Model}}` | {{.Dims}} | {{.Calls}} (after {{.Warmups}}) | {{.P50}} | {{.P99}} | {{.Mean}} |
+{{- end}}
+{{- end}}
+
+- Hardware: {{.Hardware}} (Ollama on the same machine).
+- Commit: `{{.Commit}}`, run {{.Date}}.
+- Command: `{{.Command}}`.
+- Cost: $0 (local Ollama only).
+{{else}}
+Threshold sweep not measured yet. Run `make eval-cache`, then `make results`.
+{{end}}{{with .Index}}
+**FLAT against HNSW.** The same entries indexed both ways in Redis and
+queried for the nearest neighbour, over every entry (unfiltered) and
+restricted to one context's entries (filtered, the shape of a gateway
+lookup). Recall@1 is the fraction of queries whose top result is the exact
+nearest neighbour (among all entries, or among the context's entries),
+found by brute force in Go. HNSW is built once and queried at each
+EF_RUNTIME, its query-time search width; the build time and size repeat. Vectors: {{range $i, $v := .Vectors}}{{if $i}}; {{end}}{{$v}}{{end}};
+queries per configuration: {{range $i, $n := .Queries}}{{if $i}}, {{end}}{{$n}}{{end}}; Redis {{range $i, $v := .Redis}}{{if $i}}, {{end}}{{$v}}{{end}}.
+
+| Algorithm | Parameters | Entries | Dimensions | Contexts | Build (s) | Unfiltered p50 (ms) | Unfiltered p99 (ms) | Unfiltered recall@1 | Filtered p50 (ms) | Filtered p99 (ms) | Filtered recall@1 | Index size (MB) |
+|-----------|------------|--------:|-----------:|---------:|----------:|--------------------:|--------------------:|--------------------:|------------------:|------------------:|------------------:|----------------:|
+{{- range .Rows}}
+| {{.Algorithm}} | {{.Params}} | {{.Entries}} | {{.Dims}} | {{.Contexts}} | {{.Build}} | {{.UnfilteredP50}} | {{.UnfilteredP99}} | {{.Recall}} | {{.FilteredP50}} | {{.FilteredP99}} | {{.FilteredRecall}} | {{.SizeMB}} |
+{{- end}}
+
+- Hardware: {{range $i, $h := .Hardware}}{{if $i}}; {{end}}{{$h}}{{end}} (Redis on the same machine).
+- Commit: {{range $i, $c := .Commits}}{{if $i}}, {{end}}`{{$c}}`{{end}}, run {{range $i, $d := .Dates}}{{if $i}}, {{end}}{{$d}}{{end}}.
+{{else}}
+FLAT against HNSW not measured yet. Run `make eval-cache` (Redis 8), then `make results`.
+{{end}}
+**Limitations.**
+
+- PAWS is Wikipedia prose built adversarially by swapping words, so its
+  negatives share nearly every word with their positives; that is harder
+  than most prompt traffic and is meant to be.
+- Every GSM8K twin differs from its question in exactly one number, so
+  the number guard rejects every GSM8K negative by construction: on that
+  set the guard's false-hit side is the design, not a measurement. Its
+  cost is measured: the positives kept their numbers in any order, the
+  guard wants them in the same order and the same spelling, so a
+  paraphrase that moves a number, or turns "third" into "3" or "50.00"
+  into "50", loses its hit. The twins change one number by a small
+  step, so how close they embed is partly how the set was built; math
+  near-misses without a changed number ("more" against "less", "+"
+  against "-") are not in the set, and the guard would pass them.
+- The threshold is chosen and reported on the same pairs; there is no
+  held-out split. The upper bound still holds for the chosen threshold
+  (hits only fall as the threshold rises, so scanning down from 1 is a
+  fixed-sequence test), but the point estimates there are optimistic.
+  PAWS pairs reuse sentences, so the pairs are not fully independent.
+- The paraphrases come from one small local model and one generation
+  setting; real users reword more freely.
+- The index check uses random unit vectors, not embeddings of prompts, so
+  its recall says how well HNSW finds the nearest of uniformly spread
+  points; real embeddings cluster. Its filtered queries see about ten
+  entries per context; single-turn traffic with one model, system prompt
+  and parameters shares one context, which can be far larger, so the
+  filtered latencies hold for small contexts and the unfiltered ones are
+  the bound for a large one.
+- Every number comes from one machine, with Ollama and Redis sharing its
+  CPU.
+{{else}}
+Not measured yet. Run `make eval-cache`, then `make results`.
+{{end}}
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -167,7 +349,9 @@ Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `
 - Q2 with GCRA: `ALGORITHMS=gcra make test-limits` once the GCRA limiter
   is implemented (`internal/ratelimit/gcra.go`; its contract tests skip
   until then).
+{{- if not .Q3}}
 - Q3 semantic cache threshold sweep: `make eval-cache` (needs Ollama).
+{{- end}}
 - Q4 hedging: `make bench-hedge` (the live part needs `ANTHROPIC_API_KEY`).
 - Q5 router frontier: `make eval-router`.
 - Q6 replica and Redis kills under load: `make chaos`.

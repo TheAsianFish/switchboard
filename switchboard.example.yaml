@@ -35,6 +35,23 @@ ratelimit:
 budget:
   grace_usd: 0.10           # per replica and key while Redis is down
 
+# Response cache. A request is cached only when it asks for deterministic
+# output (temperature at most max_temperature) or sends the header
+# X-Switchboard-Cache: exact|semantic|off. The semantic layer serves a
+# stored reply to a reworded last turn, only within the same tenant, model,
+# system prompt, earlier turns and sampling parameters; its threshold is the
+# one `make eval-cache` measured (RESULTS.md, Q3). Entries live in Redis when
+# redis.url is set, so every replica sees them.
+cache:
+  mode: "off"              # default for keys: off, exact or semantic
+  ttl: 24h
+  max_temperature: 0
+  semantic:
+    embed_url: http://localhost:11434   # Ollama, without /v1
+    # model (nomic-embed-text; ollama pull it), threshold (0.9989), index
+    # (flat) and match_numbers (true) default to what the eval chose; a
+    # lower threshold serves more rewordings and more wrong answers.
+
 models:
   # Prices are dollars per million tokens. Claude models fall back to the
   # built-in list prices; a model with no price is not counted in spend and
@@ -60,3 +77,5 @@ keys:
     #   requests: {rate: 60, per: 1m, burst: 10}
     #   tokens: {rate: 200000, per: 1m, burst: 50000}
     # budget: {usd: "5.00", period: monthly}   # total, daily or monthly
+    # tenant: team-a      # keys with one tenant share cached replies (default: the key's name)
+    # cache: semantic     # this key's cache mode, overriding cache.mode

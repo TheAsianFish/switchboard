@@ -10,14 +10,14 @@ latency tail, an exact and a semantic cache with a measured false-hit rate, a
 and model, OpenTelemetry traces, Prometheus metrics and a small admin page.
 Every feature ships with the benchmark or eval that says what it is worth.
 
-**Status: M2 of 7.** The streaming spine (M1) and shared state (M2) work:
-both front ends; the Anthropic, OpenAI-compatible and fake providers; per-key
-request and token rate limits and dollar budgets shared by every replica
-through Redis, with a degrade policy for when Redis is down; cost accounting
-from a price table; and Prometheus metrics. Compose runs three replicas
-behind nginx, and `make test-limits` measures how many requests get past a
-shared limit. The cache, hedging, the router and the admin page follow (see
-[PLAN.md](PLAN.md)).
+**Status: M3 of 7.** The streaming spine (M1), shared state (M2) and the
+response cache (M3) work: both front ends; the Anthropic, OpenAI-compatible
+and fake providers; per-key request and token rate limits and dollar
+budgets shared by every replica through Redis, with a degrade policy for
+when Redis is down; cost accounting from a price table; Prometheus metrics;
+and an exact plus semantic response cache in Redis, namespaced per tenant,
+whose threshold comes from `make eval-cache`. Hedging, the router and the
+admin page follow (see [PLAN.md](PLAN.md)).
 Every measured number lives in [RESULTS.md](RESULTS.md), which is rendered
 from the raw files under `eval/results/`.
 
@@ -74,6 +74,26 @@ models:
   - {name: qwen2.5:0.5b, provider: ollama, price: {input: 0, output: 0}}
 ```
 
+Caching is per key too. A request is cached when it asks for deterministic
+output (`temperature: 0`) or sends `X-Switchboard-Cache: exact|semantic`;
+`off` skips the cache for one request, and a header can lower a key's mode
+but never raise it. The response says what happened in
+`X-Switchboard-Cache-Status` (`hit-exact`, `hit-semantic`, `miss`, `skip`):
+
+```yaml
+cache:
+  mode: exact            # default for every key: off, exact or semantic
+  semantic: {embed_url: "http://localhost:11434"}   # Ollama, for semantic keys
+keys:
+  - {name: team-a-ci, key: sk-ci, tenant: team-a, cache: semantic}
+  - {name: team-a-web, key: sk-web, tenant: team-a}  # shares team-a's entries
+```
+
+A cached reply is replayed in the asking client's wire format, streamed or
+not, whichever format filled it. A hit costs nothing against the key's
+token limit or budget, but still counts as a request against its request
+limit.
+
 A refused request gets each API's own error: `429 rate_limit_error` with
 `Retry-After` for a rate limit, and for a spent budget OpenAI's `429
 insufficient_quota` or Anthropic's `402 billing_error`. Per-key requests,
@@ -96,7 +116,7 @@ flowchart LR
   subgraph gw["switchboard serve (×3)"]
     FO[api/openai<br/>/v1/chat/completions]
     FA[api/anthropic<br/>/v1/messages]
-    P[pipeline<br/>auth · route · limits · budget<br/>provider · settle · log]
+    P[pipeline<br/>auth · route · limits · budget<br/>cache · provider · settle · log]
     M[admin listener<br/>/metrics]
     FO --> P
     FA --> P
@@ -106,7 +126,8 @@ flowchart LR
   A --> LB
   LB --> FO
   LB --> FA
-  P <-->|Lua: fixed window or GCRA,<br/>reserve / settle| R[(Redis 8)]
+  P <-->|Lua: fixed window or GCRA,<br/>reserve / settle,<br/>exact keys, vector index| R[(Redis 8)]
+  P -->|/api/embed<br/>last user turn| E[Ollama embeddings]
   P --> PA[provider/anthropic<br/>anthropic-sdk-go]
   P --> PO[provider/openaicompat<br/>Ollama · vLLM · llama.cpp]
   P --> PF[provider/fake]
@@ -161,6 +182,36 @@ harness measures every window length from 1 s to 60 s. RESULTS.md has the
 table, including what a Redis restart without persistence does to a
 fixed-window counter.
 
+**The hard part in M3: a semantic cache that never serves an answer to
+the wrong person, with a threshold that was measured, not guessed.**
+Isolation is structural. The exact key hashes the whole request (tenant,
+model, the provider and upstream model it routes to, system prompt,
+earlier turns, sampling parameters and the `max_tokens` actually sent
+upstream). The semantic layer embeds only the
+last user turn and searches only entries with the same tenant and the same
+context hash, a filter inside the Redis query itself. A lookup therefore
+cannot see another tenant's or another conversation's entries. Tests with a
+threshold low enough to accept any vector check this against the
+in-memory index and against Redis with both index types. The threshold
+comes from Q3: two labelled pair sets, PAWS-Wiki's adversarial rewordings
+and GSM8K questions with one number changed, are embedded through the
+gateway's own client and the threshold is swept. Embeddings alone barely
+tell the cases apart. On PAWS-Wiki the 1% false-hit target is met only so
+close to a cosine of 1 that few true paraphrases still hit. On GSM8K a
+question with one number changed scores *higher* than a real
+paraphrase, so no threshold below 1 separates them. A number guard (the
+same numbers in the same order) removes those false hits without any
+threshold. The shipped threshold is the one a rule fixed before the full
+run picked from the sweep, and a test fails if the config and the eval
+disagree. The conclusion in RESULTS.md: at a 1% false-hit rate per
+negative pair, about one in eight semantic hits served on PAWS-Wiki is
+still wrong, and only about 6% of true paraphrases hit, so caching is off
+unless a key turns it on, and the next step is a reranking stage rather
+than a lower threshold. Every lookup is filtered to one context; on the
+small contexts measured FLAT and HNSW are equally fast, FLAT is exact and
+builds in a second, and its unfiltered worst case at 100,000 entries
+(about 5–9 ms) is still below the embedding call, so the index is FLAT.
+
 How the M1 streaming path is checked:
 
 - recorded real streams from Ollama in both formats replay through the
@@ -183,6 +234,11 @@ How the M1 streaming path is checked:
 | Every limit and budget decision is one Lua script that reads Redis's clock | Atomic across replicas in one round trip; skewed replica clocks do not matter. | Read-modify-write from Go: races between replicas. Replica clocks: skew moves windows. |
 | Reserve the worst case, settle the real cost | Concurrent requests on any replica cannot together overspend; unsettled holds expire after a crash. | Charge after the reply: N replicas overspend by N requests' worth at the edge. |
 | Degrade to per-replica limits at rate ÷ replicas when Redis is down | The fleet stays near its limit during an outage instead of failing every request or admitting all of them. | Fail closed: a Redis blip becomes an outage. Fail open: unlimited spend. |
+| Exact key over the whole request, semantic match on the last user turn only within the same context hash | A cached reply can never cross a tenant, a system prompt, earlier turns or sampling parameters, and similarity is only asked of short texts, where embeddings work. | Embedding the whole conversation: multi-turn similarity is unreliable and a false hit serves another conversation's answer. |
+| Semantic threshold chosen by a rule fixed before the full run (Wilson upper bound of false hits ≤ 1% on every pair set) | A semantic cache with an unmeasured false-hit rate is a correctness bug; the rule makes the shipped number the eval's, and a test keeps them equal. | A vendor default (0.9–0.97) measured on someone else's traffic. |
+| Number guard: a semantic hit needs the same numbers in the same order | Changing one number in a math question moves its embedding less than rewording it does. | Trusting the threshold alone: no threshold separates them (RESULTS.md, Q3). |
+| Cache lookup after admission; a hit refunds tokens and budget | A hit cannot be used to dodge the request limit, and costs nothing it did not use. | Lookup first: hits bypass rate limits. Charging hits: bills for replies nobody generated. |
+| Cache key uses the `max_tokens` sent upstream, not the client's | A reply the gateway capped for a budgeted key must not answer an uncapped request. | The client's request alone: a truncated reply leaks across keys of one tenant. |
 | Integer nanodollars, prices to a tenth of a cent per MTok | Ledgers sum exactly over millions of requests, so spend can be checked to the cent. | Float dollars: rounding drift in the totals. |
 | Metrics on a separate loopback listener | Per-key names and spend never reach the public port. | `/metrics` on the API port. |
 | Open-loop load generator | Requests leave on schedule whether or not earlier ones finished, so a slow target cannot hide its queueing (coordinated omission). | Closed-loop workers: under-report the tail. |
@@ -193,13 +249,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). `make check` is the per-PR gate
 (gofmt, go vet, golangci-lint, `go test -race`), offline and well under two
 minutes. `make bench` reruns the overhead benchmark, `make sdk-smoke` the SDK
 check against Ollama, `make test-limits` the three-replica limit and budget
-test in compose (about 12 minutes), `make test-integration` the Lua scripts
-against a real Redis 8, and `make results` re-renders RESULTS.md.
+test in compose (about 12 minutes), `make eval-cache` the semantic cache
+sweep and the FLAT against HNSW check, `make test-integration` the Lua
+scripts and the vector index against a real Redis 8, and `make results`
+re-renders RESULTS.md.
 
 ## Roadmap
 
-GCRA limiter and its Q2 numbers · M3 exact and semantic cache ·
-M4 retries, hedging, tool calls and tracing · M5 the evaluated router ·
+GCRA limiter and its Q2 numbers · a reranking step for semantic hits
+(Q3 shows embeddings alone cannot keep false hits under 1% at a useful hit
+rate on adversarial pairs) · M4 retries, hedging, tool calls and tracing · M5 the evaluated router ·
 M6 admin page, chaos run and the per-feature overhead breakdown · M7 release.
 
 ## Licence

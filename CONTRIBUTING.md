@@ -36,7 +36,8 @@ make check
 | `make record-fixtures` | re-capture the provider fixtures from Ollama (`scripts/record-fixtures.sh anthropic` for Claude) | local |
 | `make bench` | overhead benchmark (Q1) through the fake provider | local, manual workflow |
 | `make test-limits` | multi-replica over-admission and shared-budget test in compose (Q2, about 12 minutes) | local, manual workflow |
-| `make eval-cache` | semantic cache threshold sweep (Q3); needs Ollama | local, manual workflow |
+| `make eval-cache` | semantic cache threshold sweep and FLAT vs HNSW check (Q3); needs Ollama with `all-minilm` and `nomic-embed-text`, and Docker | local, manual workflow |
+| `make eval-cache-data` | rebuild the Q3 pair sets in `eval/cache/data/` (about 2.5 h; needs Ollama with `qwen2.5:3b`) | local |
 | `make bench-hedge` | hedging benchmark (Q4); live part needs a key | local, manual workflow |
 | `make eval-router` | router frontier (Q5); replays recordings, labels live with a key | local, manual workflow |
 | `make chaos` | the phased kill run (Q6) | local, manual workflow |
