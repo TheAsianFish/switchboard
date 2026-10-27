@@ -7,6 +7,7 @@
 //	switchboard eval limits       Q2: over-admission from the fake provider's ledger
 //	switchboard eval budget       Q2: shared budget spend against the ledger
 //	switchboard eval cache-data   Q3: build the cache pair sets (needs Ollama)
+//	switchboard eval cache        Q3: semantic cache threshold sweep (needs Ollama)
 //	switchboard version           print the build version
 package main
 
@@ -48,6 +49,7 @@ commands:
   eval limits       Q2: over-admission from the fake provider's ledger
   eval budget       Q2: shared budget spend against the ledger
   eval cache-data   Q3: build the cache pair sets (needs Ollama)
+  eval cache        Q3: semantic cache threshold sweep (needs Ollama)
   version           print the build version
 `
 
@@ -77,10 +79,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && (args[1] == "limits" || args[1] == "budget") {
 			return limitseval.Main(ctx, args[1:], stdout, stderr)
 		}
-		if len(args) > 1 && args[1] == "cache-data" {
+		if len(args) > 1 && (args[1] == "cache-data" || args[1] == "cache") {
 			return cacheeval.Main(ctx, args[1:], stdout, stderr)
 		}
-		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data [flags]")
+		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache [flags]")
 		return 2
 	case "version":
 		_, _ = fmt.Fprintln(stdout, version())
