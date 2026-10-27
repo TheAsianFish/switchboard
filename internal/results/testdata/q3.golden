@@ -46,7 +46,7 @@ right; a negative is one where it is wrong.
   question gives a negative: the question against its twin, the same text
   with one such number changed, so the answer changes. A positive is the
   question against a paraphrase written by the local model `qwen2.5:3b`,
-  kept only if it contains exactly the same numbers and the same model,
+  kept only if it contains the same numbers, in any order, and the same model,
   asked to solve the paraphrase, gets the gold answer (450 paraphrases kept their
   numbers, 400 of those were solved correctly: 400 positives against
   500 negatives).
@@ -150,11 +150,13 @@ queries per configuration: 1000; Redis 8.2.1.
 - PAWS is Wikipedia prose built adversarially by swapping words, so its
   negatives share nearly every word with their positives; that is harder
   than most prompt traffic and is meant to be.
-- The GSM8K positives were kept only if their numbers match the original,
-  so the number guard cannot cost them a hit by construction, and every
-  twin differs in exactly one number, so the guard rejects every GSM8K
-  negative by construction too. On that set the guard's effect is the
-  design, not a measurement; PAWS is where it is tested.
+- Every GSM8K twin differs from its question in exactly one number, so
+  the number guard rejects every GSM8K negative by construction: on that
+  set the guard's false-hit side is the design, not a measurement. Its
+  cost is measured: the positives kept their numbers in any order, the
+  guard wants them in the same order, so a paraphrase that moves a
+  number loses its hit (the guarded hit rate at the lowest threshold is
+  the share that kept the order).
 - The paraphrases come from one small local model and one generation
   setting; real users reword more freely.
 - The index check uses random unit vectors, not embeddings of prompts, so
