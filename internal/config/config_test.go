@@ -229,6 +229,7 @@ func TestValidateShared(t *testing.T) {
 		{"replicas", "replicas: 3", "replicas: 0", "replicas must be at least 1"},
 		{"redis timeout", "timeout: 50ms", "timeout: -1s", "redis.timeout must be positive"},
 		{"grace", "grace_usd: 0.25", "grace_usd: -1", "budget.grace_usd"},
+		{"hold outlives the call", "grace_usd: 0.25", "grace_usd: 0.25, reservation_ttl: 5m", `must be longer than provider "fake"'s timeout (10m0s)`},
 		{"limit", "rate: 100, per: 1m", "rate: 0, per: 1m", "limits.requests needs a positive"},
 		{"too fine", "rate: 100000, per: 1m", "rate: 100000000, per: 1m", "faster than one unit per microsecond"},
 		{"budget usd", "usd: 5.00", "usd: 5.0000000001", "budget.usd"},

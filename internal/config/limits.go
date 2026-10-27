@@ -169,6 +169,13 @@ func (c *Config) validateShared(models map[string]Model) []error {
 	if _, err := cost.ParseUSD(string(c.Budget.GraceUSD)); err != nil {
 		errs = append(errs, fmt.Errorf("budget.grace_usd: %w", err))
 	}
+	for _, p := range c.Providers {
+		// A hold that expires while its call is still running frees
+		// budget the call is about to spend.
+		if c.Budget.ReservationTTL <= p.Timeout {
+			errs = append(errs, fmt.Errorf("budget.reservation_ttl (%v) must be longer than provider %q's timeout (%v)", c.Budget.ReservationTTL, p.Name, p.Timeout))
+		}
+	}
 	for _, m := range c.Models {
 		if _, _, err := m.ResolvedPrice(); err != nil {
 			errs = append(errs, fmt.Errorf("model %q: %w", m.Name, err))
