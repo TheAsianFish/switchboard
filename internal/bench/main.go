@@ -38,6 +38,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.IntVar(&cfg.MaxInFlight, "max-in-flight", 1024, "cap on outstanding requests; requests beyond it are dropped")
 	fs.IntVar(&cfg.MaxTokens, "max-tokens", 0, "max_tokens per request (0: omit for openai, 64 for anthropic)")
 	fs.StringVar(&cfg.Label, "label", "", "name recorded in the result")
+	fs.BoolVar(&cfg.KeepSamples, "samples", false, "record every measured request's latency and TTFT in the result")
 	fs.StringVar(&out, "out", "", "write the result JSON to this file instead of stdout")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
