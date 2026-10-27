@@ -343,3 +343,48 @@ func TestRedisDownDegradesToLocalLimits(t *testing.T) {
 		t.Errorf("degraded replicas = %v, want 3", n)
 	}
 }
+
+// cancellingLedger is a client disconnecting while its reservation is
+// in flight: Reserve cancels the request's context and fails with it.
+type cancellingLedger struct {
+	budget.Ledger
+	cancel context.CancelFunc
+}
+
+func (c cancellingLedger) Reserve(ctx context.Context, _ string, _ budget.Budget, _ string, _ cost.Nanos) (budget.Reservation, error) {
+	c.cancel()
+	return budget.Reservation{}, ctx.Err()
+}
+
+// A client that disconnects during admission must not leave its rate
+// limit charges behind, even though the refund runs after its context is
+// gone.
+func TestRefundsSurviveClientCancel(t *testing.T) {
+	t.Parallel()
+	m := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: m.Addr()})
+	defer func() { _ = rdb.Close() }()
+	lim := ratelimit.NewDegrading(ratelimit.NewFixedWindow(rdb, "sb:"), ratelimit.NewMemoryFixedWindow(time.Now), 1)
+	lim.Timeout = time.Second
+	reqs := ratelimit.Limit{Rate: 10, Period: time.Hour, Burst: 10}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := New(auth.NewKeys([]config.Key{{
+		Name: "k", Key: "sk",
+		Limits: config.Limits{Requests: &config.Rate{Rate: 10, Per: time.Hour, Burst: 10}},
+		Budget: &config.KeyBudget{USD: "1", Period: "total"},
+	}}), []Route{
+		{Model: "m", ProviderName: "x", Upstream: "m", Provider: fake.New(fake.Config{Tokens: 5}), Price: price, Priced: true, OutputEstimate: 64},
+	}, Policy{Limiter: lim, Ledger: cancellingLedger{cancel: cancel}})
+	ctx, _ = p.Authenticate(ctx, "sk")
+	if _, err := p.Complete(ctx, &core.Request{Model: "m", Messages: []core.Message{{Role: core.RoleUser, Text: "hi"}}}); err == nil {
+		t.Fatal("want an error")
+	}
+	d, err := lim.Allow(context.Background(), "req:k", reqs, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Remaining != 9 {
+		t.Errorf("request limit remaining = %d, want 9: the refund was lost", d.Remaining)
+	}
+}

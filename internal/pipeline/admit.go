@@ -74,7 +74,7 @@ func (p *Pipeline) admit(ctx context.Context, pr *auth.Principal, rt Route, req 
 		if !d.Allowed {
 			p.refundRequest(ctx, a)
 			if d.RetryAfter == ratelimit.Never {
-				return nil, core.Errorf(core.KindInvalidRequest, "this request needs about %d tokens (input estimate plus max_tokens), more than this key's token burst of %d; lower max_tokens", need, pr.Tokens.Burst)
+				return nil, core.Errorf(core.KindInvalidRequest, "this request needs about %d tokens (input estimate plus max_tokens), more than this key's token limit admits at once (rate %d, burst %d per %v); lower max_tokens", need, pr.Tokens.Rate, pr.Tokens.Burst, pr.Tokens.Period)
 			}
 			p.policy.Metrics.Refused(pr.Name, "tokens")
 			return nil, rateLimited(d, fmt.Sprintf("token rate limit exceeded: this key may use %d tokens per %v (burst %d)", pr.Tokens.Rate, pr.Tokens.Period, pr.Tokens.Burst))
@@ -112,10 +112,19 @@ func (p *Pipeline) storeError(ctx context.Context, component, op string, err err
 	return core.Wrap(core.KindInternal, err, component+" unavailable")
 }
 
+// refundCtx outlives the request: a refund that is skipped because the
+// client went away would leave the charge standing for the rest of the
+// window.
+func (p *Pipeline) refundCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), p.settleTimeout())
+}
+
 func (p *Pipeline) refundRequest(ctx context.Context, a *admission) {
 	if p.policy.Limiter == nil || a.pr.Requests == nil {
 		return
 	}
+	ctx, cancel := p.refundCtx(ctx)
+	defer cancel()
 	if err := p.policy.Limiter.Adjust(ctx, requestsKey(a.pr), *a.pr.Requests, -1); err != nil {
 		telemetry.Logger(ctx).Warn("rate limit refund failed", slog.String("error", err.Error()))
 	}
@@ -125,6 +134,8 @@ func (p *Pipeline) refundTokens(ctx context.Context, a *admission) {
 	if a.tokens == 0 {
 		return
 	}
+	ctx, cancel := p.refundCtx(ctx)
+	defer cancel()
 	if err := p.policy.Limiter.Adjust(ctx, tokensKey(a.pr), *a.pr.Tokens, -a.tokens); err != nil {
 		telemetry.Logger(ctx).Warn("token limit refund failed", slog.String("error", err.Error()))
 	}
