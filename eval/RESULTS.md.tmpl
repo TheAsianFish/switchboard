@@ -28,9 +28,13 @@ worst p99 delay between a request's scheduled and actual send time across
 all runs) was {{.MaxSendDelayP99}} ms.
 
 Added = gateway minus direct. The two sides are independent runs, not paired
-requests, so the difference carries the run-to-run noise of both; a few
-tenths of a millisecond at p99 are within that noise and should not be read
-as a cost of the gateway.
+requests, and each cell is a single run per side, so the difference carries
+the run-to-run noise of both and that noise is not measured here; a negative
+entry can only be noise, so differences of that size should not be read as a
+cost of the gateway. The generator, the gateway and the fake provider share
+one machine, and latency includes the generator's own lag, so part of an
+added figure can be the gateway's CPU use slowing the generator rather than
+time spent in the gateway (compare the send delays in the raw files).
 
 | Mode | Rate (req/s) | Metric | Direct p50 (ms) | Direct p99 (ms) | Gateway p50 (ms) | Gateway p99 (ms) | Added p50 (ms) | Added p99 (ms) | Requests (direct / gateway) | Errors (direct / gateway) |
 |------|-------------:|--------|----------------:|----------------:|-----------------:|-----------------:|---------------:|---------------:|----------------------------:|--------------------------:|
