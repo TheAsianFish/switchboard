@@ -8,6 +8,7 @@
 //	switchboard eval budget       Q2: shared budget spend against the ledger
 //	switchboard eval cache-data   Q3: build the cache pair sets (needs Ollama)
 //	switchboard eval cache        Q3: semantic cache threshold sweep (needs Ollama)
+//	switchboard eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
 //	switchboard version           print the build version
 package main
 
@@ -50,6 +51,7 @@ commands:
   eval budget       Q2: shared budget spend against the ledger
   eval cache-data   Q3: build the cache pair sets (needs Ollama)
   eval cache        Q3: semantic cache threshold sweep (needs Ollama)
+  eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
   version           print the build version
 `
 
@@ -79,10 +81,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && (args[1] == "limits" || args[1] == "budget") {
 			return limitseval.Main(ctx, args[1:], stdout, stderr)
 		}
-		if len(args) > 1 && (args[1] == "cache-data" || args[1] == "cache") {
+		if len(args) > 1 && (args[1] == "cache-data" || args[1] == "cache" || args[1] == "cache-index") {
 			return cacheeval.Main(ctx, args[1:], stdout, stderr)
 		}
-		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache [flags]")
+		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache|cache-index [flags]")
 		return 2
 	case "version":
 		_, _ = fmt.Fprintln(stdout, version())

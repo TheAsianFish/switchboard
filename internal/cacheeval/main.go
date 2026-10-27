@@ -8,7 +8,8 @@ import (
 	"io"
 )
 
-// Main runs `switchboard eval cache-data|cache`; args[0] is the subcommand.
+// Main runs `switchboard eval cache-data|cache|cache-index`; args[0] is the
+// subcommand.
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch args[0] {
@@ -16,6 +17,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = dataMain(ctx, args[1:], stdout, stderr)
 	case "cache":
 		err = cacheMain(ctx, args[1:], stdout, stderr)
+	case "cache-index":
+		err = indexMain(ctx, args[1:], stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown eval %q\n", args[0])
 		return 2
