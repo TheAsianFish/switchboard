@@ -58,7 +58,8 @@ type Options struct {
 	Timeout time.Duration
 	// RetryInterval is how long the cache stays bypassed after a store
 	// error, so an unreachable Redis costs one timeout per interval and
-	// not one per request. Zero means one second.
+	// not one per request; the semantic layer alone is bypassed as long
+	// after an embedder or vector index error. Zero means one second.
 	RetryInterval time.Duration
 	// Metrics records lookups and fills; nil records nothing.
 	Metrics *telemetry.Metrics
@@ -74,9 +75,11 @@ type Cache struct {
 	dims    int
 
 	// downUntil is the unix-nano time until which the store is bypassed,
-	// embedDownUntil the same for the embedder.
+	// embedDownUntil and indexDownUntil the same for the embedder and the
+	// vector index, whose failures bypass the semantic layer only.
 	downUntil      atomic.Int64
 	embedDownUntil atomic.Int64
+	indexDownUntil atomic.Int64
 
 	// fillMu orders Fill's Add against Close's Wait: a WaitGroup must not
 	// gain work while someone waits on it.
@@ -181,7 +184,7 @@ func (c *Cache) Lookup(ctx context.Context, tenant string, mode Mode, req *core.
 		}
 		// A corrupt entry is a miss; the fill overwrites it.
 	}
-	if mode < ModeSemantic || !c.Semantic() || c.bypassed(&c.embedDownUntil) {
+	if mode < ModeSemantic || !c.Semantic() || c.bypassed(&c.embedDownUntil) || c.bypassed(&c.indexDownUntil) {
 		return c.record(l)
 	}
 	c.semantic(ctx, l)
@@ -190,7 +193,7 @@ func (c *Cache) Lookup(ctx context.Context, tenant string, mode Mode, req *core.
 
 // semantic embeds the prompt and looks for a stored reply to a reworded
 // version of it in the same context. Failures leave l a miss: the exact
-// layer still works without the embedder.
+// layer still works without the embedder or the vector index.
 func (c *Cache) semantic(ctx context.Context, l *Lookup) {
 	start := c.opts.Now()
 	defer func() { c.opts.Metrics.CacheLatency("semantic", c.opts.Now().Sub(start)) }()
@@ -226,8 +229,8 @@ func (c *Cache) semantic(ctx context.Context, l *Lookup) {
 	matches, err := idx.Search(sctx, Query{Namespace: l.keys.Namespace, Context: l.keys.Context, Vector: l.vec, K: c.opts.Candidates})
 	cancel()
 	if err != nil {
-		c.storeFailed(ctx, "search", err)
-		l.Status, l.Reason, l.vec = StatusError, "store unavailable", nil
+		c.indexFailed(ctx, "search", err)
+		l.vec = nil
 		return
 	}
 	for _, m := range matches {
@@ -308,8 +311,10 @@ func (c *Cache) Fill(ctx context.Context, l *Lookup, resp *core.Response) {
 				err = idx.Add(fctx, Item{ID: l.keys.Exact, Namespace: l.keys.Namespace, Context: l.keys.Context, Vector: l.vec, Payload: raw, TTL: c.opts.TTL})
 			}
 			if err != nil {
+				// The exact entry is stored; only the semantic one is
+				// missing.
 				c.opts.Metrics.CacheFill("error")
-				c.storeFailed(ctx, "add", err)
+				c.indexFailed(ctx, "add", err)
 				return
 			}
 		}
@@ -354,6 +359,23 @@ func (c *Cache) storeFailed(ctx context.Context, op string, err error) {
 	}
 	c.downUntil.Store(c.opts.Now().Add(c.opts.RetryInterval).UnixNano())
 	telemetry.Logger(ctx).Warn("cache store failed; bypassing the cache", slog.String("op", op),
+		slog.String("error", err.Error()), slog.Duration("for", c.opts.RetryInterval))
+}
+
+// indexFailed bypasses the semantic layer for RetryInterval after a vector
+// index error. The exact layer stays on: a store that answers Get and Set
+// but not the vector commands (a Redis without the Query Engine) still
+// serves exact hits.
+func (c *Cache) indexFailed(ctx context.Context, op string, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	c.opts.Metrics.CacheError(op)
+	if errors.Is(err, ErrDimensions) {
+		return
+	}
+	c.indexDownUntil.Store(c.opts.Now().Add(c.opts.RetryInterval).UnixNano())
+	telemetry.Logger(ctx).Warn("cache: vector index failed; semantic layer bypassed", slog.String("op", op),
 		slog.String("error", err.Error()), slog.Duration("for", c.opts.RetryInterval))
 }
 

@@ -430,3 +430,99 @@ func TestCloseStopsFills(t *testing.T) {
 		t.Errorf("filled after Close: %s", s)
 	}
 }
+
+// failingIndex fails every Search or every Add, as a Redis without the
+// Query Engine does, and counts the calls.
+type failingIndex struct {
+	cache.Index
+	failSearch, failAdd bool
+	mu                  sync.Mutex
+	searches, adds      int
+}
+
+func (f *failingIndex) Search(ctx context.Context, q cache.Query) ([]cache.Match, error) {
+	f.mu.Lock()
+	f.searches++
+	f.mu.Unlock()
+	if f.failSearch {
+		return nil, errors.New("ERR unknown command 'FT.SEARCH'")
+	}
+	return f.Index.Search(ctx, q)
+}
+
+func (f *failingIndex) Add(ctx context.Context, it cache.Item) error {
+	f.mu.Lock()
+	f.adds++
+	f.mu.Unlock()
+	if f.failAdd {
+		return errors.New("ERR unknown command 'HSET'")
+	}
+	return f.Index.Add(ctx, it)
+}
+
+// A failing vector index bypasses the semantic layer only: the exact
+// layer, whose store answers, keeps serving every tenant.
+func TestIndexFailureKeepsExactLayer(t *testing.T) {
+	t.Parallel()
+	base := req("m", "", "What is the capital of France?")
+	reworded := req("m", "", "France: what is the capital of?")
+	newFailing := func(idx *failingIndex) (*cache.Cache, *clock) {
+		clk := &clock{t: time.Unix(1_700_000_000, 0)}
+		return cache.New(cache.Options{
+			KV: cache.NewMemoryKV(10, clk.now),
+			NewIndex: func(d int) (cache.Index, error) {
+				idx.Index = cache.NewMemoryIndex(d, 10, clk.now)
+				return idx, nil
+			},
+			Embedder:      &embed.Fake{Dims: 8},
+			Threshold:     0.9,
+			TTL:           time.Hour,
+			RetryInterval: time.Second,
+			Now:           clk.now,
+		}), clk
+	}
+
+	t.Run("search", func(t *testing.T) {
+		t.Parallel()
+		idx := &failingIndex{failSearch: true}
+		c, clk := newFailing(idx)
+		fill(t, c, "a", cache.ModeExact, base)
+		l := c.Lookup(context.Background(), "a", cache.ModeSemantic, reworded)
+		if l.Status != cache.StatusMiss || !l.Fillable() {
+			t.Fatalf("lookup with a failing search: %+v, want a fillable miss", l)
+		}
+		if l := c.Lookup(context.Background(), "a", cache.ModeSemantic, base); l.Status != cache.StatusExact {
+			t.Fatalf("exact lookup after a search failure: %+v, want hit-exact", l)
+		}
+		// The reply to the missed request is still stored exactly.
+		c.Fill(context.Background(), l, answer)
+		c.Wait()
+		if l := c.Lookup(context.Background(), "a", cache.ModeSemantic, reworded); l.Status != cache.StatusExact {
+			t.Fatalf("refill after a search failure: %+v, want hit-exact", l)
+		}
+		if idx.searches != 1 {
+			t.Errorf("searches during the back-off = %d, want 1", idx.searches)
+		}
+		clk.add(time.Second)
+		_ = c.Lookup(context.Background(), "b", cache.ModeSemantic, reworded)
+		if idx.searches != 2 {
+			t.Errorf("searches after the back-off = %d, want 2", idx.searches)
+		}
+	})
+
+	t.Run("add", func(t *testing.T) {
+		t.Parallel()
+		idx := &failingIndex{failAdd: true}
+		c, _ := newFailing(idx)
+		fill(t, c, "a", cache.ModeSemantic, base)
+		if idx.adds != 1 {
+			t.Fatalf("adds = %d, want 1", idx.adds)
+		}
+		if l := c.Lookup(context.Background(), "a", cache.ModeSemantic, base); l.Status != cache.StatusExact {
+			t.Fatalf("exact lookup after an add failure: %+v, want hit-exact", l)
+		}
+		if l := c.Lookup(context.Background(), "b", cache.ModeExact, base); l.Status != cache.StatusMiss {
+			t.Fatalf("other tenant after an add failure: %+v, want miss", l)
+		}
+	})
+}
