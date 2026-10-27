@@ -464,7 +464,8 @@ func TestStopReason(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]core.StopReason{
 		"end_turn": core.StopEndTurn, "max_tokens": core.StopMaxTokens, "stop_sequence": core.StopSequence,
-		"refusal": core.StopContentFilter, "tool_use": core.StopEndTurn, "pause_turn": core.StopEndTurn, "": core.StopEndTurn,
+		"model_context_window_exceeded": core.StopMaxTokens,
+		"refusal":                       core.StopContentFilter, "tool_use": core.StopEndTurn, "pause_turn": core.StopEndTurn, "": core.StopEndTurn,
 	} {
 		if got := stopReason(sdk.StopReason(in)); got != want {
 			t.Errorf("stopReason(%q) = %q, want %q", in, got, want)

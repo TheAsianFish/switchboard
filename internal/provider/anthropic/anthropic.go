@@ -186,7 +186,8 @@ func (p *Provider) params(req *core.Request) sdk.MessageNewParams {
 // stopReason maps Anthropic's stop reason to the canonical one.
 func stopReason(s sdk.StopReason) core.StopReason {
 	switch s {
-	case sdk.StopReasonMaxTokens:
+	case sdk.StopReasonMaxTokens, sdk.StopReasonModelContextWindowExceeded:
+		// Both cut the reply off; clients must not read it as finished.
 		return core.StopMaxTokens
 	case sdk.StopReasonStopSequence:
 		return core.StopSequence
