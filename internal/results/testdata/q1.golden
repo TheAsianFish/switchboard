@@ -48,6 +48,16 @@ time spent in the gateway (compare the send delays in the raw files).
 - Command: `RATES='200 50' DURATION=60s WARMUP=5s eval/bench/q1.sh`.
 - Cost: $0 (no paid API; the fake provider only).
 
+## Q2: shared limits and budgets across three replicas
+
+When three replicas share one rate limit through Redis, how many requests
+slip past it under load, and how many when Redis is down? Does a budget the
+same three replicas share hold, and does the gateway's spend match what the
+provider says it served? Command: `make test-limits` (`eval/limits/run.sh`),
+raw files in `eval/results/q2-limits/`.
+
+Not measured yet. Run `make test-limits` (Docker), then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -68,8 +78,9 @@ Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `
 - Q1 per-feature breakdown (limits, budget, exact and semantic cache miss
   paths, router, tracing toggled one at a time; CPU and RSS per replica at
   500 req/s): M6, `make bench`.
-- Q2 shared limits across three replicas, Redis up and down:
-  `make test-limits`.
+- Q2 with GCRA: `ALGORITHMS=gcra make test-limits` once the GCRA limiter
+  is implemented (`internal/ratelimit/gcra.go`; its contract tests skip
+  until then).
 - Q3 semantic cache threshold sweep: `make eval-cache` (needs Ollama).
 - Q4 hedging: `make bench-hedge` (the live part needs `ANTHROPIC_API_KEY`).
 - Q5 router frontier: `make eval-router`.
