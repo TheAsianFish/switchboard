@@ -185,8 +185,9 @@ fixed-window counter.
 **The hard part in M3: a semantic cache that never serves an answer to
 the wrong person, with a threshold that was measured, not guessed.**
 Isolation is structural. The exact key hashes the whole request (tenant,
-model, system prompt, earlier turns, sampling parameters and the
-`max_tokens` actually sent upstream). The semantic layer embeds only the
+model, the provider and upstream model it routes to, system prompt,
+earlier turns, sampling parameters and the `max_tokens` actually sent
+upstream). The semantic layer embeds only the
 last user turn and searches only entries with the same tenant and the same
 context hash, a filter inside the Redis query itself. A lookup therefore
 cannot see another tenant's or another conversation's entries. Tests with a
