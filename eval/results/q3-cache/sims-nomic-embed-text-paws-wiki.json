@@ -1,7 +1,7 @@
 {
-  "commit": "a17cb59",
-  "date": "2026-10-27T15:44:00Z",
-  "command": "switchboard eval cache ",
+  "commit": "b4befc6",
+  "date": "2026-10-27T16:01:12Z",
+  "command": "switchboard eval cache",
   "hardware": {
     "num_cpu": 4,
     "gomaxprocs": 4,
@@ -14,7 +14,7 @@
   "model": "nomic-embed-text",
   "set": "paws-wiki",
   "dims": 768,
-  "embed_seconds": 179.624,
+  "embed_seconds": 173.736,
   "texts": 6431,
   "pairs": [
     {"id":"paws-1","same":false,"cos":0.943715,"exact":false,"norm":false,"numbers_equal":true},

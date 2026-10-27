@@ -1,7 +1,7 @@
 {
-  "commit": "a17cb59",
-  "date": "2026-10-27T15:44:00Z",
-  "command": "switchboard eval cache ",
+  "commit": "b4befc6",
+  "date": "2026-10-27T16:01:12Z",
+  "command": "switchboard eval cache",
   "hardware": {
     "num_cpu": 4,
     "gomaxprocs": 4,
@@ -14,7 +14,7 @@
   "model": "nomic-embed-text",
   "set": "gsm8k-perturb",
   "dims": 768,
-  "embed_seconds": 63.319,
+  "embed_seconds": 62.091,
   "texts": 1329,
   "pairs": [
     {"id":"gsm-0-twin","same":false,"cos":0.998768,"exact":false,"norm":false,"numbers_equal":false},

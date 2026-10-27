@@ -1,7 +1,7 @@
 {
-  "commit": "a17cb59-dirty",
-  "date": "2026-10-27T15:49:07Z",
-  "command": "switchboard eval cache-index ",
+  "commit": "b4befc6",
+  "date": "2026-10-27T16:06:17Z",
+  "command": "switchboard eval cache-index",
   "hardware": {
     "num_cpu": 4,
     "gomaxprocs": 4,
@@ -20,16 +20,16 @@
   "runs": [
     {
       "algorithm": "FLAT",
-      "build_seconds": 0.977767065,
+      "build_seconds": 1.222859076,
       "unfiltered": {
-        "p50_ms": 4.37,
-        "p99_ms": 6.937,
-        "mean_ms": 4.533
+        "p50_ms": 4.869,
+        "p99_ms": 6.614,
+        "mean_ms": 4.914
       },
       "filtered": {
-        "p50_ms": 0.121,
-        "p99_ms": 0.152,
-        "mean_ms": 0.123
+        "p50_ms": 0.139,
+        "p99_ms": 0.189,
+        "mean_ms": 0.141
       },
       "recall_at_1": 1,
       "filtered_recall_at_1": 1,
@@ -42,20 +42,20 @@
         "EF_RUNTIME": 10,
         "M": 16
       },
-      "build_seconds": 23.312804046,
+      "build_seconds": 26.240965391,
       "unfiltered": {
-        "p50_ms": 0.17,
-        "p99_ms": 0.207,
-        "mean_ms": 0.171
+        "p50_ms": 0.185,
+        "p99_ms": 0.242,
+        "mean_ms": 0.188
       },
       "filtered": {
-        "p50_ms": 0.133,
-        "p99_ms": 0.165,
-        "mean_ms": 0.133
+        "p50_ms": 0.138,
+        "p99_ms": 0.161,
+        "mean_ms": 0.138
       },
-      "recall_at_1": 0.019,
+      "recall_at_1": 0.026,
       "filtered_recall_at_1": 1,
-      "index_size_mb": 177.80130004882812
+      "index_size_mb": 177.80653381347656
     },
     {
       "algorithm": "HNSW",
@@ -64,20 +64,20 @@
         "EF_RUNTIME": 100,
         "M": 16
       },
-      "build_seconds": 23.312804046,
+      "build_seconds": 26.240965391,
       "unfiltered": {
-        "p50_ms": 0.481,
-        "p99_ms": 0.587,
-        "mean_ms": 0.487
+        "p50_ms": 0.508,
+        "p99_ms": 0.65,
+        "mean_ms": 0.512
       },
       "filtered": {
-        "p50_ms": 0.128,
-        "p99_ms": 0.154,
-        "mean_ms": 0.129
+        "p50_ms": 0.136,
+        "p99_ms": 0.165,
+        "mean_ms": 0.135
       },
-      "recall_at_1": 0.145,
+      "recall_at_1": 0.137,
       "filtered_recall_at_1": 1,
-      "index_size_mb": 177.80130004882812
+      "index_size_mb": 177.80653381347656
     },
     {
       "algorithm": "HNSW",
@@ -86,20 +86,20 @@
         "EF_RUNTIME": 1000,
         "M": 16
       },
-      "build_seconds": 23.312804046,
+      "build_seconds": 26.240965391,
       "unfiltered": {
-        "p50_ms": 3.149,
-        "p99_ms": 5.316,
-        "mean_ms": 3.238
+        "p50_ms": 3.335,
+        "p99_ms": 4.158,
+        "mean_ms": 3.383
       },
       "filtered": {
-        "p50_ms": 0.132,
-        "p99_ms": 0.181,
-        "mean_ms": 0.135
+        "p50_ms": 0.137,
+        "p99_ms": 0.183,
+        "mean_ms": 0.14
       },
-      "recall_at_1": 0.655,
+      "recall_at_1": 0.649,
       "filtered_recall_at_1": 1,
-      "index_size_mb": 177.80130004882812
+      "index_size_mb": 177.80653381347656
     }
   ]
 }
