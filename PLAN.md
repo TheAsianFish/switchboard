@@ -164,6 +164,11 @@ Engine with HNSW and FLAT vector indexes built in, AGPLv3 option); Ollama with
 an environment, the module stays buildable on 1.24 by lowering the `go`
 directive; no 1.25+ language feature is required.
 
+Pinned at M1 (2026-10-26): Go 1.27.0 through `GOTOOLCHAIN=auto`;
+`anthropic-sdk-go` v1.84.0; `openai-go/v3` v3.88.0 (tests only);
+`golangci-lint` v2.15.0; Ollama 0.40.11 with `qwen2.5:0.5b`; Python SDKs for
+the smoke check `openai` 3.39.0 and `anthropic` 2.3.0.
+
 ## Evaluation
 
 Everything below has a `make` target, writes raw output under `eval/results/`
@@ -309,7 +314,20 @@ or the compose stack is a `make` target or a `workflow_dispatch` job.
 
 ## Milestones
 
-- [ ] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
+Changes made while building:
+
+- **M1.** Ollama 0.40 serves the Anthropic Messages API at `/v1/messages`
+  as well as `/v1/chat/completions`, so the Anthropic provider is exercised
+  live without a key (model `qwen2.5:0.5b-via-messages` in
+  `eval/sdk/switchboard.yaml`) and the Anthropic-format fixtures are real
+  captures from Ollama. Captures from api.anthropic.com come from the same
+  script (`scripts/record-fixtures.sh anthropic`) once a key exists.
+  `make dev` runs the gateway and Ollama only; Redis, Jaeger and Prometheus
+  join the compose file in M2 and M4. Besides the Python SDK check, the
+  unmodified Go SDKs (`openai-go`, `anthropic-sdk-go`) stream through the
+  whole gateway inside `go test`, so the drop-in claim is checked on every PR.
+
+- [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [ ] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
 - [ ] M3: Exact and semantic cache — canonical request hash cache; `embed` client for Ollama `/api/embed` with a fake; vector index interface with Redis HNSW/FLAT and in-memory FLAT implementations; cacheability rules (temperature, explicit header, context hash) and tenant namespacing; cached streams replayed in the client's wire format; `make eval-cache` with the PAWS-Wiki and GSM8K-perturbation pair sets, the threshold sweep and the FLAT vs HNSW latency check; RESULTS.md cache section answering Q3. Done when the cross-tenant and cross-context leak tests pass, the eval runs end to end on a laptop with Ollama, and the chosen threshold is the one the eval produced.
 - [ ] M4: Resilience and observability — retries with backoff on retryable statuses, hedged requests bounded by time-to-first-token and a per-tenant hedge budget, per-provider circuit breaker and health; tool-call and `stop_reason` translation in both wire formats; OpenTelemetry spans per pipeline stage exported over OTLP to Jaeger in compose, trace id in the response headers; `make bench-hedge` answering Q4 on the synthetic tail and on a real provider where a key exists. Done when a trace shows every stage and the hedge, and the hedging numbers are in RESULTS.md with their cost.

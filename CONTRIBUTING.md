@@ -30,8 +30,10 @@ make check
 | `make check` | `gofmt`, `go vet`, `golangci-lint`, `go test -race ./...` (offline, under 2 minutes) | every PR |
 | `make test-integration` | Lua and vector-index tests against a real `redis:8` container | every PR (service container) |
 | `make ui-check` | typecheck, lint and Vitest for `web/` | every PR from M6 |
-| `make dev` | `docker compose up` with one replica, Redis, Ollama, Jaeger, Prometheus | local |
+| `make dev` | `docker compose up` with one replica and Ollama (Redis from M2, Jaeger and Prometheus from M4) | local |
 | `make fleet` | the same with three replicas behind the load balancer | local |
+| `make sdk-smoke` | unmodified OpenAI and Anthropic Python SDKs stream through the gateway from Ollama (and Claude with a key) | local |
+| `make record-fixtures` | re-capture the provider fixtures from Ollama (`scripts/record-fixtures.sh anthropic` for Claude) | local |
 | `make bench` | overhead benchmark (Q1) through the fake provider | local, manual workflow |
 | `make test-limits` | multi-replica over-admission test (Q2) | local, manual workflow |
 | `make eval-cache` | semantic cache threshold sweep (Q3); needs Ollama | local, manual workflow |
