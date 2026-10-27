@@ -34,7 +34,11 @@ models:
     provider: fake
 
 keys:
-  # A plain key for a laptop. In a deployed file prefer sha256, the hex
-  # digest of the key: printf %s "$KEY" | sha256sum
+  # The image listens on 0.0.0.0 and this key is printed in the README, so it
+  # only reaches the free local models. To use Claude, mount a config with a
+  # key of your own, stored as its hex digest: printf %s "$KEY" | sha256sum
+  #   - name: me
+  #     sha256: <digest>
   - name: dev
     key: sk-switchboard-dev
+    models: [qwen2.5:0.5b, fake]

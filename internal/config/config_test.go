@@ -129,3 +129,35 @@ func TestEnvName(t *testing.T) {
 		t.Errorf("envName = %q", got)
 	}
 }
+
+// TestShippedImageConfig guards the config baked into the container image:
+// it listens on every interface and its plain-text key is published in the
+// README, so that key must not reach a paid provider.
+func TestShippedImageConfig(t *testing.T) {
+	t.Parallel()
+	cfg, err := Load("../../deploy/switchboard.yaml", env(map[string]string{"ANTHROPIC_API_KEY": "secret"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerType := map[string]string{}
+	for _, p := range cfg.Providers {
+		providerType[p.Name] = p.Type
+	}
+	modelProvider := map[string]string{}
+	for _, m := range cfg.Models {
+		modelProvider[m.Name] = m.Provider
+	}
+	for _, k := range cfg.Keys {
+		if k.Key == "" {
+			continue
+		}
+		if len(k.Models) == 0 {
+			t.Errorf("plain key %q may use every model, Claude included", k.Name)
+		}
+		for _, m := range k.Models {
+			if providerType[modelProvider[m]] == "anthropic" {
+				t.Errorf("plain key %q may use %q, a paid model", k.Name, m)
+			}
+		}
+	}
+}
