@@ -81,6 +81,16 @@ the positives, no threshold can serve one without the other.
 | `nomic-embed-text` | `paws-wiki` | 0.850 / 0.850 / 0.950 (0.950) | 0.800 / 0.800 / 0.800 (0.990) |
 | `nomic-embed-text` | `gsm8k-perturb` | 0.850 / 0.850 / 0.950 (0.950) | 0.800 / 0.800 / 0.800 (0.990) |
 
+**At a guessed threshold.** Hit rate / false-hit rate without the number
+guard at fixed thresholds, the range vendor defaults sit in and above it.
+
+| Model | Pair set | 0.9000 | 0.9500 | 0.9700 | 0.9900 |
+|-------|----------|------:|------:|------:|------:|
+| `all-minilm` | `paws-wiki` | 50.0% / 100.0% | 50.0% / 0.5% | 0.0% / 0.5% | 0.0% / 0.5% |
+| `all-minilm` | `gsm8k-perturb` | 50.0% / 0.5% | 50.0% / 0.5% | 0.0% / 0.5% | 0.0% / 0.5% |
+| `nomic-embed-text` | `paws-wiki` | 50.0% / 0.5% | 50.0% / 0.5% | 0.0% / 0.5% | 0.0% / 0.5% |
+| `nomic-embed-text` | `gsm8k-perturb` | 50.0% / 0.5% | 50.0% / 0.5% | 0.0% / 0.5% | 0.0% / 0.5% |
+
 | Model | Pair set | Number guard | Threshold (false-hit rate ≤ 1%) | Hit rate there | False-hit rate there | Threshold (upper bound ≤ 1%) | Hit rate there | False-hit rate there |
 |-------|----------|:------------:|------------------------:|---------------:|---------------------:|------------------------:|---------------:|---------------------:|
 | `all-minilm` | `paws-wiki` | off | 0.9025 | 50.0% (29.9–70.1) | 0.5% (0.1–1.8) | 0.9901 | 0.0% (0.0–16.1) | 0.0% (0.0–0.9) |

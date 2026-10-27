@@ -43,7 +43,11 @@ type Q3Sweep struct {
 	Joints             []Q3Joint
 	Latency            []Q3Latency
 	Spreads            []Q3Spread
-	Chosen             cacheeval.Chosen
+	// RefThresholds head the Reference table, whose rows give hit and
+	// false-hit rates at those thresholds, without the number guard.
+	RefThresholds []string
+	Reference     []Q3Ref
+	Chosen        cacheeval.Chosen
 	// ChosenThreshold is Chosen.Threshold to four decimals.
 	ChosenThreshold string
 	// ChosenPerSet is the hit rate each pair set keeps at the chosen
@@ -56,6 +60,17 @@ type Q3Sweep struct {
 	// AtFloor is true when some threshold shown is the grid's lowest.
 	AtFloor                         bool
 	Commit, Date, Command, Hardware string
+}
+
+// referenceThresholds are vendor-style defaults (PLAN.md cites 0.9 to
+// 0.97) and two stricter values, to show what a guessed threshold gives.
+var referenceThresholds = []float64{0.9, 0.95, 0.97, 0.99}
+
+// Q3Ref is one model and pair set at the reference thresholds; each cell
+// is "hit rate / false-hit rate".
+type Q3Ref struct {
+	Model, Set string
+	Cells      []string
 }
 
 // Q3Spread is where one pair set's cosines fall under one model, each
@@ -191,6 +206,25 @@ func buildQ3Sweep(s cacheeval.Summary) *Q3Sweep {
 		exact = append(exact, "`"+b.Set+"` "+rate(b.ExactHitRate))
 	}
 	q.ExactPerSet = strings.Join(exact, "; ")
+	for _, t := range referenceThresholds {
+		q.RefThresholds = append(q.RefThresholds, threshold(t))
+	}
+	for _, c := range s.Curves {
+		if c.Guard {
+			continue
+		}
+		ref := Q3Ref{Model: c.Model, Set: c.Set}
+		for _, t := range referenceThresholds {
+			cell := "—"
+			for _, p := range c.Points {
+				if p.Threshold == t {
+					cell = pct1(p.HitRate.P) + " / " + pct1(p.FalseHitRate.P)
+				}
+			}
+			ref.Cells = append(ref.Cells, cell)
+		}
+		q.Reference = append(q.Reference, ref)
+	}
 	for _, sp := range s.Spreads {
 		q.Spreads = append(q.Spreads, Q3Spread{Model: sp.Model, Set: sp.Set, Positives: spread(sp.Positives), Negatives: spread(sp.Negatives)})
 	}

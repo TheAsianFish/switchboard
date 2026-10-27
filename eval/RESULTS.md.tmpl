@@ -193,6 +193,15 @@ the positives, no threshold can serve one without the other.
 | `{{.Model}}` | `{{.Set}}` | {{.Positives}} | {{.Negatives}} |
 {{- end}}
 
+**At a guessed threshold.** Hit rate / false-hit rate without the number
+guard at fixed thresholds, the range vendor defaults sit in and above it.
+
+| Model | Pair set |{{range .RefThresholds}} {{.}} |{{end}}
+|-------|----------|{{range .RefThresholds}}------:|{{end}}
+{{- range .Reference}}
+| `{{.Model}}` | `{{.Set}}` |{{range .Cells}} {{.}} |{{end}}
+{{- end}}
+
 | Model | Pair set | Number guard | Threshold (false-hit rate ≤ {{.Target}}) | Hit rate there | False-hit rate there | Threshold (upper bound ≤ {{.Target}}) | Hit rate there | False-hit rate there |
 |-------|----------|:------------:|------------------------:|---------------:|---------------------:|------------------------:|---------------:|---------------------:|
 {{- range .Rows}}
