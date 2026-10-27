@@ -72,6 +72,9 @@ type Degrading struct {
 	gen      uint64
 	pending  map[accountKey]pendingCharge
 	flushing bool
+	// failures counts primary failures; a success ends degraded mode only
+	// if none was recorded after its call started.
+	failures uint64
 }
 
 // pendingCharge is cost settled while degraded, not yet on the primary.
@@ -117,20 +120,21 @@ func (d *Degrading) Degraded() bool {
 	return d.degraded
 }
 
-// tryPrimary reports whether a call should go to the primary. While
-// degraded, one caller per RetryInterval is let through as a probe.
-func (d *Degrading) tryPrimary() bool {
+// tryPrimary reports whether a call should go to the primary, and the
+// failure count it started at. While degraded, one caller per
+// RetryInterval is let through as a probe.
+func (d *Degrading) tryPrimary() (bool, uint64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.degraded {
-		return true
+		return true, d.failures
 	}
 	now := d.now()
 	if now.Before(d.retryAt) {
-		return false
+		return false, 0
 	}
 	d.retryAt = now.Add(d.retry)
-	return true
+	return true, d.failures
 }
 
 // failed classifies err from a primary call made under ctx. Exhaustion and
@@ -143,6 +147,7 @@ func (d *Degrading) failed(ctx context.Context, err error) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.retryAt = d.now().Add(d.retry)
+	d.failures++
 	if !d.degraded {
 		d.degraded = true
 		telemetry.Logger(ctx).Warn("budget store unreachable, using per-replica grace",
@@ -153,10 +158,12 @@ func (d *Degrading) failed(ctx context.Context, err error) bool {
 }
 
 // succeeded runs after a primary call that reached the store: it charges
-// pending costs and, once none are left, leaves degraded mode.
-func (d *Degrading) succeeded(ctx context.Context) {
+// pending costs and, once none are left, leaves degraded mode. A call
+// that started before the latest failure (seen is older) proves nothing
+// about the store now and changes nothing.
+func (d *Degrading) succeeded(ctx context.Context, seen uint64) {
 	d.mu.Lock()
-	if (!d.degraded && len(d.pending) == 0) || d.flushing {
+	if (!d.degraded && len(d.pending) == 0) || d.flushing || d.failures != seen {
 		d.mu.Unlock()
 		return
 	}
@@ -232,13 +239,13 @@ func (d *Degrading) Reserve(ctx context.Context, key string, b Budget, id string
 	if err := checkReserve(b, id, amount); err != nil {
 		return Reservation{}, err
 	}
-	if d.tryPrimary() {
+	if try, seen := d.tryPrimary(); try {
 		cctx, cancel := context.WithTimeout(ctx, d.timeout)
 		r, err := d.primary.Reserve(cctx, key, b, id, amount)
 		cancel()
 		if !d.failed(ctx, err) {
 			if err == nil || errors.Is(err, ErrExhausted) {
-				d.succeeded(ctx)
+				d.succeeded(ctx, seen)
 			}
 			return r, err
 		}
@@ -265,7 +272,7 @@ func (d *Degrading) Settle(ctx context.Context, key string, b Budget, r Reservat
 	// The money was spent whether or not the caller is still waiting, so
 	// its cancellation must not drop the charge.
 	ctx = context.WithoutCancel(ctx)
-	if d.tryPrimary() {
+	if try, seen := d.tryPrimary(); try {
 		pr := r
 		if r.grace != 0 {
 			// The primary never saw this hold; charge the cost plainly.
@@ -275,7 +282,7 @@ func (d *Degrading) Settle(ctx context.Context, key string, b Budget, r Reservat
 		err := d.primary.Settle(cctx, key, b, pr, actual)
 		cancel()
 		if err == nil {
-			d.succeeded(ctx)
+			d.succeeded(ctx, seen)
 			return nil
 		}
 		if !d.failed(ctx, err) {
@@ -306,14 +313,15 @@ func (d *Degrading) Balance(ctx context.Context, key string, b Budget) (Balance,
 	if err := b.Validate(); err != nil {
 		return Balance{}, err
 	}
-	if !d.tryPrimary() {
+	try, seen := d.tryPrimary()
+	if !try {
 		return Balance{}, fmt.Errorf("budget balance %s: %w", key, ErrUnavailable)
 	}
 	cctx, cancel := context.WithTimeout(ctx, d.timeout)
 	bal, err := d.primary.Balance(cctx, key, b)
 	cancel()
 	if err == nil {
-		d.succeeded(ctx)
+		d.succeeded(ctx, seen)
 		return bal, nil
 	}
 	if d.failed(ctx, err) {

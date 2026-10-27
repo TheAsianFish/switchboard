@@ -453,3 +453,56 @@ func TestDegradingTooBigForTheFullLimitIsNever(t *testing.T) {
 		t.Errorf("decision %+v, want a refusal with RetryAfter Never", d)
 	}
 }
+
+// gatedLimiter answers its first call only when released, successfully,
+// and fails every later call.
+type gatedLimiter struct {
+	ratelimit.Limiter
+	started, release chan struct{}
+	calls            atomic.Int64
+}
+
+func (g *gatedLimiter) Allow(ctx context.Context, _ string, _ ratelimit.Limit, _ int64) (ratelimit.Decision, error) {
+	if g.calls.Add(1) == 1 {
+		close(g.started)
+		<-g.release
+		return ratelimit.Decision{Allowed: true, Remaining: primaryRemaining}, nil
+	}
+	return ratelimit.Decision{}, errStore
+}
+
+// A slow call that started before the store failed and succeeds after it
+// must not end the degraded state; only a probe can.
+func TestDegradingStaleSuccessDoesNotRecover(t *testing.T) {
+	t.Parallel()
+	g := &gatedLimiter{started: make(chan struct{}), release: make(chan struct{})}
+	clock := ratelimittest.NewClock(ratelimittest.Start)
+	d := ratelimit.NewDegrading(g, ratelimit.NewMemoryFixedWindow(clock.Now), 3)
+	d.Now, d.Timeout = clock.Now, time.Minute
+	var states []bool
+	var mu sync.Mutex
+	d.OnState = func(degraded bool) { mu.Lock(); states = append(states, degraded); mu.Unlock() }
+	ctx := context.Background()
+
+	slow := make(chan error)
+	go func() { _, err := d.Allow(ctx, "k", q2Limit, 1); slow <- err }()
+	<-g.started
+	if _, err := d.Allow(ctx, "k", q2Limit, 1); err != nil {
+		t.Fatal(err)
+	}
+	if !d.Degraded() {
+		t.Fatal("not degraded after a failure")
+	}
+	close(g.release)
+	if err := <-slow; err != nil {
+		t.Fatal(err)
+	}
+	if !d.Degraded() {
+		t.Error("a success that started before the failure ended the degraded state")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(states) != 1 || !states[0] {
+		t.Errorf("transitions = %v, want [true]", states)
+	}
+}

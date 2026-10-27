@@ -489,3 +489,48 @@ func TestDegradingOverRedis(t *testing.T) {
 	wantPosition(t, mustBalance(t, d, "k", monthly), 160, 10)
 	s.want(t, true, false)
 }
+
+// gatedLedger answers its first Reserve only when released, successfully;
+// every other call fails.
+type gatedLedger struct {
+	Ledger
+	started, release chan struct{}
+	calls            atomic.Int64
+}
+
+func (g *gatedLedger) Reserve(ctx context.Context, key string, b Budget, id string, amount cost.Nanos) (Reservation, error) {
+	if g.calls.Add(1) == 1 {
+		close(g.started)
+		<-g.release
+		return g.Ledger.Reserve(ctx, key, b, id, amount)
+	}
+	return Reservation{}, errDown
+}
+
+// A slow call that started before the store failed and succeeds after it
+// must not end degraded mode; only a probe can.
+func TestDegradingStaleSuccessDoesNotRecover(t *testing.T) {
+	t.Parallel()
+	c := &clock{t: t0}
+	g := &gatedLedger{Ledger: NewMemory(time.Minute, c.Now), started: make(chan struct{}), release: make(chan struct{})}
+	s := &states{}
+	d := NewDegrading(g, DegradeOptions{Grace: grace, RetryInterval: time.Second, Timeout: time.Minute, OnState: s.record, Now: c.Now})
+	ctx := context.Background()
+
+	slow := make(chan error)
+	go func() { _, err := d.Reserve(ctx, "k", monthly, "slow", 10); slow <- err }()
+	<-g.started
+	if _, err := d.Reserve(ctx, "k", monthly, "fails", 10); err != nil {
+		t.Fatal(err)
+	}
+	if !d.Degraded() {
+		t.Fatal("not degraded after a failure")
+	}
+	close(g.release)
+	if err := <-slow; err != nil {
+		t.Fatal(err)
+	}
+	if !d.Degraded() {
+		t.Error("a success that started before the failure ended degraded mode")
+	}
+}

@@ -51,6 +51,10 @@ type Degrading struct {
 	mu       sync.Mutex
 	degraded bool
 	probeAt  time.Time // when degraded, the earliest next Primary call
+	// failures counts Primary failures. A success only ends the degraded
+	// state if no failure was recorded after its call started: a slow
+	// call that began before the outage says nothing about the store now.
+	failures uint64
 }
 
 // Defaults for the zero values of the Degrading fields.
@@ -131,7 +135,8 @@ func (d *Degrading) Adjust(ctx context.Context, key string, l Limit, delta int64
 // degraded and not yet due a probe. It reports whether the caller should
 // use Local instead; when it should not, err is Primary's result.
 func (d *Degrading) tryPrimary(ctx context.Context, call func(context.Context) error) (local bool, err error) {
-	if !d.shouldTry() {
+	try, seen := d.shouldTry()
+	if !try {
 		return true, nil
 	}
 	timeout := d.Timeout
@@ -143,7 +148,7 @@ func (d *Degrading) tryPrimary(ctx context.Context, call func(context.Context) e
 	cancel()
 	switch {
 	case err == nil:
-		d.recover(ctx)
+		d.recover(ctx, seen)
 		return false, nil
 	case ctx.Err() != nil, errors.Is(err, ErrNotImplemented):
 		// The caller gave up, or the algorithm does not exist: neither
@@ -154,26 +159,28 @@ func (d *Degrading) tryPrimary(ctx context.Context, call func(context.Context) e
 	return true, nil
 }
 
-// shouldTry reports whether this call goes to Primary. While degraded,
-// one call per RetryInterval is let through as a probe.
-func (d *Degrading) shouldTry() bool {
+// shouldTry reports whether this call goes to Primary, and the failure
+// count it started at. While degraded, one call per RetryInterval is let
+// through as a probe.
+func (d *Degrading) shouldTry() (bool, uint64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.degraded {
-		return true
+		return true, d.failures
 	}
 	now := d.now()
 	if now.Before(d.probeAt) {
-		return false
+		return false, 0
 	}
 	d.probeAt = now.Add(d.retryInterval())
-	return true
+	return true, d.failures
 }
 
 func (d *Degrading) fail(ctx context.Context, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.probeAt = d.now().Add(d.retryInterval())
+	d.failures++
 	if d.degraded {
 		return
 	}
@@ -185,10 +192,10 @@ func (d *Degrading) fail(ctx context.Context, err error) {
 	}
 }
 
-func (d *Degrading) recover(ctx context.Context) {
+func (d *Degrading) recover(ctx context.Context, seen uint64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if !d.degraded {
+	if !d.degraded || d.failures != seen {
 		return
 	}
 	d.degraded = false
