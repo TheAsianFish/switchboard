@@ -131,7 +131,15 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	elapsed := p.now().Sub(start)
 	if err != nil {
 		err = upstreamError(rt, err)
-		p.settle(ctx, adm, core.Usage{}, 0, false, telemetry.OutcomeError)
+		u, outcome := core.Usage{}, telemetry.OutcomeError
+		if ctx.Err() != nil {
+			// The client went away mid-call. The upstream may have read
+			// the whole prompt and billed for it, and nothing here can
+			// tell, so the prompt estimate is charged: an over-count
+			// rather than a cost the ledger never sees.
+			u.InputTokens, outcome = adm.estimate.InputTokens, telemetry.OutcomeAbandoned
+		}
+		p.settle(ctx, adm, u, 0, false, outcome)
 		logCall(ctx, rt, false, elapsed, 0, core.Usage{}, err)
 		return nil, err
 	}

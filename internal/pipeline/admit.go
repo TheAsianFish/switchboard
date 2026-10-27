@@ -161,8 +161,9 @@ func (p *Pipeline) refundTokens(ctx context.Context, a *admission) {
 }
 
 // settle corrects the admission to what the request really used and
-// records it. A request that failed before any output was produced is
-// charged nothing; one that streamed and then failed or was abandoned is
+// records it. A request the upstream refused or failed before any output
+// is charged nothing (one the client abandoned mid-call is charged its
+// prompt estimate, see Complete); one that streamed and then failed or was abandoned is
 // charged for what it produced, estimated from its text when the provider
 // never reported usage.
 func (p *Pipeline) settle(ctx context.Context, a *admission, u core.Usage, outChars int, stream bool, outcome string) {

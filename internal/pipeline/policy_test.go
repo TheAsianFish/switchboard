@@ -460,3 +460,44 @@ func TestHugeMaxTokensIsRefused(t *testing.T) {
 		t.Errorf("store errors = %v, want 0", n)
 	}
 }
+
+// hangingUp is a client that disconnects while the upstream is working.
+type hangingUp struct {
+	core.Provider
+	cancel context.CancelFunc
+}
+
+func (h hangingUp) Complete(ctx context.Context, _ *core.Request) (*core.Response, error) {
+	h.cancel()
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A non-streaming call the client abandons is charged its prompt
+// estimate, and the charge lands even though the request's context is
+// gone by the time it is settled.
+func TestAbandonedCallIsChargedItsPrompt(t *testing.T) {
+	t.Parallel()
+	m := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: m.Addr()})
+	defer func() { _ = rdb.Close() }()
+	led := budget.NewRedis(rdb, "sb:", time.Minute, time.Now)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := New(auth.NewKeys([]config.Key{{Name: "k", Key: "sk", Budget: &config.KeyBudget{USD: "1", Period: "total"}}}), []Route{
+		{Model: "m", ProviderName: "x", Upstream: "m", Provider: hangingUp{cancel: cancel}, Price: price, Priced: true, OutputEstimate: 64},
+	}, Policy{Ledger: led})
+	ctx, _ = p.Authenticate(ctx, "sk")
+	req := &core.Request{Model: "m", Messages: []core.Message{{Role: core.RoleUser, Text: "a prompt the upstream has already read"}}}
+	if _, err := p.Complete(ctx, req); err == nil {
+		t.Fatal("want an error")
+	}
+	bal, err := led.Balance(context.Background(), "k", budget.Budget{Limit: cost.Dollar, Period: budget.PeriodTotal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := price.Of(core.Usage{InputTokens: cost.EstimateInputTokens(req)})
+	if bal.Spent != want || bal.Reserved != 0 {
+		t.Errorf("spent %v reserved %v, want %v spent and nothing reserved", bal.Spent, bal.Reserved, want)
+	}
+}
