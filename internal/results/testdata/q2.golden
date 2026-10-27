@@ -60,29 +60,30 @@ the next one.
 
 | Scenario | Store | Algorithm | Offered | Admitted | Refused (429) | Other errors | Most in one limiter window (rate) | Worst W (s) | Admitted in it | Bound at W | Over at W | Admitted in worst 60 s | Bound at 60 s | Over at 60 s | Latency p50 / p99 of admitted (ms) |
 |----------|-------|-----------|--------:|---------:|--------------:|-------------:|----------------------------------:|------------:|---------------:|-----------:|----------:|-----------------------:|--------------:|-------------:|-----------------------------------:|
-| fixed-window | redis | fixed_window | 900 | 337 | 563 | 0 | — (100) | 20 | 100 | 53 | 47 | 138 | 120 | 18 | — / — |
-| fixed-window-redis-outage | redis | fixed_window | 900 | 445 | 455 | 0 | — (100) | 31 | 153 | 71 | 82 | 154 | 120 | 34 | — / — |
-| no-shared-store | none | fixed_window | 900 | 900 | 0 | 0 | — (100) | 60 | 301 | 120 | 181 | 301 | 120 | 181 | — / — |
+| fixed-window | redis | fixed_window | 900 | 366 | 534 | 0 | 100 (100) | 20 | 100 | 53 | 47 | 167 | 120 | 47 | 22.4 / 24.2 |
+| fixed-window-redis-outage | redis | fixed_window | 900 | 533 | 367 | 0 | 183 (100) | 37 | 183 | 81 | 102 | 183 | 120 | 63 | 22.3 / 123.4 |
+| no-shared-store | none | fixed_window | 900 | 900 | 0 | 0 | 300 (100) | 60 | 301 | 120 | 181 | 301 | 120 | 181 | 22.0 / 23.3 |
 
 Admitted per limiter window, in order (`*`: a window the run covers only in part):
 
-- `fixed-window`: not recorded
-- `fixed-window-redis-outage`: not recorded
-- `no-shared-store`: not recorded
+- `fixed-window`: 100* · 100 · 100 · 66*
+- `fixed-window-redis-outage`: 100* · 175 · 183 · 75*
+- `no-shared-store`: 200* · 300 · 300 · 100*
 
 Phases of `fixed-window-redis-outage` (seconds from the start of the run; bound over the
 whole phase, and the worst window inside it):
 
 | Phase | From (s) | To (s) | Admitted | Bound over the phase | Over | Worst W (s) | Admitted in it | Bound at W | Over at W |
 |-------|---------:|-------:|---------:|---------------------:|-----:|------------:|---------------:|-----------:|----------:|
-| before the outage | 0 | 60.003 | 146 | 120 | 26 | 20 | 100 | 53 | 47 |
-| Redis down | 60.003 | 120.328 | 148 | 120 | 28 | 20 | 100 | 53 | 47 |
-| after Redis is back | 120.328 | 179.829 | 151 | 119 | 32 | 21 | 105 | 55 | 50 |
+| before the outage | 0 | 60.003 | 175 | 120 | 55 | 60 | 175 | 120 | 55 |
+| Redis down | 60.003 | 120.329 | 178 | 120 | 58 | 60 | 177 | 120 | 57 |
+| after Redis is back | 120.329 | 179.829 | 180 | 119 | 61 | 59 | 178 | 118 | 60 |
 
 **Shared budget.** A second key has a total budget of $0.10 on a model
 priced at $3 in and $15 out per million tokens.
 `switchboard bench` offered 20 requests per second (600
-requests) through
+requests, `max_tokens` 64, so each reservation is the worst case of 64
+output tokens and is settled to the 30 per request the fake provider returned) through
 the same three replicas. The provider's ledger is priced independently of
 the gateway's cost code, with exact rationals.
 
@@ -91,7 +92,7 @@ the gateway's cost code, with exact rationals.
 | 213 | 387 | 0 | 1065 / 6390 | $0.099045000 | $0.099045000 | $0.000000000 | $0.000000000 | $0.099045000 | yes | yes | yes |
 
 - Hardware: AMD EPYC 9V45 96-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 6.17.0-1022-azure, go1.27.0 (generator, nginx, the three replicas, Redis and the fake provider on one machine).
-- Commit: `d8626ad`, run 2026-10-27.
+- Commit: `d967c73`, run 2026-10-27.
 - Command: `make test-limits`.
 - Cost: $0 (fake provider only).
 - Not in this run: `gcra`, `gcra-redis-outage` (a scenario is skipped when its algorithm is not implemented yet; `make test-limits` runs it as soon as it is).
