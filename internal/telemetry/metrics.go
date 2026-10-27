@@ -82,7 +82,7 @@ func NewMetrics(runtime bool) *Metrics {
 		}, []string{"component", "op"}),
 		cacheLookups: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "switchboard_cache_lookups_total",
-			Help: "Response cache lookups by result (hit-exact, hit-semantic, miss, skip, error).",
+			Help: "Response cache lookups by result (hit-exact, hit-semantic, miss, error, and skip while the store is bypassed after an error). Requests with the cache off or not cacheable are not counted.",
 		}, []string{"result"}),
 		cacheLatency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "switchboard_cache_lookup_seconds",
@@ -95,7 +95,7 @@ func NewMetrics(runtime bool) *Metrics {
 		}, []string{"result"}),
 		cacheErrs: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "switchboard_cache_errors_total",
-			Help: "Failed cache operations by operation (get, set, search, add, embed, index); the request still goes upstream.",
+			Help: "Failed cache operations by operation (get, set, search, add, embed, embed_too_long for a prompt longer than the embedder reads, index); the request still goes upstream.",
 		}, []string{"op"}),
 		cacheSaved: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "switchboard_cache_saved_dollars_total",
