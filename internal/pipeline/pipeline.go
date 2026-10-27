@@ -191,6 +191,9 @@ func (s *stream) Next() (core.Event, error) {
 	if err != nil {
 		switch {
 		case errors.Is(err, io.EOF):
+			// After a stop event this is a no-op; before one, the upstream
+			// cut the stream short.
+			s.finish(errNoStop)
 		case s.ctx.Err() != nil:
 			// The client went away and its cancelled context failed the
 			// upstream read: that is an abandoned stream, not an upstream
@@ -223,13 +226,19 @@ func (s *stream) Next() (core.Event, error) {
 }
 
 func (s *stream) Close() error {
+	// Close upstream first: settling takes store round trips, and until
+	// the upstream is closed the provider keeps generating.
+	err := s.inner.Close()
 	s.finish(errStreamAbandoned)
-	return s.inner.Close()
+	return err
 }
 
 // errStreamAbandoned marks a stream closed before its stop event, which is
 // what a client disconnect looks like from here.
 var errStreamAbandoned = errors.New("stream closed before it finished")
+
+// errNoStop marks a stream the upstream ended without a stop event.
+var errNoStop = core.Errorf(core.KindUpstream, "stream ended without a stop event")
 
 func (s *stream) finish(err error) {
 	s.logged.Do(func() {
