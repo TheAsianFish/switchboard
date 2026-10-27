@@ -133,6 +133,158 @@ the gateway's cost code, with exact rationals.
 - Cost: $0 (fake provider only).
 - Not in this run: `gcra`, `gcra-redis-outage` (a scenario is skipped when its algorithm is not implemented yet; `make test-limits` runs it as soon as it is).
 
+## Q3: semantic cache false hits
+
+At what cosine similarity threshold does the semantic cache's false-hit
+rate fall under 1%, how much hit rate survives there, and does the answer
+depend on the embedding model and the kind of prompt? Command:
+`make eval-cache` (`switchboard eval cache` for the sweep,
+`switchboard eval cache-index` for the index check), raw files in
+`eval/results/q3-cache/`.
+
+**Method.** Two labelled pair sets, committed under `eval/cache/data/`. A
+positive is a pair where serving one side's cached answer for the other is
+right; a negative is one where it is wrong.
+
+- `paws-wiki`: the PAWS-Wiki labelled (final) test split, 8000 sentence pairs.
+  Both sentences share almost all their words; label 1 (a paraphrase) is a
+  positive, label 0 (the words swapped or reordered so the meaning changes)
+  a negative.
+- `gsm8k-perturb`: 500 GSM8K test questions sampled (seed 1) from the
+  1282 that have a number their worked solution uses. Every
+  question gives a negative: the question against its twin, the same text
+  with one such number changed, so the answer changes. A positive is the
+  question against a paraphrase written by the local model `qwen2.5:3b`,
+  kept only if it contains the same numbers, in any order, and the same model,
+  asked to solve the paraphrase, gets the gold answer (412 paraphrases kept their
+  numbers, 329 of those were solved correctly: 329 positives against
+  500 negatives).
+
+Each distinct text is embedded once per model through the gateway's own
+Ollama client (`/api/embed`) and every pair is scored by the cosine of its
+two embeddings, rounded to six decimals in the raw files. A pair hits at
+threshold t when its cosine is at least t and, with the number guard on,
+both sides contain the same numbers in the same order (`cache.SameNumbers`,
+which also reads spelled-out numbers). The threshold is swept from 0.5000 to 0.9900 in steps
+of 0.0025 and on to 1.0000 in steps of 0.0001, where the pair sets separate if they
+do at all. Hit rate is over the positives, false-hit rate over the
+negatives, both with Wilson 95% intervals in brackets. Two thresholds are
+reported per row: the lowest whose observed false-hit rate is at most
+1%, and the lowest whose Wilson upper bound is; the second is the one the
+gateway uses, and it can only be met with at least 381 negatives and no
+false hit among them.
+
+| Pair set | Positives | Negatives |
+|----------|----------:|----------:|
+| `paws-wiki` | 3536 | 4464 |
+| `gsm8k-perturb` | 329 | 500 |
+
+**Where the pairs sit.** Cosine similarity of the positives and of the
+negatives, as p10 / median / p90 (max). Where the negatives sit as high as
+the positives, no threshold can serve one without the other.
+
+| Model | Pair set | Positives | Negatives |
+|-------|----------|-----------|-----------|
+| `all-minilm` | `paws-wiki` | 0.938 / 0.987 / 0.998 (1.000) | 0.910 / 0.977 / 0.995 (1.000) |
+| `all-minilm` | `gsm8k-perturb` | 0.908 / 0.963 / 0.990 (0.998) | 0.965 / 0.990 / 0.999 (1.000) |
+| `nomic-embed-text` | `paws-wiki` | 0.961 / 0.991 / 0.998 (1.000) | 0.940 / 0.983 / 0.995 (1.000) |
+| `nomic-embed-text` | `gsm8k-perturb` | 0.944 / 0.976 / 0.994 (0.999) | 0.991 / 0.999 / 1.000 (1.000) |
+
+| Model | Pair set | Number guard | Threshold (false-hit rate ≤ 1%) | Hit rate there | False-hit rate there | Threshold (upper bound ≤ 1%) | Hit rate there | False-hit rate there |
+|-------|----------|:------------:|------------------------:|---------------:|---------------------:|------------------------:|---------------:|---------------------:|
+| `all-minilm` | `paws-wiki` | off | 0.9987 | 4.8% (4.1–5.5) | 1.0% (0.7–1.3) | 0.9989 | 3.6% (3.0–4.3) | 0.7% (0.5–1.0) |
+| `all-minilm` | `gsm8k-perturb` | off | 0.9998 | 0.0% (0.0–1.2) | 1.0% (0.4–2.3) | 1.0000 | 0.0% (0.0–1.2) | 0.0% (0.0–0.8) |
+| `all-minilm` | `paws-wiki` | on | 0.9987 | 4.8% (4.1–5.5) | 0.9% (0.7–1.2) | 0.9989 | 3.6% (3.0–4.3) | 0.6% (0.4–0.9) |
+| `all-minilm` | `gsm8k-perturb` | on | 0.5000* | 76.3% (71.4–80.6) | 0.0% (0.0–0.8) | 0.5000* | 76.3% (71.4–80.6) | 0.0% (0.0–0.8) |
+| `nomic-embed-text` | `paws-wiki` | off | 0.9987 | 7.0% (6.2–7.9) | 1.0% (0.7–1.3) | 0.9989 | 5.7% (4.9–6.5) | 0.7% (0.5–1.0) |
+| `nomic-embed-text` | `gsm8k-perturb` | off | 1.0000 | 0.0% (0.0–1.2) | 0.0% (0.0–0.8) | 1.0000 | 0.0% (0.0–1.2) | 0.0% (0.0–0.8) |
+| `nomic-embed-text` | `paws-wiki` | on | 0.9986 | 7.6% (6.7–8.5) | 1.0% (0.7–1.3) | 0.9989 | 5.6% (4.9–6.4) | 0.6% (0.4–0.9) |
+| `nomic-embed-text` | `gsm8k-perturb` | on | 0.5000* | 76.3% (71.4–80.6) | 0.0% (0.0–0.8) | 0.5000* | 76.3% (71.4–80.6) | 0.0% (0.0–0.8) |
+
+\* The lowest threshold swept; a lower one might meet the target too.
+
+**Exact-match baseline.** The floor a semantic cache has to beat: the
+gateway's exact layer (`cache.KeysFor`, which normalises line endings and
+trailing whitespace only) and an exact cache that also collapses
+whitespace and folds case.
+
+| Pair set | Exact hit rate | Exact false-hit rate | Normalised hit rate | Normalised false-hit rate |
+|----------|---------------:|---------------------:|--------------------:|--------------------------:|
+| `paws-wiki` | 0.3% (0.1–0.5) | 0.1% (0.0–0.2) | 0.3% (0.2–0.5) | 0.1% (0.0–0.2) |
+| `gsm8k-perturb` | 0.0% (0.0–1.2) | 0.0% (0.0–0.8) | 0.0% (0.0–1.2) | 0.0% (0.0–0.8) |
+
+**One threshold for both kinds of prompt.** The highest of a model's
+per-set thresholds at the upper bound, so the false-hit target holds on
+every pair set, and the hit rate each set keeps there.
+
+| Model | Number guard | Joint threshold | Hit rate per set | Mean hit rate |
+|-------|:------------:|----------------:|------------------|--------------:|
+| `all-minilm` | off | 1.0000 | `paws-wiki` 0.4% (0.3–0.7); `gsm8k-perturb` 0.0% (0.0–1.2) | 0.2% |
+| `all-minilm` | on | 0.9989 | `paws-wiki` 3.6% (3.0–4.3); `gsm8k-perturb` 0.0% (0.0–1.2) | 1.8% |
+| `nomic-embed-text` | off | 1.0000 | `paws-wiki` 0.4% (0.3–0.7); `gsm8k-perturb` 0.0% (0.0–1.2) | 0.2% |
+| `nomic-embed-text` | on | 0.9989 | `paws-wiki` 5.6% (4.9–6.4); `gsm8k-perturb` 0.9% (0.3–2.6) | 3.2% |
+
+**Shipped default.** The gateway ships with `nomic-embed-text` at threshold 0.9989 with the number guard on.
+There the semantic layer serves this share of the true paraphrases: `paws-wiki` 5.6% (4.9–6.4); `gsm8k-perturb` 0.9% (0.3–2.6); the exact layer alone serves `paws-wiki` 0.3% (0.1–0.5); `gsm8k-perturb` 0.0% (0.0–1.2).
+Rule: For each embedding model, the joint threshold with the number guard on (the lowest threshold whose Wilson 95% upper bound on the false-hit rate is at most 1% on every pair set); the model with the higher mean hit rate at its joint threshold; ties go to the smaller model (fewer dimensions).
+
+**Embedding latency.** What a semantic lookup adds before it reaches
+Redis: one prompt per call, as the gateway sends it, timed in the client
+after untimed warm-up calls, nearest-rank percentiles.
+
+| Model | Dimensions | Calls (after warm-up) | p50 (ms) | p99 (ms) | Mean (ms) |
+|-------|-----------:|----------------------:|---------:|---------:|----------:|
+| `all-minilm` | 384 | 200 (after 10) | 10.99 | 15.70 | 11.33 |
+| `nomic-embed-text` | 768 | 200 (after 10) | 47.38 | 88.20 | 48.62 |
+
+- Hardware: AMD EPYC 9V45 96-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 6.17.0-1022-azure, go1.27.0 (Ollama on the same machine).
+- Commit: `b4befc6`, run 2026-10-27.
+- Command: `switchboard eval cache`.
+- Cost: $0 (local Ollama only).
+
+**FLAT against HNSW.** The same entries indexed both ways in Redis and
+queried for the nearest neighbour, over every entry (unfiltered) and
+restricted to one context's entries (filtered, the shape of a gateway
+lookup). Recall@1 is the fraction of queries whose top result is the exact
+nearest neighbour (among all entries, or among the context's entries),
+found by brute force in Go. HNSW is built once and queried at each
+EF_RUNTIME, its query-time search width; the build time and size repeat. Vectors: random unit (normalised Gaussian), entries and queries independent, seed 1;
+queries per configuration: 1000; Redis 8.10.3.
+
+| Algorithm | Parameters | Entries | Dimensions | Contexts | Build (s) | Unfiltered p50 (ms) | Unfiltered p99 (ms) | Unfiltered recall@1 | Filtered p50 (ms) | Filtered p99 (ms) | Filtered recall@1 | Index size (MB) |
+|-----------|------------|--------:|-----------:|---------:|----------:|--------------------:|--------------------:|--------------------:|------------------:|------------------:|------------------:|----------------:|
+| FLAT | — | 100000 | 384 | 10000 | 1.2 | 4.87 | 6.61 | 1.000 | 0.14 | 0.19 | 1.000 | 151.7 |
+| HNSW | EF_CONSTRUCTION 200, EF_RUNTIME 10, M 16 | 100000 | 384 | 10000 | 26.2 | 0.18 | 0.24 | 0.026 | 0.14 | 0.16 | 1.000 | 177.8 |
+| HNSW | EF_CONSTRUCTION 200, EF_RUNTIME 100, M 16 | 100000 | 384 | 10000 | 26.2 | 0.51 | 0.65 | 0.137 | 0.14 | 0.17 | 1.000 | 177.8 |
+| HNSW | EF_CONSTRUCTION 200, EF_RUNTIME 1000, M 16 | 100000 | 384 | 10000 | 26.2 | 3.33 | 4.16 | 0.649 | 0.14 | 0.18 | 1.000 | 177.8 |
+| FLAT | — | 100000 | 768 | 10000 | 1.6 | 9.23 | 12.00 | 1.000 | 0.14 | 0.17 | 1.000 | 298.7 |
+| HNSW | EF_CONSTRUCTION 200, EF_RUNTIME 10, M 16 | 100000 | 768 | 10000 | 46.3 | 0.21 | 0.43 | 0.013 | 0.14 | 0.19 | 1.000 | 325.0 |
+| HNSW | EF_CONSTRUCTION 200, EF_RUNTIME 100, M 16 | 100000 | 768 | 10000 | 46.3 | 0.70 | 0.85 | 0.093 | 0.15 | 0.75 | 1.000 | 325.0 |
+| HNSW | EF_CONSTRUCTION 200, EF_RUNTIME 1000, M 16 | 100000 | 768 | 10000 | 46.3 | 4.82 | 7.69 | 0.501 | 0.15 | 0.18 | 1.000 | 325.0 |
+
+- Hardware: AMD EPYC 9V45 96-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 6.17.0-1022-azure, go1.27.0 (Redis on the same machine).
+- Commit: `b4befc6`, run 2026-10-27.
+
+**Limitations.**
+
+- PAWS is Wikipedia prose built adversarially by swapping words, so its
+  negatives share nearly every word with their positives; that is harder
+  than most prompt traffic and is meant to be.
+- Every GSM8K twin differs from its question in exactly one number, so
+  the number guard rejects every GSM8K negative by construction: on that
+  set the guard's false-hit side is the design, not a measurement. Its
+  cost is measured: the positives kept their numbers in any order, the
+  guard wants them in the same order, so a paraphrase that moves a
+  number loses its hit (the guarded hit rate at the lowest threshold is
+  the share that kept the order).
+- The paraphrases come from one small local model and one generation
+  setting; real users reword more freely.
+- The index check uses random unit vectors, not embeddings of prompts, so
+  its recall says how well HNSW finds the nearest of uniformly spread
+  points; real embeddings cluster.
+- Every number comes from one machine, with Ollama and Redis sharing its
+  CPU.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -163,7 +315,6 @@ Recorded 2026-10-27 on the machine in Q1. Cost: $0 (local Ollama only).
 - Q2 with GCRA: `ALGORITHMS=gcra make test-limits` once the GCRA limiter
   is implemented (`internal/ratelimit/gcra.go`; its contract tests skip
   until then).
-- Q3 semantic cache threshold sweep: `make eval-cache` (needs Ollama).
 - Q4 hedging: `make bench-hedge` (the live part needs `ANTHROPIC_API_KEY`).
 - Q5 router frontier: `make eval-router`.
 - Q6 replica and Redis kills under load: `make chaos`.
