@@ -137,6 +137,11 @@ func TestStreamErrorBeforeFirstEvent(t *testing.T) {
 			status: 429, typ: "rate_limit_error",
 		},
 		{
+			name:   "budget spent",
+			p:      &stubProvider{err: core.Errorf(core.KindBudgetExceeded, "budget spent")},
+			status: 402, typ: "billing_error",
+		},
+		{
 			name: "first event fails",
 			p: &stubProvider{newStream: func(context.Context) core.Stream {
 				return &errStream{err: core.Errorf(core.KindOverloaded, "busy")}

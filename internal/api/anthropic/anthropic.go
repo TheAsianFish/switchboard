@@ -138,6 +138,9 @@ func errorStatus(k core.ErrorKind) (int, string) {
 		return http.StatusNotFound, "not_found_error"
 	case core.KindRateLimited:
 		return http.StatusTooManyRequests, "rate_limit_error"
+	case core.KindBudgetExceeded:
+		// Anthropic's own billing failure; the SDKs do not retry a 402.
+		return http.StatusPaymentRequired, "billing_error"
 	case core.KindOverloaded:
 		return 529, "overloaded_error"
 	case core.KindTimeout:
