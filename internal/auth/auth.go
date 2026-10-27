@@ -7,8 +7,11 @@ import (
 	"encoding/hex"
 	"strings"
 
+	"github.com/TheAsianFish/switchboard/internal/budget"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/core"
+	"github.com/TheAsianFish/switchboard/internal/cost"
+	"github.com/TheAsianFish/switchboard/internal/ratelimit"
 )
 
 // Principal is the identity behind an API key.
@@ -18,6 +21,10 @@ type Principal struct {
 	Name string
 	// models is the allow list; nil allows every model.
 	models map[string]bool
+	// Requests and Tokens are the key's rate limits; nil means none.
+	Requests, Tokens *ratelimit.Limit
+	// Budget is the key's dollar allowance; nil means none.
+	Budget *budget.Budget
 }
 
 // Allows reports whether the principal may use model.
@@ -45,7 +52,7 @@ func NewKeys(keys []config.Key) *Keys {
 			}
 			copy(digest[:], b)
 		}
-		p := &Principal{Name: k.Name}
+		p := &Principal{Name: k.Name, Requests: limit(k.Limits.Requests), Tokens: limit(k.Limits.Tokens), Budget: keyBudget(k.Budget)}
 		if len(k.Models) > 0 {
 			p.models = make(map[string]bool, len(k.Models))
 			for _, m := range k.Models {
@@ -55,6 +62,23 @@ func NewKeys(keys []config.Key) *Keys {
 		t.byDigest[digest] = p
 	}
 	return t
+}
+
+// limit converts a validated config rate.
+func limit(r *config.Rate) *ratelimit.Limit {
+	if r == nil {
+		return nil
+	}
+	return &ratelimit.Limit{Rate: r.Rate, Period: r.Per, Burst: r.Burst}
+}
+
+// keyBudget converts a validated config budget.
+func keyBudget(b *config.KeyBudget) *budget.Budget {
+	if b == nil {
+		return nil
+	}
+	usd, _ := cost.ParseUSD(string(b.USD)) // config.Validate rejects bad amounts
+	return &budget.Budget{Limit: usd, Period: budget.Period(b.Period)}
 }
 
 // Lookup resolves a presented key. The lookup is by SHA-256 digest, so the

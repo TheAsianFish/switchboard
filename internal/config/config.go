@@ -29,6 +29,13 @@ type Config struct {
 	Providers []Provider `yaml:"providers"`
 	Models    []Model    `yaml:"models"`
 	Keys      []Key      `yaml:"keys"`
+	// AdminListen serves /metrics (and, later, the admin API). It is a
+	// separate listener so per-key names and spend never reach the public
+	// port; the default is loopback only.
+	AdminListen string       `yaml:"admin_listen"`
+	Redis       Redis        `yaml:"redis"`
+	RateLimit   RateLimit    `yaml:"ratelimit"`
+	Budget      BudgetPolicy `yaml:"budget"`
 }
 
 // Log configures the process logger.
@@ -71,6 +78,12 @@ type Model struct {
 	Provider string `yaml:"provider"`
 	// Upstream is the provider's own name for the model; defaults to Name.
 	Upstream string `yaml:"upstream"`
+	// Price overrides the built-in list price for the upstream name.
+	Price *Price `yaml:"price"`
+	// MaxOutputTokens is the output a request without max_tokens is
+	// assumed to produce when it is admitted and reserved; the default is
+	// DefaultOutputEstimate.
+	MaxOutputTokens int `yaml:"max_output_tokens"`
 }
 
 // Key is a client API key. Exactly one of Key and SHA256 is set; SHA256 is
@@ -81,18 +94,30 @@ type Key struct {
 	SHA256 string `yaml:"sha256"`
 	// Models restricts the key to these model names; empty allows all.
 	Models []string `yaml:"models"`
+	// Limits are the key's rate limits; none by default.
+	Limits Limits `yaml:"limits"`
+	// Budget is the key's dollar allowance; none by default.
+	Budget *KeyBudget `yaml:"budget"`
 }
 
 // Defaults applied before the file is read.
 const (
-	DefaultListen  = "127.0.0.1:8080"
-	DefaultTimeout = 10 * time.Minute
+	DefaultListen      = "127.0.0.1:8080"
+	DefaultAdminListen = "127.0.0.1:9090"
+	DefaultTimeout     = 10 * time.Minute
 )
 
 // Load reads the file at path (which may be empty for an all-defaults
 // config) and applies environment overrides from getenv.
 func Load(path string, getenv func(string) string) (*Config, error) {
-	cfg := &Config{Listen: DefaultListen, Log: Log{Format: "json", Level: "info"}}
+	cfg := &Config{
+		Listen:      DefaultListen,
+		AdminListen: DefaultAdminListen,
+		Log:         Log{Format: "json", Level: "info"},
+		Redis:       Redis{Timeout: DefaultRedisTimeout, KeyPrefix: DefaultKeyPrefix},
+		RateLimit:   RateLimit{Algorithm: "fixed_window", Replicas: 1, RetryInterval: DefaultRetryInterval},
+		Budget:      BudgetPolicy{GraceUSD: DefaultGraceUSD, ReservationTTL: 15 * time.Minute},
+	}
 	if path != "" {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -119,6 +144,9 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		if cfg.Models[i].Upstream == "" {
 			cfg.Models[i].Upstream = cfg.Models[i].Name
 		}
+		if cfg.Models[i].MaxOutputTokens == 0 {
+			cfg.Models[i].MaxOutputTokens = DefaultOutputEstimate
+		}
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -139,6 +167,12 @@ func applyEnv(cfg *Config, getenv func(string) string) {
 	set(&cfg.Listen, "SWITCHBOARD_LISTEN")
 	set(&cfg.Log.Format, "SWITCHBOARD_LOG_FORMAT")
 	set(&cfg.Log.Level, "SWITCHBOARD_LOG_LEVEL")
+	set(&cfg.AdminListen, "SWITCHBOARD_ADMIN_LISTEN")
+	set(&cfg.Redis.URL, "SWITCHBOARD_REDIS_URL")
+	set(&cfg.RateLimit.Algorithm, "SWITCHBOARD_RATELIMIT_ALGORITHM")
+	if n, ok := atoi(getenv("SWITCHBOARD_RATELIMIT_REPLICAS")); ok {
+		cfg.RateLimit.Replicas = n
+	}
 	for i := range cfg.Providers {
 		set(&cfg.Providers[i].BaseURL, "SWITCHBOARD_PROVIDER_"+envName(cfg.Providers[i].Name)+"_BASE_URL")
 	}
@@ -181,7 +215,9 @@ func (c *Config) Validate() error {
 		}
 	}
 	models := map[string]bool{}
+	byName := map[string]Model{}
 	for i, m := range c.Models {
+		byName[m.Name] = m
 		switch {
 		case m.Name == "":
 			errs = append(errs, fmt.Errorf("models[%d]: name is required", i))
@@ -212,6 +248,7 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
+	errs = append(errs, c.validateShared(byName)...)
 	return errors.Join(errs...)
 }
 
