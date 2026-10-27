@@ -72,6 +72,15 @@ type LimitsResult struct {
 	// Whole is the run as one phase; Phases splits it at the outage.
 	Whole  Phase   `json:"whole_run"`
 	Phases []Phase `json:"phases,omitempty"`
+	// LimiterWindows counts admissions per window as a fixed-window
+	// limiter aligns them; with one shared counter none exceeds the rate.
+	LimiterWindows      []LimiterWindow `json:"limiter_windows"`
+	MostInLimiterWindow int             `json:"most_in_limiter_window"`
+	// Latency is the bench's latency over the requests that succeeded.
+	Latency bench.Stats `json:"latency_ok"`
+	// AdmittedAt is when each admitted request reached the provider, in
+	// seconds from the start, so every window above can be recomputed.
+	AdmittedAt []float64 `json:"admitted_at_seconds"`
 }
 
 // BudgetResult is the shared-budget scenario.
@@ -84,7 +93,10 @@ type BudgetResult struct {
 	Outcomes         map[string]int `json:"outcomes"`
 	Admitted         int            `json:"admitted"`
 	Incomplete       int            `json:"incomplete"`
-	Price            struct {
+	// MaxTokens is the max_tokens each request sent, which its
+	// reservation is the worst case of.
+	MaxTokens int `json:"max_tokens"`
+	Price     struct {
 		InputPerMTok  string `json:"input_per_mtok"`
 		OutputPerMTok string `json:"output_per_mtok"`
 	} `json:"price"`
@@ -212,6 +224,12 @@ func limitsMain(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	res.Outcomes = b.Outcomes
 	res.Admitted = len(times)
 	res.Whole = phase("whole run", times, l, from, from, to)
+	res.LimiterWindows = PerLimiterWindow(times, l.Period, from, to)
+	res.MostInLimiterWindow = MostInLimiterWindow(res.LimiterWindows)
+	res.Latency = b.Latency
+	for _, t := range sortedTimes(times) {
+		res.AdmittedAt = append(res.AdmittedAt, round(t.Sub(from).Seconds()))
+	}
 	if outFrom > 0 {
 		of, ot := unix(outFrom), unix(outTo)
 		res.Phases = []Phase{
@@ -294,6 +312,7 @@ func budgetMain(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	res.OfferedPerSecond = b.Config.Rate
 	res.Offered = b.Requests + b.WarmupRequests
 	res.Outcomes = b.Outcomes
+	res.MaxTokens = b.Config.MaxTokens
 	for _, e := range entries {
 		if e.Model != c.model {
 			continue

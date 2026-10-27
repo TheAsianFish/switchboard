@@ -79,3 +79,34 @@ func TestWorstConforming(t *testing.T) {
 		t.Errorf("Worst = %+v, want nothing over", w)
 	}
 }
+
+func TestPerLimiterWindow(t *testing.T) {
+	t.Parallel()
+	// t0 is on a minute boundary; the run starts 50 s before the next.
+	from := t0.Add(10 * time.Second)
+	to := from.Add(130 * time.Second) // ends 20 s into the third window
+	times := at(10, 59.999, 60, 61, 119.5, 120, 139.9, 140, 5)
+	got := PerLimiterWindow(times, time.Minute, from, to)
+	want := []LimiterWindow{
+		{StartSeconds: -10, Admitted: 2, Partial: true}, // 10, 59.999; 5 is before the run
+		{StartSeconds: 50, Admitted: 3},                 // 60, 61, 119.5
+		{StartSeconds: 110, Admitted: 2, Partial: true}, // 120, 139.9; 140 is the end, excluded
+	}
+	if len(got) != len(want) {
+		t.Fatalf("windows = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("window %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if n := MostInLimiterWindow(got); n != 3 {
+		t.Errorf("most = %d, want 3", n)
+	}
+	// A run that starts and ends on boundaries has only whole windows.
+	for _, w := range PerLimiterWindow(nil, time.Minute, t0, t0.Add(2*time.Minute)) {
+		if w.Partial {
+			t.Errorf("window %+v marked partial", w)
+		}
+	}
+}

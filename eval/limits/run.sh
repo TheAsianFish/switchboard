@@ -22,7 +22,7 @@ rate=${RATE:-5} # 300 requests per minute: 3× the limit
 algorithms=${ALGORITHMS:-fixed_window gcra}
 budget_rate=${BUDGET_RATE:-20}
 budget_duration=${BUDGET_DURATION:-30}
-out=eval/results/q2-limits
+final=eval/results/q2-limits
 command="DURATION=$duration OUTAGE_AT=$outage_at OUTAGE_FOR=$outage_for RATE=$rate ALGORITHMS='$algorithms' eval/limits/run.sh"
 if [[ -z ${DURATION:-}${OUTAGE_AT:-}${OUTAGE_FOR:-}${RATE:-}${ALGORITHMS:-} ]]; then
 	command="make test-limits"
@@ -31,6 +31,9 @@ fi
 project=switchboard-limits
 compose=(docker compose -f deploy/compose.yaml -f eval/limits/compose.yaml -p "$project" --profile fleet)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/switchboard-q2.XXXXXX")
+# Results are written here and moved into $final only when every scenario
+# has run, so a failed run leaves the committed results alone.
+out=$tmp/results
 
 cleanup() {
 	local status=$?
@@ -157,7 +160,6 @@ go build -o bin/switchboard ./cmd/switchboard
 wait_for "fake provider" curl -fsS http://127.0.0.1:9101/healthz
 
 mkdir -p "$out"
-rm -f "$out"/*.json
 for algorithm in $algorithms; do
 	name=${algorithm//_/-}
 	run_limits "$name" "$algorithm" redis no
@@ -166,4 +168,11 @@ done
 run_limits no-shared-store fixed_window none no
 run_budget
 
-echo "q2: results in $out. Run 'make results' to render RESULTS.md." >&2
+# A full run replaces every file; a partial one (ALGORITHMS=gcra) only
+# the scenarios it ran.
+mkdir -p "$final"
+if [[ $command == "make test-limits" ]]; then
+	rm -f "$final"/*.json
+fi
+mv "$out"/*.json "$final"/
+echo "q2: results in $final. Run 'make results' to render RESULTS.md." >&2

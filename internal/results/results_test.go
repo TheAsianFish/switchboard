@@ -231,7 +231,7 @@ func TestRenderQ2(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"| fixed-window | redis | fixed_window | 900 | 337 | 563 | 0 | 20 | 100 | 53 | 47 | 138 | 120 | 18 |",
+		"| fixed-window | redis | fixed_window | 900 | 337 | 563 | 0 | — (100) | 20 | 100 | 53 | 47 | 138 | 120 | 18 | — / — |",
 		"| Redis down | 60.003 | 120.328 | 148 | 120 | 28 |",
 		"total budget of $0.10",
 		"| $0.099045000 | $0.099045000 | $0.000000000 |",

@@ -85,3 +85,53 @@ func At(sorted []time.Time, l ratelimit.Limit, w time.Duration, from, to time.Ti
 		Over:         max(int64(n)-b, 0),
 	}
 }
+
+// LimiterWindow is one window as a fixed-window limiter counts it:
+// [k·Period, (k+1)·Period) on the Unix clock, which is the clock Redis's
+// TIME reads on the same host. Partial marks a window the run only
+// covers in part.
+type LimiterWindow struct {
+	StartSeconds float64 `json:"start_seconds"`
+	Admitted     int     `json:"admitted"`
+	Partial      bool    `json:"partial,omitempty"`
+}
+
+// PerLimiterWindow counts times in each aligned window of length period
+// that overlaps [from, to). It is the direct check that replicas share
+// one fixed-window counter: no window may hold more than the rate. Times
+// are when a request reached the provider, a few milliseconds after it
+// was admitted, so a request admitted at the very end of a window can be
+// counted in the next.
+func PerLimiterWindow(times []time.Time, period time.Duration, from, to time.Time) []LimiterWindow {
+	p := period.Microseconds()
+	if p <= 0 || !to.After(from) {
+		return nil
+	}
+	first := from.UnixMicro() / p
+	last := (to.UnixMicro() - 1) / p
+	out := make([]LimiterWindow, last-first+1)
+	for i := range out {
+		k := first + int64(i)
+		start := time.UnixMicro(k * p)
+		out[i] = LimiterWindow{
+			StartSeconds: round(start.Sub(from).Seconds()),
+			Partial:      start.Before(from) || start.Add(period).After(to),
+		}
+	}
+	for _, t := range times {
+		if t.Before(from) || !t.Before(to) {
+			continue
+		}
+		out[t.UnixMicro()/p-first].Admitted++
+	}
+	return out
+}
+
+// MostInLimiterWindow is the largest count among ws.
+func MostInLimiterWindow(ws []LimiterWindow) int {
+	most := 0
+	for _, w := range ws {
+		most = max(most, w.Admitted)
+	}
+	return most
+}

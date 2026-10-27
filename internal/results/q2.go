@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/TheAsianFish/switchboard/internal/cost"
 	"github.com/TheAsianFish/switchboard/internal/limitseval"
@@ -46,6 +48,14 @@ type Q2Row struct {
 	SixtyStart, WorstStart    string
 	OtherErrors               int
 	OfferedRate, DurationSecs string
+	// MostInWindow is the most admitted in one aligned limiter window,
+	// Windows every window's count ("*" marks one the run covers in
+	// part), Rate the limit's rate for comparison.
+	MostInWindow string
+	Windows      string
+	Rate         int64
+	// P50 and P99 are the latency of the requests that succeeded, in ms.
+	P50, P99 string
 }
 
 // Q2Outage is the phase table of one outage run.
@@ -72,6 +82,10 @@ type Q2Budget struct {
 	MatchesToCent, MetricsToCent, WithinBudget      string
 	Scraped, Replicas                               int
 	InputPrice, OutputPrice, OfferedRate            string
+	// MaxTokens is the max_tokens each request sent; OutPerRequest the
+	// output tokens the provider returned per admitted request.
+	MaxTokens     int
+	OutPerRequest string
 }
 
 // scenarioOrder is the order of the full run, which is also the table's.
@@ -162,7 +176,27 @@ func limitsRow(r limitseval.LimitsResult) Q2Row {
 		WorstStart:   num(r.Whole.Worst.StartSeconds),
 		OfferedRate:  num(r.OfferedPerSecond),
 		DurationSecs: fmt.Sprintf("%.0f", r.DurationSeconds),
+		Rate:         r.Limit.Rate,
+		// Result files from before these fields were recorded have none.
+		MostInWindow: "—",
+		P50:          "—",
+		P99:          "—",
 	}
+	if len(r.LimiterWindows) > 0 {
+		row.MostInWindow = strconv.Itoa(r.MostInLimiterWindow)
+	}
+	if r.Latency.Count > 0 {
+		row.P50, row.P99 = fmt.Sprintf("%.1f", r.Latency.P50), fmt.Sprintf("%.1f", r.Latency.P99)
+	}
+	var ws []string
+	for _, w := range r.LimiterWindows {
+		v := strconv.Itoa(w.Admitted)
+		if w.Partial {
+			v += "*"
+		}
+		ws = append(ws, v)
+	}
+	row.Windows = strings.Join(ws, " · ")
 	if s := r.Whole.Sixty; s != nil {
 		row.SixtyAdmitted, row.SixtyBound, row.SixtyOver, row.SixtyStart = s.Admitted, s.Bound, s.Over, num(s.StartSeconds)
 	}
@@ -193,6 +227,10 @@ func budgetRow(b limitseval.BudgetResult) *Q2Budget {
 		MatchesToCent: yes(b.MatchesToCent), MetricsToCent: yes(b.MetricsToCent), WithinBudget: yes(b.WithinBudget),
 		Scraped: b.ScrapedReplicas, Replicas: b.Replicas,
 		InputPrice: b.Price.InputPerMTok, OutputPrice: b.Price.OutputPerMTok, OfferedRate: num(b.OfferedPerSecond),
+		MaxTokens: b.MaxTokens,
+	}
+	if b.Admitted > 0 {
+		q.OutPerRequest = num(float64(b.OutputTokens) / float64(b.Admitted))
 	}
 	for k, v := range b.Outcomes {
 		if k != "ok" {

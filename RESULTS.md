@@ -83,11 +83,28 @@ alternative PLAN.md rejected. Redis runs without persistence, so after a
 restart it comes back empty and a fixed-window counter hands out a fresh
 allowance in the middle of a window.
 
-| Scenario | Store | Algorithm | Offered | Admitted | Refused (429) | Other errors | Worst W (s) | Admitted in it | Bound at W | Over at W | Admitted in worst 60 s | Bound at 60 s | Over at 60 s |
-|----------|-------|-----------|--------:|---------:|--------------:|-------------:|------------:|---------------:|-----------:|----------:|-----------------------:|--------------:|-------------:|
-| fixed-window | redis | fixed_window | 900 | 337 | 563 | 0 | 20 | 100 | 53 | 47 | 138 | 120 | 18 |
-| fixed-window-redis-outage | redis | fixed_window | 900 | 445 | 455 | 0 | 31 | 153 | 71 | 82 | 154 | 120 | 34 |
-| no-shared-store | none | fixed_window | 900 | 900 | 0 | 0 | 60 | 301 | 120 | 181 | 301 | 120 | 181 |
+That bound is GCRA's promise, and the fixed window is not built to keep
+it: by design it may admit up to twice its rate across a boundary. What a
+fixed window does promise is at most the rate in each of its own windows,
+so the table also counts admissions per limiter window, aligned to the
+Unix clock as the script aligns them to Redis's `TIME` (both containers
+read the host's clock). With one counter shared by the three replicas, no
+window may exceed the rate; per-replica counters would allow three times
+it. Arrival is recorded at the provider, a few milliseconds after
+admission, so a request admitted at the very end of a window can land in
+the next one.
+
+| Scenario | Store | Algorithm | Offered | Admitted | Refused (429) | Other errors | Most in one limiter window (rate) | Worst W (s) | Admitted in it | Bound at W | Over at W | Admitted in worst 60 s | Bound at 60 s | Over at 60 s | Latency p50 / p99 of admitted (ms) |
+|----------|-------|-----------|--------:|---------:|--------------:|-------------:|----------------------------------:|------------:|---------------:|-----------:|----------:|-----------------------:|--------------:|-------------:|-----------------------------------:|
+| fixed-window | redis | fixed_window | 900 | 337 | 563 | 0 | — (100) | 20 | 100 | 53 | 47 | 138 | 120 | 18 | — / — |
+| fixed-window-redis-outage | redis | fixed_window | 900 | 445 | 455 | 0 | — (100) | 31 | 153 | 71 | 82 | 154 | 120 | 34 | — / — |
+| no-shared-store | none | fixed_window | 900 | 900 | 0 | 0 | — (100) | 60 | 301 | 120 | 181 | 301 | 120 | 181 | — / — |
+
+Admitted per limiter window, in order (`*`: a window the run covers only in part):
+
+- `fixed-window`: not recorded
+- `fixed-window-redis-outage`: not recorded
+- `no-shared-store`: not recorded
 
 Phases of `fixed-window-redis-outage` (seconds from the start of the run; bound over the
 whole phase, and the worst window inside it):
@@ -101,8 +118,7 @@ whole phase, and the worst window inside it):
 **Shared budget.** A second key has a total budget of $0.10 on a model
 priced at $3 in and $15 out per million tokens.
 `switchboard bench` offered 20 requests per second (600
-requests, `max_tokens` 64, so each reservation is the worst case of 64
-output tokens and is settled to the 30 the fake provider returns) through
+requests) through
 the same three replicas. The provider's ledger is priced independently of
 the gateway's cost code, with exact rationals.
 
