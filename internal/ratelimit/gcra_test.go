@@ -79,3 +79,33 @@ func TestGCRAValidatesFirst(t *testing.T) {
 		}
 	}
 }
+
+// The key lives exactly as long as its TAT is ahead of now, whether Allow
+// or Adjust moved it, and is gone once it has drained.
+func TestGCRAKeysExpire(t *testing.T) {
+	t.Parallel()
+	m := miniredis.RunT(t)
+	m.SetTime(ratelimittest.Start)
+	g := ratelimit.NewGCRA(newClient(t, m), "p:")
+	l := ratelimit.Limit{Rate: 60, Period: time.Minute, Burst: 10} // T = 1 s
+	ctx := context.Background()
+	if _, err := g.Allow(ctx, "user", l, 5); errors.Is(err, ratelimit.ErrNotImplemented) {
+		t.Skip("GCRA is not implemented yet")
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	const key = "p:rl:gcra:{user}"
+	if ttl := m.TTL(key); ttl != 5*time.Second {
+		t.Fatalf("TTL after Allow(5) = %v, want 5s (TAT − now)", ttl)
+	}
+	if err := g.Adjust(ctx, "user", l, 3); err != nil {
+		t.Fatal(err)
+	}
+	if ttl := m.TTL(key); ttl != 8*time.Second {
+		t.Fatalf("TTL after Adjust(3) = %v, want 8s", ttl)
+	}
+	m.FastForward(8 * time.Second)
+	if keys := m.Keys(); len(keys) != 0 {
+		t.Fatalf("keys after the TAT drained = %v, want none", keys)
+	}
+}

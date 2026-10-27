@@ -28,8 +28,14 @@ import (
 //     more unit every T after that.
 //   - Allow computes tat' = max(TAT, now) + cost·T and admits iff
 //     tat' − now ≤ τ, storing tat'. A refusal stores nothing.
-//   - Remaining, after the decision, is floor((now + τ − TAT) / T) on the
-//     stored TAT, and never below zero (a key in debt has none).
+//   - Remaining, after the decision, is floor((now + τ − max(TAT, now)) / T)
+//     on the TAT stored after it (unchanged by a refusal), and never below
+//     zero (a key in debt has none). The max matters: a drained key's TAT
+//     can lie in the past, and Remaining never exceeds Burst.
+//   - T is a whole number of microseconds (config rejects a Period/Rate
+//     below 1 µs). When Period/Rate is not whole, round T up, so the
+//     limiter never admits faster than Rate; the suites use limits where
+//     it is whole, against an oracle that keeps exact fractions.
 //   - RetryAfter of a refusal is tat' − now − τ: after exactly that long,
 //     with nothing else arriving, the same request is admitted. It is Never
 //     when cost > Burst, since no TAT can make room for it.
