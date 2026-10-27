@@ -26,10 +26,16 @@ jobs:
         run: make fmt
       - name: go vet
         run: make vet
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+      # Built from source with the module's Go: a prebuilt golangci-lint
+      # compiled with an older Go refuses to lint a go 1.27 module.
+      - uses: actions/cache@v6
         with:
-          version: v2.15.0
+          path: bin
+          key: golangci-${{ runner.os }}-${{ hashFiles('go.mod', 'Makefile') }}
+      - name: golangci-lint
+        run: |
+          test -x bin/golangci-lint || make tools
+          make lint
 
   test:
     runs-on: ubuntu-latest
