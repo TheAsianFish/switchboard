@@ -1,0 +1,19 @@
+# Overlay on deploy/compose.yaml for `make test-limits`: the three fleet
+# replicas run eval/limits/switchboard.yaml, with the algorithm and the
+# Redis URL chosen per scenario by eval/limits/run.sh. Paths are relative
+# to deploy/, the project directory.
+x-limits: &limits
+  environment:
+    SWITCHBOARD_CONFIG: /etc/switchboard/limits/switchboard.yaml
+    SWITCHBOARD_RATELIMIT_ALGORITHM: ${ALGORITHM:-fixed_window}
+    # Set to empty for the scenario without a shared store.
+    SWITCHBOARD_REDIS_URL: ${REDIS_URL-redis://redis:6379/0}
+    SWITCHBOARD_LOG_FORMAT: json
+  volumes:
+    - ../eval/limits:/etc/switchboard/limits:ro
+  restart: "no"
+
+services:
+  switchboard-1: *limits
+  switchboard-2: *limits
+  switchboard-3: *limits

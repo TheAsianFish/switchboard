@@ -1,0 +1,33 @@
+# Gateway config for `make test-limits` (Q2). Each replica reaches the fake
+# provider over HTTP, so every request that gets past the limits lands in
+# the fake provider's ledger with its arrival time and usage. Each scenario
+# has its own key and upstream model name, so the ledger attributes every
+# request to the key that sent it.
+listen: 0.0.0.0:8080
+log:
+  format: json
+  level: warn
+providers:
+  - name: fake
+    type: openaicompat
+    base_url: http://fake-provider:9101/v1
+    timeout: 30s
+models:
+  - name: fake-limits
+    provider: fake
+  - name: fake-budget
+    provider: fake
+    # A made-up price so spend is not zero: $3 in, $15 out per MTok.
+    price: {input: 3, output: 15}
+keys:
+  # PLAN.md's Q2 limit: 100 requests per minute with a burst of 20.
+  - name: limits
+    key: sk-limits
+    models: [fake-limits]
+    limits:
+      requests: {rate: 100, per: 1m, burst: 20}
+  # Ten cents, spent by a few hundred requests from three replicas at once.
+  - name: budget
+    key: sk-budget
+    models: [fake-budget]
+    budget: {usd: "0.10", period: total}
