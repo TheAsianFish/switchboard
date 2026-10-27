@@ -433,3 +433,30 @@ func TestChargedRequestsAreCappedAtTheirEstimate(t *testing.T) {
 		})
 	}
 }
+
+// A max_tokens large enough to overflow the cost arithmetic is the
+// client's error, and charges nothing.
+func TestHugeMaxTokensIsRefused(t *testing.T) {
+	t.Parallel()
+	reqs := ratelimit.Limit{Rate: 10, Period: time.Minute, Burst: 10}
+	p, lim, led, met := single(t, config.Key{
+		Name: "k", Key: "sk",
+		Limits: config.Limits{Requests: &config.Rate{Rate: 10, Per: time.Minute, Burst: 10}},
+		Budget: &config.KeyBudget{USD: "1", Period: "total"},
+	}, fake.New(fake.Config{Tokens: 5}))
+	ctx, _ := p.Authenticate(context.Background(), "sk")
+	for _, n := range []int{MaxRequestTokens + 1, 922337203685478} {
+		_, err := p.Complete(ctx, &core.Request{Model: "m", MaxTokens: n, Messages: []core.Message{{Role: core.RoleUser, Text: "hi"}}})
+		if core.AsError(err).Kind != core.KindInvalidRequest {
+			t.Errorf("max_tokens %d: %v, want invalid request", n, err)
+		}
+	}
+	d, _ := lim.Allow(context.Background(), "req:k", reqs, 1)
+	bal, _ := led.Balance(context.Background(), "k", budget.Budget{Limit: cost.Dollar, Period: budget.PeriodTotal})
+	if d.Remaining != 9 || bal.Reserved != 0 {
+		t.Errorf("request limit remaining %d, reserved %v: a refused request was charged", d.Remaining, bal.Reserved)
+	}
+	if n := sum(t, []*telemetry.Metrics{met}, "switchboard_store_errors_total", nil); n != 0 {
+		t.Errorf("store errors = %v, want 0", n)
+	}
+}

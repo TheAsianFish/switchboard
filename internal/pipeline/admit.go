@@ -50,6 +50,11 @@ func (a *admission) charged() bool {
 	return (a.tokens != 0 || a.reservation != nil) && a.estimate.OutputTokens > 0
 }
 
+// MaxRequestTokens is the largest max_tokens the gateway accepts. It is far
+// above any model's output limit and keeps the worst-case cost of a
+// request well inside int64 nanodollars.
+const MaxRequestTokens = 1 << 24
+
 func requestsKey(pr *auth.Principal) string { return "req:" + pr.Name }
 func tokensKey(pr *auth.Principal) string   { return "tok:" + pr.Name }
 
@@ -58,6 +63,9 @@ func tokensKey(pr *auth.Principal) string   { return "tok:" + pr.Name }
 // separate store calls, so a refusal by a later one leaves a short window
 // in which an earlier charge counted against the key.
 func (p *Pipeline) admit(ctx context.Context, pr *auth.Principal, rt Route, req *core.Request) (*admission, error) {
+	if req.MaxTokens > MaxRequestTokens {
+		return nil, core.Errorf(core.KindInvalidRequest, "max_tokens %d is above this gateway's limit of %d", req.MaxTokens, MaxRequestTokens)
+	}
 	a := &admission{pr: pr, route: rt, estimate: cost.Estimate(req, rt.OutputEstimate), start: p.now()}
 	lim := p.policy.Limiter
 	if lim != nil && pr.Requests != nil {
@@ -89,6 +97,11 @@ func (p *Pipeline) admit(ctx context.Context, pr *auth.Principal, rt Route, req 
 	}
 	if p.policy.Ledger != nil && pr.Budget != nil {
 		amount := rt.Price.Of(a.estimate)
+		if amount < 0 || amount >= budget.MaxExact {
+			p.refundRequest(ctx, a)
+			p.refundTokens(ctx, a)
+			return nil, core.Errorf(core.KindInvalidRequest, "this request could cost more than a budget can track (%s); send a smaller request", usd(amount))
+		}
 		res, err := p.policy.Ledger.Reserve(ctx, pr.Name, *pr.Budget, telemetry.NewRequestID(), amount)
 		if err != nil {
 			p.refundRequest(ctx, a)
