@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"sync"
 	"testing"
@@ -326,6 +328,72 @@ func TestCacheKeyCoversRoute(t *testing.T) {
 				if got := h.Get(cache.StatusHeader); got != string(want) {
 					t.Fatalf("call %d: status %q, want %q", i+1, got, want)
 				}
+			}
+		})
+	}
+}
+
+// cutShort streams a start event and two deltas, then ends with err: io.EOF
+// for an upstream that hangs up without a stop event, or a read error.
+type cutShort struct{ err error }
+
+func (c cutShort) Complete(context.Context, *core.Request) (*core.Response, error) {
+	return nil, errors.New("not used")
+}
+
+func (c cutShort) Stream(context.Context, *core.Request) (core.Stream, error) {
+	return &failingStream{SliceStream: core.SliceStream{Events: []core.Event{
+		{Kind: core.EventStart, Usage: core.Usage{InputTokens: 3}},
+		{Kind: core.EventDelta, Text: "Paris is "},
+		{Kind: core.EventDelta, Text: "the"},
+	}}, err: c.err}, nil
+}
+
+type failingStream struct {
+	core.SliceStream
+	err error
+}
+
+func (f *failingStream) Next() (core.Event, error) {
+	ev, err := f.SliceStream.Next()
+	if errors.Is(err, io.EOF) {
+		return ev, f.err
+	}
+	return ev, err
+}
+
+// A stream that ends before its stop event is not a whole reply and is not
+// stored, whether the upstream hung up or failed mid-stream.
+func TestStreamCutShortIsNotStored(t *testing.T) {
+	t.Parallel()
+	for name, err := range map[string]error{
+		"eof without stop": io.EOF,
+		"mid-stream error": core.Errorf(core.KindOverloaded, "connection reset"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c := cache.New(cache.Options{KV: cache.NewMemoryKV(10, time.Now), TTL: time.Hour})
+			p := New(auth.NewKeys([]config.Key{{Name: "k", Key: "sk", Cache: "exact"}}),
+				[]Route{{Model: "m", ProviderName: "fake", Upstream: "u", Provider: cutShort{err: err}}}, Policy{Cache: c})
+			req := deterministic("m", "", "What is the capital of France?")
+			// The second identical request must miss and go upstream again.
+			for i := range 2 {
+				ctx, rep := cache.WithRequest(context.Background(), "")
+				ctx, _ = p.Authenticate(ctx, "sk")
+				s, serr := p.Stream(ctx, req)
+				if serr != nil {
+					t.Fatal(serr)
+				}
+				h := http.Header{}
+				rep.WriteHeaders(h)
+				if got := h.Get(cache.StatusHeader); got != string(cache.StatusMiss) {
+					t.Fatalf("call %d: status %q, want miss", i+1, got)
+				}
+				if _, cerr := core.Collect(s); cerr == nil {
+					t.Fatalf("call %d: the stream did not fail", i+1)
+				}
+				_ = s.Close()
+				c.Wait()
 			}
 		})
 	}
