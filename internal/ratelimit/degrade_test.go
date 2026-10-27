@@ -437,3 +437,19 @@ func TestDegradingShareTooSmallIsAWait(t *testing.T) {
 		t.Errorf("decision %+v, want a refusal retrying after the probe interval", d)
 	}
 }
+
+// A request above the full limit cannot be admitted by any replica, with
+// or without Redis, so the outage does not turn it into a wait.
+func TestDegradingTooBigForTheFullLimitIsNever(t *testing.T) {
+	t.Parallel()
+	f := newDegradeFixture(3)
+	f.primary.set(errStore, false)
+	l := ratelimit.Limit{Rate: 1000, Period: time.Minute, Burst: 1000}
+	d, err := f.d.Allow(f.ctx, "tok", l, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Allowed || d.RetryAfter != ratelimit.Never {
+		t.Errorf("decision %+v, want a refusal with RetryAfter Never", d)
+	}
+}

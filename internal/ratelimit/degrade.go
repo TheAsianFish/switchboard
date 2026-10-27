@@ -102,10 +102,12 @@ func (d *Degrading) Allow(ctx context.Context, key string, l Limit, cost int64) 
 		return dec, err
 	}
 	dec, err = d.Local.Allow(ctx, key, d.LocalLimit(l), cost)
-	if err == nil && dec.RetryAfter == Never {
-		// Too big for this replica's share, though the full limit would
+	if err == nil && dec.RetryAfter == Never && cost <= max(l.Rate, l.Burst) {
+		// Too big for this replica's share, though the full limit may
 		// take it: that is the outage's fault, not the request's, so it
-		// is refused as rate limited until Redis can be tried again.
+		// is refused as rate limited until Redis can be tried again. A
+		// cost above both Rate and Burst fits no algorithm's limit and
+		// stays Never.
 		dec.RetryAfter = d.retryInterval()
 	}
 	return dec, err
