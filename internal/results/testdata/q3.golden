@@ -56,7 +56,7 @@ Ollama client (`/api/embed`) and every pair is scored by the cosine of its
 two embeddings, rounded to six decimals in the raw files. A pair hits at
 threshold t when its cosine is at least t and, with the number guard on,
 both sides contain the same numbers in the same order (`cache.SameNumbers`,
-which also reads spelled-out numbers). The threshold is swept from 0.5000 to 0.99 in steps
+which also reads spelled-out numbers). The threshold is swept from 0.5000 to 0.9900 in steps
 of 0.0025 and on to 1.0000 in steps of 0.0001, where the pair sets separate if they
 do at all. Hit rate is over the positives, false-hit rate over the
 negatives, both with Wilson 95% intervals in brackets. Two thresholds are

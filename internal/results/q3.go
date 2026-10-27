@@ -145,7 +145,7 @@ func loadQ3(dir string) (*Q3, error) {
 func buildQ3Sweep(s cacheeval.Summary) *Q3Sweep {
 	q := &Q3Sweep{
 		Target: strconv.FormatFloat(100*s.Target, 'f', -1, 64) + "%", Step: strconv.FormatFloat(s.Step, 'f', -1, 64),
-		FineFrom: strconv.FormatFloat(s.FineFrom, 'f', -1, 64), FineStep: strconv.FormatFloat(s.FineStep, 'f', -1, 64),
+		FineFrom: threshold(s.FineFrom), FineStep: strconv.FormatFloat(s.FineStep, 'f', -1, 64),
 		Models: s.Models, Data: s.Data, Chosen: s.Chosen,
 		ChosenThreshold: threshold(s.Chosen.Threshold),
 		MinNegatives:    minNegatives(s.Target),

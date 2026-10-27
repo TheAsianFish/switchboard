@@ -188,7 +188,7 @@ func dataMain(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		return err
 	}
 	meta := DataMeta{
-		Date: time.Now().UTC().Format(time.RFC3339), Command: "switchboard eval cache-data " + strings.Join(args, " "),
+		Date: time.Now().UTC().Format(time.RFC3339), Command: commandLine("cache-data", args),
 		Model: *model, Seed: *seed, GSMEligible: len(eligible), GSMSampled: len(rows), PAWSRows: len(pawsRows),
 		Sources: []string{pawsRowsURL, gsmTestURL},
 	}

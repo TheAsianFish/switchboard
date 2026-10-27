@@ -106,7 +106,7 @@ func cacheMain(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		info = RunInfo{
 			Commit:   gitCommit(ctx),
 			Date:     time.Now().UTC().Format(time.RFC3339),
-			Command:  "switchboard eval cache " + strings.Join(args, " "),
+			Command:  commandLine("cache", args),
 			Hardware: bench.DetectHardware(),
 		}
 		var err error
@@ -361,10 +361,19 @@ func gitCommit(ctx context.Context) string {
 		return "unknown"
 	}
 	commit := strings.TrimSpace(string(rev))
-	if st, err := exec.CommandContext(ctx, "git", "status", "--porcelain").Output(); err == nil && len(bytes.TrimSpace(st)) > 0 {
+	// Result files do not count, tracked or not: `make eval-cache` runs
+	// the index check after the sweep has rewritten its files, and
+	// neither is a change to the code being measured.
+	status := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=no", "--", ".", ":(exclude)eval/results")
+	if st, err := status.Output(); err == nil && len(bytes.TrimSpace(st)) > 0 {
 		commit += "-dirty"
 	}
 	return commit
+}
+
+// commandLine is how a run was invoked, for its result file.
+func commandLine(sub string, args []string) string {
+	return strings.TrimSpace("switchboard eval " + sub + " " + strings.Join(args, " "))
 }
 
 // printSummary writes the operating points and the chosen default.

@@ -109,7 +109,7 @@ func indexMain(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	info := RunInfo{
 		Commit:   gitCommit(ctx),
 		Date:     time.Now().UTC().Format(time.RFC3339),
-		Command:  "switchboard eval cache-index " + strings.Join(args, " "),
+		Command:  commandLine("cache-index", args),
 		Hardware: bench.DetectHardware(),
 	}
 	if err := os.MkdirAll(c.out, 0o755); err != nil {
