@@ -25,7 +25,7 @@ Non-streaming rows compare total latency;
 streaming rows compare time to first token (TTFT). Percentiles are
 nearest-rank over every request in the window. The generator's own lag (the
 worst p99 delay between a request's scheduled and actual send time across
-all runs) was 1.788 ms.
+all runs) was 1.755 ms.
 
 Added = gateway minus direct. The two sides are independent runs, not paired
 requests, and each cell is a single run per side, so the difference carries
@@ -38,15 +38,15 @@ time spent in the gateway (compare the send delays in the raw files).
 
 | Mode | Rate (req/s) | Metric | Direct p50 (ms) | Direct p99 (ms) | Gateway p50 (ms) | Gateway p99 (ms) | Added p50 (ms) | Added p99 (ms) | Requests (direct / gateway) | Errors (direct / gateway) |
 |------|-------------:|--------|----------------:|----------------:|-----------------:|-----------------:|---------------:|---------------:|----------------------------:|--------------------------:|
-| non-streaming | 50 | total | 21.42 | 22.20 | 21.80 | 22.80 | +0.38 | +0.60 | 3000 / 3000 | 0 / 0 |
-| non-streaming | 200 | total | 21.27 | 22.17 | 21.53 | 22.59 | +0.26 | +0.41 | 12000 / 12000 | 0 / 0 |
-| non-streaming | 500 | total | 21.05 | 22.15 | 21.41 | 22.52 | +0.35 | +0.37 | 30000 / 30000 | 0 / 0 |
-| streaming | 50 | TTFT | 21.28 | 22.45 | 21.33 | 22.09 | +0.05 | -0.36 | 3000 / 3000 | 0 / 0 |
-| streaming | 200 | TTFT | 21.03 | 22.30 | 21.54 | 22.87 | +0.51 | +0.57 | 12000 / 12000 | 0 / 0 |
-| streaming | 500 | TTFT | 21.09 | 22.48 | 21.71 | 24.01 | +0.61 | +1.53 | 30000 / 30000 | 0 / 0 |
+| non-streaming | 50 | total | 21.25 | 22.00 | 21.72 | 22.52 | +0.47 | +0.52 | 3000 / 3000 | 0 / 0 |
+| non-streaming | 200 | total | 21.32 | 22.22 | 21.53 | 22.57 | +0.21 | +0.36 | 12000 / 12000 | 0 / 0 |
+| non-streaming | 500 | total | 21.05 | 22.16 | 21.42 | 22.52 | +0.37 | +0.35 | 30000 / 30000 | 0 / 0 |
+| streaming | 50 | TTFT | 21.33 | 22.39 | 21.36 | 22.18 | +0.03 | -0.21 | 3000 / 3000 | 0 / 0 |
+| streaming | 200 | TTFT | 21.07 | 22.33 | 21.58 | 22.97 | +0.51 | +0.64 | 12000 / 12000 | 0 / 0 |
+| streaming | 500 | TTFT | 21.10 | 22.48 | 21.70 | 23.97 | +0.61 | +1.50 | 30000 / 30000 | 0 / 0 |
 
 - Hardware: AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 6.17.0-1022-azure, go1.27.0.
-- Commit: `5399f18`, run 2026-10-26T23:48:52Z.
+- Commit: `1bca260`, run 2026-10-27T00:21:44Z.
 - Command: `RATES='50 200 500' DURATION=60s WARMUP=5s eval/bench/q1.sh`.
 - Cost: $0 (no paid API; the fake provider only).
 
@@ -65,12 +65,12 @@ the client, and says nothing about the gateway's overhead (Q1 does).
 
 | SDK | Model | Backend | Passed | Chunks | Stop reason | Output tokens | TTFT (ms) | Streamed text |
 |-----|-------|---------|--------|-------:|-------------|--------------:|----------:|---------------|
-| anthropic-python 2.3.0 | `qwen2.5:0.5b-via-messages` | ollama /v1/messages (anthropic provider) | yes | 5 | end_turn | 6 | 30 | Red, Yellow, Blue |
-| anthropic-python 2.3.0 | `qwen2.5:0.5b` | ollama /v1/chat/completions (openaicompat provider) | yes | 6 | end_turn | 7 | 81 | Red, Yellow, Blue. |
-| openai-python 3.39.0 | `qwen2.5:0.5b-via-messages` | ollama /v1/messages (anthropic provider) | yes | 5 | stop | 6 | 26 | Red, Yellow, Blue |
-| openai-python 3.39.0 | `qwen2.5:0.5b` | ollama /v1/chat/completions (openaicompat provider) | yes | 5 | stop | 6 | 68 | Red, Yellow, Blue |
+| anthropic-python 2.3.0 | `qwen2.5:0.5b-via-messages` | ollama /v1/messages (anthropic provider) | yes | 5 | end_turn | 6 | 29 | Red, Yellow, Blue |
+| anthropic-python 2.3.0 | `qwen2.5:0.5b` | ollama /v1/chat/completions (openaicompat provider) | yes | 5 | end_turn | 6 | 85 | Red, Green, Blue |
+| openai-python 3.39.0 | `qwen2.5:0.5b-via-messages` | ollama /v1/messages (anthropic provider) | yes | 5 | stop | 6 | 28 | Red, Yellow, Blue |
+| openai-python 3.39.0 | `qwen2.5:0.5b` | ollama /v1/chat/completions (openaicompat provider) | yes | 5 | stop | 6 | 852 | Red, Yellow, Blue |
 
-Recorded 2026-10-26 on the machine in Q1. Cost: $0 (local Ollama only).
+Recorded 2026-10-27 on the machine in Q1. Cost: $0 (local Ollama only).
 
 ## To measure
 
