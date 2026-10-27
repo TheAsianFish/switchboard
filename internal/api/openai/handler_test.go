@@ -441,19 +441,25 @@ func zeroCreated(t *testing.T, data string) string {
 
 func TestStreamErrorBeforeFirstEvent(t *testing.T) {
 	t.Parallel()
+	start := []core.Event{{Kind: core.EventStart, ID: "x", Model: "m"}}
 	tests := []struct {
 		name   string
+		events []core.Event
 		err    error
 		status int
 	}{
-		{"rate limited", &core.Error{Kind: core.KindRateLimited, Message: "slow down", RetryAfter: time.Second}, 429},
-		{"not found", core.Errorf(core.KindNotFound, "upstream: model 'x' not found"), 404},
-		{"empty stream", nil, 502},
+		{"rate limited", nil, &core.Error{Kind: core.KindRateLimited, Message: "slow down", RetryAfter: time.Second}, 429},
+		{"not found", nil, core.Errorf(core.KindNotFound, "upstream: model 'x' not found"), 404},
+		{"empty stream", nil, nil, 502},
+		// Anthropic sends message_start before generating and can still
+		// fail with overloaded_error: that is before the first token too.
+		{"overloaded after start", start, core.Errorf(core.KindOverloaded, "busy"), 503},
+		{"ended after start", start, nil, 502},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			s := newScriptStream(tt.err)
+			s := newScriptStream(tt.err, tt.events...)
 			w := post(t, ChatCompletions(streamGateway(s)), testKey, `{"model":"m","stream":true,"messages":[{"role":"user","content":"x"}]}`)
 			if w.Code != tt.status {
 				t.Fatalf("status %d, want %d", w.Code, tt.status)

@@ -148,6 +148,18 @@ func TestStreamErrorBeforeFirstEvent(t *testing.T) {
 			p:      &stubProvider{newStream: func(context.Context) core.Stream { return &core.SliceStream{} }},
 			status: 502, typ: "api_error",
 		},
+		{
+			// The Anthropic API sends message_start before generating and
+			// can still fail with overloaded_error.
+			name: "fails after the start event",
+			p: &stubProvider{newStream: func(context.Context) core.Stream {
+				return &errStream{
+					SliceStream: core.SliceStream{Events: []core.Event{{Kind: core.EventStart, ID: "msg_1", Model: "m"}}},
+					err:         core.Errorf(core.KindOverloaded, "busy"),
+				}
+			}},
+			status: 529, typ: "overloaded_error",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -200,17 +212,21 @@ func TestStreamMidStreamError(t *testing.T) {
 	}
 }
 
-// blockingStream sends a start event, then blocks until its context ends.
+// blockingStream sends a start event and one token, then blocks until its
+// context ends.
 type blockingStream struct {
 	ctx    context.Context
-	sent   bool
+	sent   int
 	closed chan struct{}
 }
 
 func (s *blockingStream) Next() (core.Event, error) {
-	if !s.sent {
-		s.sent = true
+	s.sent++
+	switch s.sent {
+	case 1:
 		return core.Event{Kind: core.EventStart, ID: "msg_b", Model: "m"}, nil
+	case 2:
+		return core.Event{Kind: core.EventDelta, Text: "Hel"}, nil
 	}
 	<-s.ctx.Done()
 	return core.Event{}, core.Wrap(core.KindTimeout, s.ctx.Err(), "request cancelled")

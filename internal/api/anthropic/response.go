@@ -136,7 +136,9 @@ type (
 )
 
 // serveStream answers a streaming request. Nothing is written until the
-// provider produced its first event, so failures before the first token are
+// first token or the stop event: a start event alone proves little (the
+// Anthropic API sends message_start before it generates, and can still
+// fail with overloaded_error), so failures before the first token are
 // ordinary JSON errors with the right status.
 func serveStream(ctx context.Context, w http.ResponseWriter, gw core.Gateway, req *core.Request) {
 	s, err := gw.Stream(ctx, req)
@@ -154,23 +156,31 @@ func serveStream(ctx context.Context, w http.ResponseWriter, gw core.Gateway, re
 		writeError(ctx, w, err)
 		return
 	}
+	start := first
+	if first.Kind == core.EventStart {
+		first, err = s.Next()
+		if errors.Is(err, io.EOF) {
+			err = core.Errorf(core.KindUpstream, "upstream stream ended early")
+		}
+		if err != nil {
+			writeError(ctx, w, err)
+			return
+		}
+	} else {
+		// Tolerate a provider that skips the start event.
+		start = core.Event{Kind: core.EventStart}
+	}
 
 	sw := sse.NewWriter(w)
 	w.WriteHeader(http.StatusOK)
 	st := &streamWriter{ctx: ctx, w: sw}
-
-	start := first
-	if first.Kind != core.EventStart {
-		// Tolerate a provider that skips the start event.
-		start = core.Event{Kind: core.EventStart}
-	}
 	if start.Model == "" {
 		start.Model = req.Model
 	}
 	if !st.start(start) {
 		return
 	}
-	if first.Kind != core.EventStart && !st.event(first) {
+	if !st.event(first) {
 		return
 	}
 	for {

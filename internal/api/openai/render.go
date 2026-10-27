@@ -137,9 +137,11 @@ func (c *chunkWriter) delta(d delta, finish *string) error {
 	return c.write([]chunkChoice{{Delta: d, FinishReason: finish}}, nil)
 }
 
-// serveStream answers a streaming request. The first event is read before
-// any header is written, so a failure before the first token is an ordinary
-// JSON error with its own status code.
+// serveStream answers a streaming request. Nothing is written until the
+// first token or the stop event: a start event alone proves little (the
+// Anthropic API sends message_start before it generates, and can still
+// fail with overloaded_error), so a failure before the first token is an
+// ordinary JSON error with its own status code.
 func serveStream(ctx context.Context, w http.ResponseWriter, gw core.Gateway, req *core.Request, opts options) {
 	s, err := gw.Stream(ctx, req)
 	if err != nil {
@@ -165,6 +167,13 @@ func serveStream(ctx context.Context, w http.ResponseWriter, gw core.Gateway, re
 			cw.model = ev.Model
 		}
 		startUsage = ev.Usage
+		if ev, err = s.Next(); err != nil {
+			if errors.Is(err, io.EOF) {
+				err = core.Errorf(core.KindUpstream, "upstream stream ended early")
+			}
+			writeError(w, ctx, err)
+			return
+		}
 	} else {
 		cw.id = completionID("")
 	}
