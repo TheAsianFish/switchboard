@@ -352,6 +352,10 @@ func TestDegradingMiniredis(t *testing.T) {
 	clock := ratelimittest.NewClock(ratelimittest.Start)
 	d := ratelimit.NewDegrading(ratelimit.NewFixedWindow(newClient(t, m), "test:"), ratelimit.NewMemoryFixedWindow(clock.Now), 3)
 	d.Now = clock.Now
+	// Generous: under -race on a busy machine the first script call to
+	// miniredis can outlast the 100 ms default, which degrades the
+	// limiter while the store is up.
+	d.Timeout = time.Second
 	ctx := context.Background()
 	l := ratelimit.Limit{Rate: 6, Period: time.Hour, Burst: 6}
 
