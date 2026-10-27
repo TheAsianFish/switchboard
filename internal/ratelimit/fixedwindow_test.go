@@ -198,6 +198,31 @@ func TestFixedWindowKeysExpire(t *testing.T) {
 	}
 }
 
+// A charge by Adjust can create a window's counter (a token correction
+// landing in a window with no admissions yet); it must expire like one
+// made by Allow.
+func TestFixedWindowAdjustedKeysExpire(t *testing.T) {
+	t.Parallel()
+	m := miniredis.RunT(t)
+	m.SetTime(ratelimittest.Start)
+	fw := ratelimit.NewFixedWindow(newClient(t, m), "p:")
+	l := ratelimit.Limit{Rate: 5, Period: time.Minute, Burst: 1}
+	if err := fw.Adjust(context.Background(), "user", l, 3); err != nil {
+		t.Fatal(err)
+	}
+	keys := m.Keys()
+	if len(keys) != 1 {
+		t.Fatalf("keys = %v, want one counter", keys)
+	}
+	if ttl := m.TTL(keys[0]); ttl <= time.Minute || ttl > 2*time.Minute {
+		t.Fatalf("counter TTL = %v, want about two periods", ttl)
+	}
+	m.FastForward(2 * time.Minute)
+	if keys := m.Keys(); len(keys) != 0 {
+		t.Fatalf("keys after two periods = %v, want none", keys)
+	}
+}
+
 func TestMemoryFixedWindowDropsOldWindows(t *testing.T) {
 	t.Parallel()
 	c := ratelimittest.NewClock(ratelimittest.Start)
