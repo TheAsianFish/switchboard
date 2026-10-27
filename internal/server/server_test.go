@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -118,6 +119,32 @@ func TestPanicRecovered(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), `"panic":"boom"`) {
 		t.Errorf("panic not logged: %s", buf.String())
+	}
+}
+
+// TestPanicAfterHeadersAborts checks that a handler panicking mid-reply
+// breaks the connection rather than ending a truncated response cleanly.
+func TestPanicAfterHeadersAborts(t *testing.T) {
+	t.Parallel()
+	h := withRequestContext(slog.New(slog.DiscardHandler), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"partial\":1}\n\n"))
+		w.(http.Flusher).Flush()
+		panic("boom")
+	}))
+	srv := httptest.NewUnstartedServer(h)
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	srv.Start()
+	defer srv.Close()
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err == nil {
+		t.Errorf("read %q to a clean end; want a broken connection", body)
 	}
 }
 

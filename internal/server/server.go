@@ -76,12 +76,18 @@ func withRequestContext(base *slog.Logger, next http.Handler) http.Handler {
 		start := time.Now()
 		defer func() {
 			log := telemetry.Logger(ctx)
+			abort := false
 			if p := recover(); p != nil {
 				if err, ok := p.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 					panic(p)
 				}
 				log.Error("panic serving request", slog.Any("panic", p))
-				if !rec.wroteHeader {
+				if rec.wroteHeader {
+					// Returning would end the response cleanly and a cut-off
+					// reply would read as complete; abort the connection so
+					// the client sees a transport error instead.
+					abort = true
+				} else {
 					rec.Header().Set("Content-Type", "application/json")
 					rec.WriteHeader(http.StatusInternalServerError)
 					_, _ = rec.Write([]byte(`{"error":{"type":"api_error","message":"internal error"}}` + "\n"))
@@ -94,6 +100,9 @@ func withRequestContext(base *slog.Logger, next http.Handler) http.Handler {
 				slog.Int64("bytes", rec.bytes),
 				slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
 			)
+			if abort {
+				panic(http.ErrAbortHandler)
+			}
 		}()
 		next.ServeHTTP(rec, r.WithContext(ctx))
 	})
