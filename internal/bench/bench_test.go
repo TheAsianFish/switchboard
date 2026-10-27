@@ -53,6 +53,7 @@ func TestPercentile(t *testing.T) {
 		{"thousand p99", seq(1000), 99, 990 * time.Millisecond},
 		{"four p50", seq(4), 50, 2 * time.Millisecond},
 		{"three p50", seq(3), 50, 2 * time.Millisecond},
+		{"ten p94", seq(10), 94, 10 * time.Millisecond}, // rank 9.4 rounds up, not to nearest
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,6 +94,25 @@ func sleepCtx(r *http.Request, d time.Duration) bool {
 func okJSON(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = io.WriteString(w, `{"id":"x","choices":[{"message":{"role":"assistant","content":"hi"}}]}`)
+}
+
+// TestSummariseCountsSendDelay pins the coordinated-omission rule: a
+// request the generator sent late is charged from its scheduled time, so a
+// generator that falls behind cannot hide the queueing it caused.
+func TestSummariseCountsSendDelay(t *testing.T) {
+	t.Parallel()
+	at := time.Unix(1000, 0)
+	sent := at.Add(50 * time.Millisecond)
+	rs := []scheduled{{at: at, sample: sample{
+		outcome:    OutcomeOK,
+		sent:       sent,
+		firstToken: sent.Add(5 * time.Millisecond),
+		done:       sent.Add(10 * time.Millisecond),
+	}}}
+	res := summarise(Config{Duration: time.Second}, rs, at, at.Add(time.Second))
+	if res.Latency.P50 != 60 || res.TTFT.P50 != 55 || res.SendDelay.P50 != 50 {
+		t.Errorf("latency %v, ttft %v, send delay %v ms; want 60, 55, 50", res.Latency.P50, res.TTFT.P50, res.SendDelay.P50)
+	}
 }
 
 func TestRunOffersRateAgainstSlowServer(t *testing.T) {
