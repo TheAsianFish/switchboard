@@ -14,6 +14,9 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/embed"
 )
 
+// target is the route every test request is looked up under.
+var target = cache.Upstream{Provider: "p", Model: "upstream-m"}
+
 func zero() *float64 { v := 0.0; return &v }
 
 // req builds a deterministic request whose last user turn is prompt, after
@@ -70,7 +73,7 @@ var answer = &core.Response{Text: "Paris is the capital.", StopReason: core.Stop
 // fill looks r up (expecting a miss) and stores answer as its reply.
 func fill(t *testing.T, c *cache.Cache, tenant string, mode cache.Mode, r *core.Request) {
 	t.Helper()
-	l := c.Lookup(context.Background(), tenant, mode, r)
+	l := c.Lookup(context.Background(), tenant, target, mode, r)
 	if l.Status != cache.StatusMiss {
 		t.Fatalf("fill: lookup status = %s (%s), want miss", l.Status, l.Reason)
 	}
@@ -108,7 +111,7 @@ func TestLookupLayers(t *testing.T) {
 			t.Parallel()
 			c, _ := newCache(t, nil, nil, tt.threshold)
 			fill(t, c, "a", cache.ModeSemantic, base)
-			l := c.Lookup(context.Background(), tt.tenant, tt.mode, tt.query)
+			l := c.Lookup(context.Background(), tt.tenant, target, tt.mode, tt.query)
 			if l.Status != tt.wantStatus {
 				t.Fatalf("status = %s (%s), want %s", l.Status, l.Reason, tt.wantStatus)
 			}
@@ -131,7 +134,7 @@ func TestLookupLayers(t *testing.T) {
 func TestContextCoversParameters(t *testing.T) {
 	t.Parallel()
 	base := req("m", "", "Count to ten.")
-	k0, ok := cache.KeysFor("a", base)
+	k0, ok := cache.KeysFor("a", target, base)
 	if !ok {
 		t.Fatal("base not cacheable")
 	}
@@ -151,8 +154,18 @@ func TestContextCoversParameters(t *testing.T) {
 		r := *base
 		r.Messages = append([]core.Message(nil), base.Messages...)
 		mutate(&r)
-		k, _ := cache.KeysFor("a", &r)
+		k, _ := cache.KeysFor("a", target, &r)
 		if k.Context == k0.Context || k.Exact == k0.Exact {
+			t.Errorf("%s: same keys as the base request", name)
+		}
+	}
+	// The route is part of the context: a model remapped to another
+	// upstream model or provider starts afresh.
+	for name, other := range map[string]cache.Upstream{
+		"upstream model": {Provider: target.Provider, Model: "other"},
+		"provider":       {Provider: "other", Model: target.Model},
+	} {
+		if k, _ := cache.KeysFor("a", other, base); k.Context == k0.Context || k.Exact == k0.Exact {
 			t.Errorf("%s: same keys as the base request", name)
 		}
 	}
@@ -160,11 +173,11 @@ func TestContextCoversParameters(t *testing.T) {
 	// non-streaming request and back.
 	streamed := *base
 	streamed.Stream = true
-	if k, _ := cache.KeysFor("a", &streamed); k != k0 {
+	if k, _ := cache.KeysFor("a", target, &streamed); k != k0 {
 		t.Error("stream flag changed the keys")
 	}
 	// Tenants differ in namespace and in every hash.
-	if k, _ := cache.KeysFor("b", base); k.Namespace == k0.Namespace || k.Context == k0.Context || k.Exact == k0.Exact {
+	if k, _ := cache.KeysFor("b", target, base); k.Namespace == k0.Namespace || k.Context == k0.Context || k.Exact == k0.Exact {
 		t.Error("another tenant shares a key")
 	}
 }
@@ -197,7 +210,7 @@ func TestNumberGuard(t *testing.T) {
 				Now:          clk.now,
 			})
 			fill(t, c, "a", cache.ModeSemantic, req("m", "", tt.stored))
-			if got := c.Lookup(context.Background(), "a", cache.ModeSemantic, req("m", "", tt.ask)).Status; got != tt.want {
+			if got := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, req("m", "", tt.ask)).Status; got != tt.want {
 				t.Errorf("status = %s, want %s", got, tt.want)
 			}
 		})
@@ -210,11 +223,11 @@ func TestExpiry(t *testing.T) {
 	base := req("m", "", "What is the capital of France?")
 	fill(t, c, "a", cache.ModeSemantic, base)
 	clk.add(59 * time.Minute)
-	if s := c.Lookup(context.Background(), "a", cache.ModeSemantic, base).Status; s != cache.StatusExact {
+	if s := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, base).Status; s != cache.StatusExact {
 		t.Fatalf("before expiry: %s", s)
 	}
 	clk.add(2 * time.Minute)
-	if s := c.Lookup(context.Background(), "a", cache.ModeSemantic, req("m", "", "France: what is the capital of?")).Status; s != cache.StatusMiss {
+	if s := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, req("m", "", "France: what is the capital of?")).Status; s != cache.StatusMiss {
 		t.Fatalf("after expiry: %s, want miss", s)
 	}
 }
@@ -227,10 +240,10 @@ func TestFillSkipsIncompleteReplies(t *testing.T) {
 	} {
 		c, _ := newCache(t, nil, nil, 0.9)
 		r := req("m", "", "hello there")
-		l := c.Lookup(context.Background(), "a", cache.ModeSemantic, r)
+		l := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, r)
 		c.Fill(context.Background(), l, resp)
 		c.Wait()
-		if s := c.Lookup(context.Background(), "a", cache.ModeSemantic, r).Status; s != cache.StatusMiss {
+		if s := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, r).Status; s != cache.StatusMiss {
 			t.Errorf("%s: stored (%s)", name, s)
 		}
 	}
@@ -239,12 +252,12 @@ func TestFillSkipsIncompleteReplies(t *testing.T) {
 func TestSkips(t *testing.T) {
 	t.Parallel()
 	c, _ := newCache(t, nil, nil, 0.9)
-	if l := c.Lookup(context.Background(), "a", cache.ModeOff, req("m", "", "hi")); l.Status != cache.StatusSkip || l.Fillable() {
+	if l := c.Lookup(context.Background(), "a", target, cache.ModeOff, req("m", "", "hi")); l.Status != cache.StatusSkip || l.Fillable() {
 		t.Errorf("off: %+v", l)
 	}
 	prefill := req("m", "", "hi")
 	prefill.Messages = append(prefill.Messages, core.Message{Role: core.RoleAssistant, Text: "Once upon"})
-	if l := c.Lookup(context.Background(), "a", cache.ModeSemantic, prefill); l.Status != cache.StatusSkip {
+	if l := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, prefill); l.Status != cache.StatusSkip {
 		t.Errorf("assistant prefill: %+v", l)
 	}
 }
@@ -278,11 +291,11 @@ func TestStoreOutageBypasses(t *testing.T) {
 	kv := &failingKV{KV: cache.NewMemoryKV(10, clk.now), down: true}
 	c := cache.New(cache.Options{KV: kv, TTL: time.Hour, RetryInterval: time.Second, Now: clk.now})
 	r := req("m", "", "hi")
-	if l := c.Lookup(context.Background(), "a", cache.ModeExact, r); l.Status != cache.StatusError || l.Fillable() {
+	if l := c.Lookup(context.Background(), "a", target, cache.ModeExact, r); l.Status != cache.StatusError || l.Fillable() {
 		t.Fatalf("first lookup: %+v", l)
 	}
 	for range 5 {
-		if l := c.Lookup(context.Background(), "a", cache.ModeExact, r); l.Status != cache.StatusSkip {
+		if l := c.Lookup(context.Background(), "a", target, cache.ModeExact, r); l.Status != cache.StatusSkip {
 			t.Fatalf("during bypass: %+v", l)
 		}
 	}
@@ -291,7 +304,7 @@ func TestStoreOutageBypasses(t *testing.T) {
 	}
 	kv.set(false)
 	clk.add(time.Second)
-	if l := c.Lookup(context.Background(), "a", cache.ModeExact, r); l.Status != cache.StatusMiss {
+	if l := c.Lookup(context.Background(), "a", target, cache.ModeExact, r); l.Status != cache.StatusMiss {
 		t.Errorf("after the interval: %+v", l)
 	}
 }
@@ -303,10 +316,10 @@ func TestEmbedderDown(t *testing.T) {
 	c, _ := newCache(t, nil, emb, 0.9)
 	base := req("m", "", "What is the capital of France?")
 	fill(t, c, "a", cache.ModeSemantic, base)
-	if s := c.Lookup(context.Background(), "a", cache.ModeSemantic, base).Status; s != cache.StatusExact {
+	if s := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, base).Status; s != cache.StatusExact {
 		t.Errorf("exact with the embedder down: %s", s)
 	}
-	if s := c.Lookup(context.Background(), "a", cache.ModeSemantic, req("m", "", "France: what is the capital of?")).Status; s != cache.StatusMiss {
+	if s := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, req("m", "", "France: what is the capital of?")).Status; s != cache.StatusMiss {
 		t.Errorf("semantic with the embedder down: %s", s)
 	}
 }
@@ -362,10 +375,10 @@ func TestCancelledClientDoesNotBypass(t *testing.T) {
 	c := cache.New(cache.Options{KV: ctxKV{cache.NewMemoryKV(10, clk.now)}, TTL: time.Hour, Now: clk.now})
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
-	if l := c.Lookup(gone, "a", cache.ModeExact, req("m", "", "hi")); l.Status != cache.StatusError {
+	if l := c.Lookup(gone, "a", target, cache.ModeExact, req("m", "", "hi")); l.Status != cache.StatusError {
 		t.Fatalf("cancelled lookup: %+v", l)
 	}
-	if l := c.Lookup(context.Background(), "b", cache.ModeExact, req("m", "", "hi")); l.Status != cache.StatusMiss {
+	if l := c.Lookup(context.Background(), "b", target, cache.ModeExact, req("m", "", "hi")); l.Status != cache.StatusMiss {
 		t.Errorf("next tenant's lookup: %+v, want a miss", l)
 	}
 }
@@ -399,7 +412,7 @@ func TestEmbedderBackoff(t *testing.T) {
 		emb := &countingEmbedder{err: tc.err}
 		c, _ := newCache(t, nil, emb, 0.9)
 		for range 3 {
-			if l := c.Lookup(context.Background(), "a", cache.ModeSemantic, req("m", "", "hello")); l.Status != cache.StatusMiss {
+			if l := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, req("m", "", "hello")); l.Status != cache.StatusMiss {
 				t.Fatalf("%s: %+v", name, l)
 			}
 		}
@@ -417,16 +430,16 @@ func TestCloseStopsFills(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 20 {
 		wg.Go(func() {
-			c.Fill(context.Background(), c.Lookup(context.Background(), "a", cache.ModeSemantic, r), answer)
+			c.Fill(context.Background(), c.Lookup(context.Background(), "a", target, cache.ModeSemantic, r), answer)
 		})
 	}
 	c.Close()
 	wg.Wait()
 	c.Close()
 	other := req("m", "", "a different question")
-	c.Fill(context.Background(), c.Lookup(context.Background(), "a", cache.ModeSemantic, other), answer)
+	c.Fill(context.Background(), c.Lookup(context.Background(), "a", target, cache.ModeSemantic, other), answer)
 	c.Wait()
-	if s := c.Lookup(context.Background(), "a", cache.ModeSemantic, other).Status; s != cache.StatusMiss {
+	if s := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, other).Status; s != cache.StatusMiss {
 		t.Errorf("filled after Close: %s", s)
 	}
 }
@@ -487,24 +500,24 @@ func TestIndexFailureKeepsExactLayer(t *testing.T) {
 		idx := &failingIndex{failSearch: true}
 		c, clk := newFailing(idx)
 		fill(t, c, "a", cache.ModeExact, base)
-		l := c.Lookup(context.Background(), "a", cache.ModeSemantic, reworded)
+		l := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, reworded)
 		if l.Status != cache.StatusMiss || !l.Fillable() {
 			t.Fatalf("lookup with a failing search: %+v, want a fillable miss", l)
 		}
-		if l := c.Lookup(context.Background(), "a", cache.ModeSemantic, base); l.Status != cache.StatusExact {
+		if l := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, base); l.Status != cache.StatusExact {
 			t.Fatalf("exact lookup after a search failure: %+v, want hit-exact", l)
 		}
 		// The reply to the missed request is still stored exactly.
 		c.Fill(context.Background(), l, answer)
 		c.Wait()
-		if l := c.Lookup(context.Background(), "a", cache.ModeSemantic, reworded); l.Status != cache.StatusExact {
+		if l := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, reworded); l.Status != cache.StatusExact {
 			t.Fatalf("refill after a search failure: %+v, want hit-exact", l)
 		}
 		if idx.searches != 1 {
 			t.Errorf("searches during the back-off = %d, want 1", idx.searches)
 		}
 		clk.add(time.Second)
-		_ = c.Lookup(context.Background(), "b", cache.ModeSemantic, reworded)
+		_ = c.Lookup(context.Background(), "b", target, cache.ModeSemantic, reworded)
 		if idx.searches != 2 {
 			t.Errorf("searches after the back-off = %d, want 2", idx.searches)
 		}
@@ -518,10 +531,10 @@ func TestIndexFailureKeepsExactLayer(t *testing.T) {
 		if idx.adds != 1 {
 			t.Fatalf("adds = %d, want 1", idx.adds)
 		}
-		if l := c.Lookup(context.Background(), "a", cache.ModeSemantic, base); l.Status != cache.StatusExact {
+		if l := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, base); l.Status != cache.StatusExact {
 			t.Fatalf("exact lookup after an add failure: %+v, want hit-exact", l)
 		}
-		if l := c.Lookup(context.Background(), "b", cache.ModeExact, base); l.Status != cache.StatusMiss {
+		if l := c.Lookup(context.Background(), "b", target, cache.ModeExact, base); l.Status != cache.StatusMiss {
 			t.Fatalf("other tenant after an add failure: %+v, want miss", l)
 		}
 	})

@@ -294,3 +294,39 @@ func TestCacheabilityInPipeline(t *testing.T) {
 		}
 	})
 }
+
+// The cache key covers where the model name is routed: after an operator
+// points a model at another upstream model or provider, or while replicas
+// of a rolling deploy disagree, one route's replies never answer another.
+func TestCacheKeyCoversRoute(t *testing.T) {
+	t.Parallel()
+	for name, second := range map[string]Route{
+		"upstream model": {Model: "m", ProviderName: "fake", Upstream: "big-model"},
+		"provider":       {Model: "m", ProviderName: "other", Upstream: "small-model"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c := cache.New(cache.Options{KV: cache.NewMemoryKV(10, time.Now), TTL: time.Hour})
+			keys := auth.NewKeys([]config.Key{{Name: "k", Key: "sk", Cache: "exact"}})
+			f := fake.New(fake.Config{Tokens: 3})
+			first := New(keys, []Route{{Model: "m", ProviderName: "fake", Upstream: "small-model", Provider: f}}, Policy{Cache: c})
+			second.Provider = f
+			remapped := New(keys, []Route{second}, Policy{Cache: c})
+			req := deterministic("m", "", "What is the capital of France?")
+			for i, p := range []*Pipeline{first, first, remapped} {
+				ctx, rep := cache.WithRequest(context.Background(), "")
+				ctx, _ = p.Authenticate(ctx, "sk")
+				if _, err := p.Complete(ctx, req); err != nil {
+					t.Fatal(err)
+				}
+				c.Wait()
+				h := http.Header{}
+				rep.WriteHeaders(h)
+				want := []cache.Status{cache.StatusMiss, cache.StatusExact, cache.StatusMiss}[i]
+				if got := h.Get(cache.StatusHeader); got != string(want) {
+					t.Fatalf("call %d: status %q, want %q", i+1, got, want)
+				}
+			}
+		})
+	}
+}

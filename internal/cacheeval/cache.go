@@ -416,6 +416,6 @@ func round3(v float64) float64 { return math.Round(v*1000) / 1000 }
 // exactKey is the gateway's exact cache key for a one-turn prompt, so the
 // baseline is exactly what the exact layer would match.
 func exactKey(prompt string) string {
-	k, _ := cache.KeysFor("eval", &core.Request{Messages: []core.Message{{Role: core.RoleUser, Text: prompt}}})
+	k, _ := cache.KeysFor("eval", cache.Upstream{}, &core.Request{Messages: []core.Message{{Role: core.RoleUser, Text: prompt}}})
 	return k.Exact
 }

@@ -154,12 +154,12 @@ func (l *Lookup) Fillable() bool { return l != nil && l.Status == StatusMiss }
 // Skip returns a lookup that did not happen, with the reason.
 func Skip(reason string) *Lookup { return &Lookup{Status: StatusSkip, Reason: reason} }
 
-// Lookup looks req up for tenant in the given mode.
-func (c *Cache) Lookup(ctx context.Context, tenant string, mode Mode, req *core.Request) *Lookup {
+// Lookup looks req, routed to up, up for tenant in the given mode.
+func (c *Cache) Lookup(ctx context.Context, tenant string, up Upstream, mode Mode, req *core.Request) *Lookup {
 	if mode == ModeOff {
 		return Skip("off")
 	}
-	keys, ok := KeysFor(tenant, req)
+	keys, ok := KeysFor(tenant, up, req)
 	if !ok {
 		return Skip("last turn is not the user's")
 	}

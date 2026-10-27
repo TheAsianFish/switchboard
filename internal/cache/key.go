@@ -11,7 +11,7 @@ import (
 
 // keyVersion changes whenever the canonical form changes, so entries
 // written under an old form are never read under a new one.
-const keyVersion = 1
+const keyVersion = 2
 
 // Keys locate a request in the cache.
 type Keys struct {
@@ -28,12 +28,21 @@ type Keys struct {
 	Prompt string
 }
 
+// Upstream is where the gateway routes a request: the configured provider
+// name and the provider's own model name.
+type Upstream struct {
+	Provider string
+	Model    string
+}
+
 // canonicalContext is the hashed form of a request without its last turn.
 // Field order is fixed by the struct, so equal requests give equal bytes.
 type canonicalContext struct {
 	V      int      `json:"v"`
 	Tenant string   `json:"tenant"`
 	Model  string   `json:"model"`
+	Prov   string   `json:"provider"`
+	Up     string   `json:"upstream_model"`
 	System string   `json:"system"`
 	Turns  []turn   `json:"turns"`
 	Max    int      `json:"max_tokens"`
@@ -56,16 +65,18 @@ type turn struct {
 // carry meaning (indentation in code, an acronym against a word). Whether
 // a looser match is worth it is the semantic layer's question, and Q3
 // measures it.
-// The client's model name is hashed, not the upstream's, and the stream
-// flag is not: a reply cached from a non-streaming call answers a
-// streaming one.
-func KeysFor(tenant string, req *core.Request) (Keys, bool) {
+// The client's model name is hashed and so is the route behind it (up), so
+// that remapping a model to another upstream model or provider, or replicas
+// that disagree during a rolling deploy, never serve one model's reply for
+// another's. The stream flag is not hashed: a reply cached from a
+// non-streaming call answers a streaming one.
+func KeysFor(tenant string, up Upstream, req *core.Request) (Keys, bool) {
 	n := len(req.Messages)
 	if n == 0 || req.Messages[n-1].Role != core.RoleUser {
 		return Keys{}, false
 	}
 	c := canonicalContext{
-		V: keyVersion, Tenant: tenant, Model: req.Model, System: clean(req.System),
+		V: keyVersion, Tenant: tenant, Model: req.Model, Prov: up.Provider, Up: up.Model, System: clean(req.System),
 		Turns: make([]turn, 0, n-1), Max: req.MaxTokens, Temp: req.Temperature, TopP: req.TopP, Stop: req.Stop,
 	}
 	for _, m := range req.Messages[:n-1] {
