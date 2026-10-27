@@ -327,8 +327,44 @@ Changes made while building:
   unmodified Go SDKs (`openai-go`, `anthropic-sdk-go`) stream through the
   whole gateway inside `go test`, so the drop-in claim is checked on every PR.
 
+- **M2.**
+  - Over-admission is measured over every window length from 1 s to
+    60 s, not over 60 s windows only. At PLAN.md's steady 3× overload a
+    fixed-window counter spends each minute's allowance in its first
+    20 s and refuses the rest. Its excess is concentrated in short
+    windows, and a 60 s window sees it only where it straddles a window
+    boundary: none at all when the run starts on one. The 60 s column is
+    still reported beside the worst window.
+  - GCRA has its interface, contract, bound and oracle tests, which skip
+    until it is implemented; `ratelimit.algorithm: gcra` refuses to start
+    until then. Q2 is answered for the fixed-window baseline, without a
+    shared store, and with a Redis outage. The GCRA rows come from
+    `ALGORITHMS=gcra make test-limits`.
+  - The fake provider attributes requests by upstream model name: each Q2
+    scenario's key uses its own model name, so the ledger needs no
+    gateway-specific header.
+  - An exhausted budget is its own error kind: OpenAI's `429
+    insufficient_quota` in the OpenAI format, Anthropic's `402
+    billing_error` in the Anthropic format (the Anthropic SDKs do not
+    retry a 402).
+  - `/metrics` is on a separate admin listener (loopback by default),
+    because per-key names and spend should not reach the public port.
+    The Prometheus server joins compose in M4 with Jaeger.
+  - Money is an integer count of nanodollars, and prices are dollars per
+    million tokens with at most three decimals. Budgets reserve the worst
+    case (input estimate plus `max_tokens`, or the model's
+    `max_output_tokens`) and settle the provider's usage.
+  - A key with a budget may not reach a model without a price; the config
+    is refused at load time.
+  - Done-criteria evidence (RESULTS.md, Q2, `make test-limits` at
+    `d8626ad`): three replicas share one request limit and one budget; the
+    budget's spend in Redis equals the fake provider's ledger to the
+    nanodollar and stays inside the budget; the over-admission run works
+    in compose for the baseline, with and without Redis, and through an
+    outage.
+
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
-- [ ] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
+- [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
 - [ ] M3: Exact and semantic cache — canonical request hash cache; `embed` client for Ollama `/api/embed` with a fake; vector index interface with Redis HNSW/FLAT and in-memory FLAT implementations; cacheability rules (temperature, explicit header, context hash) and tenant namespacing; cached streams replayed in the client's wire format; `make eval-cache` with the PAWS-Wiki and GSM8K-perturbation pair sets, the threshold sweep and the FLAT vs HNSW latency check; RESULTS.md cache section answering Q3. Done when the cross-tenant and cross-context leak tests pass, the eval runs end to end on a laptop with Ollama, and the chosen threshold is the one the eval produced.
 - [ ] M4: Resilience and observability — retries with backoff on retryable statuses, hedged requests bounded by time-to-first-token and a per-tenant hedge budget, per-provider circuit breaker and health; tool-call and `stop_reason` translation in both wire formats; OpenTelemetry spans per pipeline stage exported over OTLP to Jaeger in compose, trace id in the response headers; `make bench-hedge` answering Q4 on the synthetic tail and on a real provider where a key exists. Done when a trace shows every stage and the hedge, and the hedging numbers are in RESULTS.md with their cost.
 - [ ] M5: Evaluated router — committed eval set (GSM8K + MMLU, 600 questions); `switchboard eval router label` runs every candidate through the gateway and records correctness, usage, dollars and latency (replays from recordings at $0); feature extraction and the per-candidate logistic models trained in Go; `model: "auto"` with a configurable quality target; `make eval-router` with 5-fold cross-validation, the four baselines and the random-mix line; RESULTS.md router section answering Q5 (live labels when a key exists, otherwise the Ollama candidate and "To measure"). Done when the router's held-out frontier is plotted against the line and the gateway serves `auto` from the trained weights.
