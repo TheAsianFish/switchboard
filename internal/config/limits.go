@@ -159,6 +159,10 @@ func (c *Config) validateShared(models map[string]Model) []error {
 	default:
 		errs = append(errs, fmt.Errorf("ratelimit.algorithm %q is not one of fixed_window, gcra", c.RateLimit.Algorithm))
 	}
+	if c.Redis.Timeout <= 0 {
+		// Zero would hand go-redis its own multi-second defaults.
+		errs = append(errs, fmt.Errorf("redis.timeout must be positive, got %v", c.Redis.Timeout))
+	}
 	if c.RateLimit.Replicas < 1 {
 		errs = append(errs, fmt.Errorf("ratelimit.replicas must be at least 1, got %d", c.RateLimit.Replicas))
 	}
