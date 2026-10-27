@@ -159,6 +159,17 @@ func TestContextCoversParameters(t *testing.T) {
 			t.Errorf("%s: same keys as the base request", name)
 		}
 	}
+	// Who said each earlier turn is part of the context, not only what.
+	earlier := func(first, second core.Role) *core.Request {
+		r := *base
+		r.Messages = append([]core.Message{{Role: first, Text: "x"}, {Role: second, Text: "y"}}, base.Messages...)
+		return &r
+	}
+	kUA, _ := cache.KeysFor("a", target, earlier(core.RoleUser, core.RoleAssistant))
+	kAU, _ := cache.KeysFor("a", target, earlier(core.RoleAssistant, core.RoleUser))
+	if kUA.Context == kAU.Context || kUA.Exact == kAU.Exact {
+		t.Error("swapping the roles of earlier turns kept the keys")
+	}
 	// The route is part of the context: a model remapped to another
 	// upstream model or provider starts afresh.
 	for name, other := range map[string]cache.Upstream{
