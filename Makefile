@@ -4,7 +4,7 @@ BIN := $(CURDIR)/bin
 GOLANGCI := $(BIN)/golangci-lint
 export GOTOOLCHAIN ?= auto
 
-.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits eval-cache eval-cache-data sdk-smoke record-fixtures results docker clean
+.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge eval-cache eval-cache-data sdk-smoke record-fixtures results docker clean
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -61,6 +61,9 @@ sdk-smoke: build ## unmodified OpenAI and Anthropic Python SDKs streaming throug
 
 record-fixtures: ## re-capture provider fixtures from Ollama
 	scripts/record-fixtures.sh ollama
+
+bench-hedge: ## Q4: hedging off and on through the fake provider's slow tail (about 3 minutes)
+	eval/hedge/run.sh
 
 results: ## render RESULTS.md from eval/results/
 	go run ./cmd/switchboard eval results

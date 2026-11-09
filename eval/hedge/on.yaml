@@ -1,0 +1,22 @@
+# Gateway config for `make bench-hedge` (Q4), hedging on: a second attempt
+# when the first has no token after the rolling p95 of the last 1000
+# first-token times, at most a tenth of the key's requests. Otherwise the
+# same as off.yaml.
+listen: 127.0.0.1:8080
+admin_listen: 127.0.0.1:9190
+log:
+  format: json
+  level: warn
+providers:
+  - name: fake
+    type: openaicompat
+    base_url: http://127.0.0.1:9101/v1
+    timeout: 30s
+    resilience:
+      hedge: {enabled: true, quantile: 0.95, window: 1000, min_samples: 100, budget: 0.1, burst: 10}
+models:
+  - name: fake
+    provider: fake
+keys:
+  - name: bench
+    key: sk-bench
