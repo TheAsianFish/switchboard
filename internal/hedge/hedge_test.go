@@ -509,3 +509,32 @@ func waitFor(t *testing.T, cond func() bool, msg string) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestClientCancelCountsEveryRunningAttempt(t *testing.T) {
+	t.Parallel()
+	for _, stream := range []bool{false, true} {
+		sc := &script{plan: func(int) (time.Duration, error) { return 5 * time.Second, nil }}
+		p := New("up", sc, hedging(5*time.Millisecond))
+		ctx, rep := WithReport(context.Background())
+		ctx, cancel := context.WithCancel(ctx)
+		go func() {
+			time.Sleep(40 * time.Millisecond)
+			cancel()
+		}()
+		req := &core.Request{Model: "m", Stream: stream}
+		var err error
+		if stream {
+			_, err = p.Stream(ctx, req)
+		} else {
+			_, err = p.Complete(ctx, req)
+		}
+		if err == nil {
+			t.Fatal("a cancelled request succeeded")
+		}
+		// Both attempts reached the provider and may have been billed for
+		// their prompts, so both are reported for settle to charge.
+		if s := rep.Snapshot(); s.Attempts != 2 || s.Cancelled != 2 {
+			t.Fatalf("stream=%v: report = %+v, want 2 attempts, 2 cancelled", stream, s)
+		}
+	}
+}

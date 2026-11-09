@@ -180,14 +180,7 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	elapsed := p.now().Sub(start)
 	if err != nil {
 		err = upstreamError(rt, err)
-		u, outcome := core.Usage{}, telemetry.OutcomeError
-		if ctx.Err() != nil {
-			// The client went away mid-call. The upstream may have read
-			// the whole prompt and billed for it, and nothing here can
-			// tell, so the prompt estimate is charged: an over-count
-			// rather than a cost the ledger never sees.
-			u.InputTokens, outcome = adm.estimate.InputTokens, telemetry.OutcomeAbandoned
-		}
+		u, outcome := abandonedUsage(ctx, adm)
 		endProvider(span, 0, core.Usage{}, outcome, err)
 		p.settle(ctx, adm, u, 0, false, outcome)
 		logCall(ctx, rt, false, elapsed, 0, core.Usage{}, err)
@@ -269,12 +262,31 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 	s, err := rt.Provider.Stream(pctx, up)
 	if err != nil {
 		err = upstreamError(rt, err)
-		endProvider(span, 0, core.Usage{}, telemetry.OutcomeError, err)
-		p.settle(ctx, adm, core.Usage{}, 0, true, telemetry.OutcomeError)
+		u, outcome := abandonedUsage(ctx, adm)
+		endProvider(span, 0, core.Usage{}, outcome, err)
+		p.settle(ctx, adm, u, 0, true, outcome)
 		logCall(ctx, rt, true, p.now().Sub(start), 0, core.Usage{}, err)
 		return nil, err
 	}
 	return &stream{inner: s, ctx: ctx, span: span, p: p, adm: adm, route: rt, model: req.Model, start: start, now: p.now, lookup: lk}, nil
+}
+
+// abandonedUsage is what a call that failed before any output is charged.
+// An upstream failure is charged nothing. When the client went away
+// mid-call instead, the upstream may have read the whole prompt and billed
+// for it, and nothing here can tell, so the prompt estimate is charged: an
+// over-count rather than a cost the ledger never sees. When the resilience
+// wrapper counted the abandoned attempts as cancelled, settle charges each
+// of them, so nothing is added here.
+func abandonedUsage(ctx context.Context, adm *admission) (core.Usage, string) {
+	if ctx.Err() == nil {
+		return core.Usage{}, telemetry.OutcomeError
+	}
+	var u core.Usage
+	if hedge.ReportFrom(ctx).Snapshot().Cancelled == 0 {
+		u.InputTokens = adm.estimate.InputTokens
+	}
+	return u, telemetry.OutcomeAbandoned
 }
 
 // upstreamError keeps a provider's refusal of the gateway's own credentials

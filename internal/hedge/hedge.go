@@ -418,6 +418,7 @@ func (p *Provider) race(ctx context.Context, req *core.Request, streaming bool, 
 				p.win(a, primary, w, running, rep, results)
 				return a, nil
 			}
+			a.cancel()
 			endSpan(a.span, "error", a.err)
 			if !a.cancelled && countsAgainst(a.err) {
 				p.breaker.Failure()
@@ -429,7 +430,7 @@ func (p *Provider) race(ctx context.Context, req *core.Request, streaming bool, 
 				return nil, firstErr
 			}
 		case <-ctx.Done():
-			p.abandon(running, results)
+			p.abandon(running, results, rep)
 			return nil, core.Wrap(core.KindTimeout, ctx.Err(), "request cancelled")
 		}
 	}
@@ -472,8 +473,11 @@ func (p *Provider) win(a, primary *attempt, w *Window, losers []*attempt, rep *R
 	}()
 }
 
-// abandon cancels every running attempt after the caller went away.
-func (p *Provider) abandon(running []*attempt, results <-chan *attempt) {
+// abandon cancels every running attempt after the caller went away. Each
+// counts as cancelled: the upstream may already have read and billed its
+// prompt.
+func (p *Provider) abandon(running []*attempt, results <-chan *attempt, rep *Report) {
+	rep.update(func(r *Report) { r.cancelled += len(running) })
 	for _, a := range running {
 		a.cancel()
 	}
