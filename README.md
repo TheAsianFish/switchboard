@@ -279,6 +279,7 @@ How the M1 streaming path is checked:
 | Retry only before the first token | A client that has seen part of a reply cannot be given another. | Retrying mid-stream: duplicated or spliced text. |
 | Hedge budget and breaker per replica | A ratio held on each replica's share of traffic holds for the fleet, and a breaker learns from its own traffic in a few requests; neither is worth a Redis round trip per request. | Shared in Redis: a round trip on every request to save a handful of failures. |
 | Tracing off unless `tracing.endpoint` is set | No cost on the request path when nobody collects traces. | Always-on tracing with a no-op exporter: spans are still built. |
+| Continue a caller's `traceparent`, ignore its sampled flag | The header arrives before authentication; trusting the flag would let any caller force every request into the collector. | Parent-based sampling on the caller's flag: an unauthenticated knob on the collector's load. |
 | Open-loop load generator | Requests leave on schedule whether or not earlier ones finished, so a slow target cannot hide its queueing (coordinated omission). | Closed-loop workers: under-report the tail. |
 
 ## Development
@@ -298,7 +299,11 @@ re-renders RESULTS.md.
 GCRA limiter and its Q2 numbers · a reranking step for semantic hits
 (Q3 shows embeddings alone cannot keep false hits under 1% at a useful hit
 rate on adversarial pairs) · Q4 against Claude
-(needs a key) · pass `traceparent` on to providers · M5 the evaluated router ·
+(needs a key) · pass `traceparent` on to providers · a first-token timeout
+per attempt, so a provider that accepts connections and never answers opens
+the breaker instead of waiting on client disconnects · accept tool-call
+arguments that are not JSON in OpenAI-format history (a cut-off call echoed
+back is refused today) · M5 the evaluated router ·
 M6 admin page, chaos run and the per-feature overhead breakdown · M7 release.
 
 ## Licence
