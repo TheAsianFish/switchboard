@@ -1,0 +1,415 @@
+{
+  "data": [
+    {
+      "traceID": "9544d264361c7ad692bef7b2c392f863",
+      "spans": [
+        {
+          "traceID": "9544d264361c7ad692bef7b2c392f863",
+          "spanID": "996314cedb2abbee",
+          "flags": 1,
+          "operationName": "auth",
+          "references": [
+            {
+              "refType": "CHILD_OF",
+              "traceID": "9544d264361c7ad692bef7b2c392f863",
+              "spanID": "7d3f5abb1f69899b"
+            }
+          ],
+          "startTime": 1794262274173514,
+          "duration": 7,
+          "tags": [
+            {
+              "key": "otel.scope.name",
+              "type": "string",
+              "value": "github.com/TheAsianFish/switchboard"
+            },
+            {
+              "key": "switchboard.key",
+              "type": "string",
+              "value": "trace"
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "internal"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        },
+        {
+          "traceID": "9544d264361c7ad692bef7b2c392f863",
+          "spanID": "0b0ed14c5acd1f2a",
+          "flags": 1,
+          "operationName": "route",
+          "references": [
+            {
+              "refType": "CHILD_OF",
+              "traceID": "9544d264361c7ad692bef7b2c392f863",
+              "spanID": "7d3f5abb1f69899b"
+            }
+          ],
+          "startTime": 1794262274173589,
+          "duration": 3,
+          "tags": [
+            {
+              "key": "otel.scope.name",
+              "type": "string",
+              "value": "github.com/TheAsianFish/switchboard"
+            },
+            {
+              "key": "switchboard.model",
+              "type": "string",
+              "value": "fake"
+            },
+            {
+              "key": "switchboard.provider",
+              "type": "string",
+              "value": "fake"
+            },
+            {
+              "key": "switchboard.upstream_model",
+              "type": "string",
+              "value": "fake"
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "internal"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        },
+        {
+          "traceID": "9544d264361c7ad692bef7b2c392f863",
+          "spanID": "46d2e9b5fe77b124",
+          "flags": 1,
+          "operationName": "ratelimit",
+          "references": [
+            {
+              "refType": "CHILD_OF",
+              "traceID": "9544d264361c7ad692bef7b2c392f863",
+              "spanID": "7d3f5abb1f69899b"
+            }
+          ],
+          "startTime": 1794262274173596,
+          "duration": 3,
+          "tags": [
+            {
+              "key": "otel.scope.name",
+              "type": "string",
+              "value": "github.com/TheAsianFish/switchboard"
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "internal"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        },
+        {
+          "traceID": "9544d264361c7ad692bef7b2c392f863",
+          "spanID": "8fddf1709c69fc52",
+          "flags": 1,
+          "operationName": "budget.reserve",
+          "references": [
+            {
+              "refType": "CHILD_OF",
+              "traceID": "9544d264361c7ad692bef7b2c392f863",
+              "spanID": "7d3f5abb1f69899b"
+            }
+          ],
+          "startTime": 1794262274173601,
+          "duration": 7,
+          "tags": [
+            {
+              "key": "otel.scope.name",
+              "type": "string",
+              "value": "github.com/TheAsianFish/switchboard"
+            },
+            {
+              "key": "switchboard.budget.reserve_usd",
+              "type": "float64",
+              "value": 0.000088
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "internal"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        },
+        {
+          "traceID": "9544d264361c7ad692bef7b2c392f863",
+          "spanID": "22d5d8c49246e831",
+          "flags": 1,
+          "operationName": "cache.lookup",
+          "references": [
+            {
+              "refType": "CHILD_OF",
+              "traceID": "9544d264361c7ad692bef7b2c392f863",
+              "spanID": "7d3f5abb1f69899b"
+            }
+          ],
+          "startTime": 1794262274173610,
+          "duration": 43,
+          "tags": [
+            {
+              "key": "otel.scope.name",
+              "type": "string",
+              "value": "github.com/TheAsianFish/switchboard"
+            },
+            {
+              "key": "switchboard.cache.status",
+              "type": "string",
+              "value": "miss"
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "internal"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        },
+        {
+          "traceID": "9544d264361c7ad692bef7b2c392f863",
+          "spanID": "4925af748781dfb3",
+          "flags": 1,
+          "operationName": "provider",
+          "references": [
+            {
+              "refType": "CHILD_OF",
+              "traceID": "9544d264361c7ad692bef7b2c392f863",
+              "spanID": "7d3f5abb1f69899b"
+            }
+          ],
+          "startTime": 1794262274173656,
+          "duration": 21166,
+          "tags": [
+            {
+              "key": "otel.scope.name",
+              "type": "string",
+              "value": "github.com/TheAsianFish/switchboard"
+            },
+            {
+              "key": "switchboard.input_tokens",
+              "type": "int64",
+              "value": 7
+            },
+            {
+              "key": "switchboard.outcome",
+              "type": "string",
+              "value": "ok"
+            },
+            {
+              "key": "switchboard.output_tokens",
+              "type": "int64",
+              "value": 30
+            },
+            {
+              "key": "switchboard.provider",
+              "type": "string",
+              "value": "fake"
+            },
+            {
+              "key": "switchboard.stream",
+              "type": "bool",
+              "value": false
+            },
+            {
+              "key": "switchboard.upstream_model",
+              "type": "string",
+              "value": "fake"
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "internal"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        },
+        {
+          "traceID": "9544d264361c7ad692bef7b2c392f863",
+          "spanID": "165d91ef6e84babb",
+          "flags": 1,
+          "operationName": "settle",
+          "references": [
+            {
+              "refType": "CHILD_OF",
+              "traceID": "9544d264361c7ad692bef7b2c392f863",
+              "spanID": "7d3f5abb1f69899b"
+            }
+          ],
+          "startTime": 1794262274194847,
+          "duration": 40,
+          "tags": [
+            {
+              "key": "otel.scope.name",
+              "type": "string",
+              "value": "github.com/TheAsianFish/switchboard"
+            },
+            {
+              "key": "switchboard.outcome",
+              "type": "string",
+              "value": "ok"
+            },
+            {
+              "key": "switchboard.spent_usd",
+              "type": "float64",
+              "value": 0.000067
+            },
+            {
+              "key": "switchboard.usage_estimated",
+              "type": "bool",
+              "value": false
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "internal"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        },
+        {
+          "traceID": "9544d264361c7ad692bef7b2c392f863",
+          "spanID": "7d3f5abb1f69899b",
+          "flags": 1,
+          "operationName": "POST /v1/chat/completions",
+          "references": [],
+          "startTime": 1794262274173478,
+          "duration": 21611,
+          "tags": [
+            {
+              "key": "otel.scope.name",
+              "type": "string",
+              "value": "github.com/TheAsianFish/switchboard"
+            },
+            {
+              "key": "http.request.method",
+              "type": "string",
+              "value": "POST"
+            },
+            {
+              "key": "http.status_code",
+              "type": "int64",
+              "value": 200
+            },
+            {
+              "key": "http.route",
+              "type": "string",
+              "value": "/v1/chat/completions"
+            },
+            {
+              "key": "switchboard.request_id",
+              "type": "string",
+              "value": "req_8991c3e51ec9f132a7aa1675"
+            },
+            {
+              "key": "url.path",
+              "type": "string",
+              "value": "/v1/chat/completions"
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "server"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        },
+        {
+          "traceID": "9544d264361c7ad692bef7b2c392f863",
+          "spanID": "70510c2480e127f6",
+          "flags": 1,
+          "operationName": "cache.fill",
+          "references": [
+            {
+              "refType": "CHILD_OF",
+              "traceID": "9544d264361c7ad692bef7b2c392f863",
+              "spanID": "7d3f5abb1f69899b"
+            }
+          ],
+          "startTime": 1794262274195218,
+          "duration": 10,
+          "tags": [
+            {
+              "key": "otel.scope.name",
+              "type": "string",
+              "value": "github.com/TheAsianFish/switchboard"
+            },
+            {
+              "key": "switchboard.cache.mode",
+              "type": "string",
+              "value": "exact"
+            },
+            {
+              "key": "span.kind",
+              "type": "string",
+              "value": "internal"
+            }
+          ],
+          "logs": [],
+          "processID": "p1",
+          "warnings": null
+        }
+      ],
+      "processes": {
+        "p1": {
+          "serviceName": "switchboard",
+          "tags": [
+            {
+              "key": "host.name",
+              "type": "string",
+              "value": "runnervmwuk1x"
+            },
+            {
+              "key": "service.version",
+              "type": "string",
+              "value": "v0.0.0-20261109221050-07ca5aad0879 (07ca5aad0879, 2026-11-09)"
+            },
+            {
+              "key": "telemetry.sdk.language",
+              "type": "string",
+              "value": "go"
+            },
+            {
+              "key": "telemetry.sdk.name",
+              "type": "string",
+              "value": "opentelemetry"
+            },
+            {
+              "key": "telemetry.sdk.version",
+              "type": "string",
+              "value": "1.47.0"
+            }
+          ]
+        }
+      },
+      "warnings": null
+    }
+  ],
+  "total": 0,
+  "limit": 0,
+  "offset": 0,
+  "errors": null
+}
