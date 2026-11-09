@@ -148,6 +148,12 @@ tree() {
 	' "$1"
 }
 
+# hedged <trace.json>: succeeds when some attempt span is a hedge.
+hedged() {
+	jq -e '[.data[0].spans[] | select(.operationName == "provider.attempt")
+		| .tags[] | select(.key == "switchboard.hedge" and .value == true)] | length > 0' "$1" >/dev/null
+}
+
 # Each request asks something nobody has asked before, so the cache misses
 # and every stage runs.
 status=0
@@ -170,6 +176,12 @@ for stream in "${streams[@]}"; do
 		echo "all expected stages present: $expect"
 	else
 		echo "trace-check: missing spans: $absent" >&2
+		status=1
+	fi
+	if hedged "$work/trace.json"; then
+		echo "a hedge attempt is present"
+	else
+		echo "trace-check: no provider.attempt with hedge=true; the hedge is not in the trace" >&2
 		status=1
 	fi
 	if [[ -n $save ]]; then
