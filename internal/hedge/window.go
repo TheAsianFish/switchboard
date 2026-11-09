@@ -77,6 +77,8 @@ func (w *Window) Quantile() (time.Duration, int) {
 
 // rank is the nearest-rank index of quantile q in n sorted samples.
 func rank(n int, q float64) int {
-	i := int(math.Ceil(float64(n)*q)) - 1
+	// The epsilon keeps n·q from landing just above an integer through
+	// floating-point error, as bench.Percentile does.
+	i := int(math.Ceil(float64(n)*q-1e-9)) - 1
 	return min(max(i, 0), n-1)
 }
