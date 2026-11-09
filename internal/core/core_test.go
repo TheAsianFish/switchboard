@@ -1,8 +1,10 @@
 package core
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -32,6 +34,47 @@ func TestCollect(t *testing.T) {
 			want: Response{StopReason: StopEndTurn, Usage: Usage{InputTokens: 13, CacheReadTokens: 24, OutputTokens: 6}},
 		},
 		{name: "no stop event", events: []Event{{Kind: EventStart}, {Kind: EventDelta, Text: "x"}}, wantErr: true},
+		{
+			name: "text then tool calls",
+			events: []Event{
+				{Kind: EventStart, ID: "a"},
+				{Kind: EventDelta, Text: "let me look"},
+				{Kind: EventToolCallStart, ToolIndex: 0, ToolCallID: "c0", ToolName: "f"},
+				{Kind: EventToolCallDelta, ToolIndex: 0, Arguments: `{"q":`},
+				{Kind: EventToolCallDelta, ToolIndex: 0, Arguments: `"x"}`},
+				{Kind: EventToolCallStart, ToolIndex: 1, ToolCallID: "c1", ToolName: "g"},
+				{Kind: EventStop, StopReason: StopToolUse, Usage: Usage{InputTokens: 1, OutputTokens: 9}},
+			},
+			want: Response{
+				ID: "a", Text: "let me look", StopReason: StopToolUse, Usage: Usage{InputTokens: 1, OutputTokens: 9},
+				ToolCalls: []ToolCall{{ID: "c0", Name: "f", Arguments: json.RawMessage(`{"q":"x"}`)}, {ID: "c1", Name: "g"}},
+			},
+		},
+		{
+			name: "tool call index skipped",
+			events: []Event{
+				{Kind: EventStart},
+				{Kind: EventToolCallStart, ToolIndex: 1, ToolCallID: "c", ToolName: "f"},
+				{Kind: EventStop, StopReason: StopToolUse},
+			},
+			wantErr: true,
+		},
+		{
+			name: "arguments for a closed call",
+			events: []Event{
+				{Kind: EventStart},
+				{Kind: EventToolCallStart, ToolIndex: 0, ToolCallID: "a", ToolName: "f"},
+				{Kind: EventToolCallStart, ToolIndex: 1, ToolCallID: "b", ToolName: "f"},
+				{Kind: EventToolCallDelta, ToolIndex: 0, Arguments: "{}"},
+				{Kind: EventStop, StopReason: StopToolUse},
+			},
+			wantErr: true,
+		},
+		{
+			name:    "arguments before any call",
+			events:  []Event{{Kind: EventStart}, {Kind: EventToolCallDelta, Arguments: "{}"}, {Kind: EventStop}},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -43,7 +86,7 @@ func TestCollect(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || *got != tt.want {
+			if err != nil || !reflect.DeepEqual(*got, tt.want) {
 				t.Fatalf("Collect = %+v, %v; want %+v", got, err, tt.want)
 			}
 		})
@@ -54,8 +97,38 @@ func TestResponseEventsRoundTrip(t *testing.T) {
 	t.Parallel()
 	r := &Response{ID: "x", Model: "m", Text: "abc", StopReason: StopEndTurn, Usage: Usage{InputTokens: 3, OutputTokens: 2, CacheWriteTokens: 1}}
 	got, err := Collect(&SliceStream{Events: ResponseEvents(r, []string{"a", "bc"})})
-	if err != nil || *got != *r {
+	if err != nil || !reflect.DeepEqual(got, r) {
 		t.Fatalf("got %+v, %v", got, err)
+	}
+
+	tools := &Response{
+		ID: "y", Model: "m", Text: "ok", StopReason: StopToolUse, Usage: Usage{InputTokens: 3, OutputTokens: 4},
+		ToolCalls: []ToolCall{{ID: "a", Name: "f", Arguments: json.RawMessage(`{"x":1}`)}, {ID: "b", Name: "g"}},
+	}
+	got, err = Collect(&SliceStream{Events: ResponseEvents(tools, []string{"o", "k"})})
+	if err != nil || !reflect.DeepEqual(got, tools) {
+		t.Fatalf("got %+v, %v; want %+v", got, err, tools)
+	}
+}
+
+func TestHasToolContent(t *testing.T) {
+	t.Parallel()
+	user := Message{Role: RoleUser, Text: "q"}
+	tests := []struct {
+		name string
+		req  Request
+		want bool
+	}{
+		{"text only", Request{Messages: []Message{user}}, false},
+		{"tools", Request{Messages: []Message{user}, Tools: []Tool{{Name: "f"}}}, true},
+		{"tool choice", Request{Messages: []Message{user}, ToolChoice: ToolChoice{Mode: ToolChoiceNone}}, true},
+		{"tool call in history", Request{Messages: []Message{user, {Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "a"}}}, user}}, true},
+		{"tool result", Request{Messages: []Message{{Role: RoleUser, ToolResults: []ToolResult{{CallID: "a"}}}}}, true},
+	}
+	for _, tt := range tests {
+		if got := tt.req.HasToolContent(); got != tt.want {
+			t.Errorf("%s: HasToolContent = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }
 
