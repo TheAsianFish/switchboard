@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"sync"
@@ -28,6 +30,17 @@ type Config struct {
 	Tokens int
 	// TokenInterval is the delay between streamed deltas.
 	TokenInterval time.Duration
+	// LatencySigma, when positive, makes each request's first-byte delay
+	// log-normal with median Latency: Latency·exp(σ·Z), Z standard normal.
+	LatencySigma float64
+	// SlowFraction of requests, drawn independently, take SlowFactor times
+	// as long to their first byte: a slow tail such as a busy upstream
+	// replica. Q4 uses 5% at 10×.
+	SlowFraction float64
+	SlowFactor   float64
+	// Seed seeds the latency draws; runs with the same seed and the same
+	// arrival order draw the same delays.
+	Seed uint64
 }
 
 // DefaultConfig is the shape PLAN.md's Q1 method uses.
@@ -42,6 +55,7 @@ type Provider struct {
 	mu     sync.Mutex
 	last   *core.Request
 	ledger []Entry
+	rnd    *rand.Rand
 }
 
 // Entry is one request in the provider's ledger: when it arrived and the
@@ -86,7 +100,26 @@ func New(cfg Config) *Provider {
 	if cfg.Tokens <= 0 {
 		cfg.Tokens = 1
 	}
-	return &Provider{cfg: cfg}
+	return &Provider{cfg: cfg, rnd: rand.New(rand.NewPCG(cfg.Seed, cfg.Seed^0x9e3779b97f4a7c15))}
+}
+
+// latency draws one request's first-byte delay.
+func (p *Provider) latency() time.Duration {
+	c := p.cfg
+	if c.LatencySigma <= 0 && c.SlowFraction <= 0 {
+		return c.Latency
+	}
+	p.mu.Lock()
+	z, u := p.rnd.NormFloat64(), p.rnd.Float64()
+	p.mu.Unlock()
+	d := float64(c.Latency)
+	if c.LatencySigma > 0 {
+		d *= math.Exp(c.LatencySigma * z)
+	}
+	if u < c.SlowFraction {
+		d *= c.SlowFactor
+	}
+	return time.Duration(d)
 }
 
 // Calls is the number of requests the provider has received.
@@ -120,7 +153,7 @@ func (p *Provider) record(req *core.Request) (string, int) {
 // Complete implements core.Provider.
 func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Response, error) {
 	id, entry := p.record(req)
-	if err := sleep(ctx, p.cfg.Latency); err != nil {
+	if err := sleep(ctx, p.latency()); err != nil {
 		return nil, err
 	}
 	words, stop := p.reply(req)
@@ -143,6 +176,7 @@ func (p *Provider) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 		entry: entry,
 		ctx:   ctx,
 		cfg:   p.cfg,
+		delay: p.latency(),
 		id:    id,
 		model: req.Model,
 		words: words,
@@ -200,6 +234,7 @@ type stream struct {
 	entry int
 	ctx   context.Context
 	cfg   Config
+	delay time.Duration
 	id    string
 	model string
 	words []string
@@ -216,7 +251,7 @@ func (s *stream) Next() (core.Event, error) {
 	}
 	switch {
 	case s.state == 0:
-		if err := sleep(s.ctx, s.cfg.Latency); err != nil {
+		if err := sleep(s.ctx, s.delay); err != nil {
 			return core.Event{}, err
 		}
 		s.state++

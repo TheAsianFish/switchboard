@@ -220,6 +220,10 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	latency := fs.Duration("latency", fake.DefaultConfig.Latency, "delay before the first byte (and the whole reply when not streaming)")
 	tokens := fs.Int("tokens", fake.DefaultConfig.Tokens, "output tokens per reply")
 	interval := fs.Duration("token-interval", fake.DefaultConfig.TokenInterval, "delay between streamed tokens")
+	sigma := fs.Float64("latency-sigma", 0, "log-normal spread of the first-byte delay around -latency (0: fixed)")
+	slowFraction := fs.Float64("slow-fraction", 0, "share of requests whose first byte is -slow-factor times slower")
+	slowFactor := fs.Float64("slow-factor", 10, "how much slower a slow request is")
+	seed := fs.Uint64("seed", 1, "seed for the latency draws")
 	logLevel := fs.String("log-level", envOr("SWITCHBOARD_LOG_LEVEL", "warn"), "log level; warn by default so a benchmark measures serving, not logging")
 	logFormat := fs.String("log-format", envOr("SWITCHBOARD_LOG_FORMAT", "json"), "json or text")
 	if err := parse(fs, args); err != nil {
@@ -229,14 +233,16 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fp := fake.New(fake.Config{Latency: *latency, Tokens: *tokens, TokenInterval: *interval})
+	fp := fake.New(fake.Config{Latency: *latency, Tokens: *tokens, TokenInterval: *interval,
+		LatencySigma: *sigma, SlowFraction: *slowFraction, SlowFactor: *slowFactor, Seed: *seed})
 	gw := pipeline.Open{Provider: fp, Names: []string{"fake"}}
 	mux := http.NewServeMux()
 	mux.Handle("/ledger", fp.LedgerHandler())
 	mux.Handle("/ledger/", fp.LedgerHandler())
 	mux.Handle("/", server.Handler(gw, log))
 	log.Warn("fake provider starting", slog.String("listen", *listen), slog.Duration("latency", *latency),
-		slog.Int("tokens", *tokens), slog.Duration("token_interval", *interval))
+		slog.Int("tokens", *tokens), slog.Duration("token_interval", *interval),
+		slog.Float64("latency_sigma", *sigma), slog.Float64("slow_fraction", *slowFraction), slog.Float64("slow_factor", *slowFactor))
 	return server.Run(ctx, *listen, mux, log, nil)
 }
 
