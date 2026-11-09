@@ -62,9 +62,48 @@ type Provider struct {
 	DefaultMaxTokens int `yaml:"default_max_tokens"`
 	// Fake configures a fake provider.
 	Fake FakeProvider `yaml:"fake"`
+	// Resilience sets retries, hedging and the circuit breaker; unset
+	// fields keep the defaults (two retries, breaker after five failures,
+	// no hedging).
+	Resilience Resilience `yaml:"resilience"`
 
 	// APIKey is resolved from APIKeyEnv at load time; never from the file.
 	APIKey string `yaml:"-"`
+}
+
+// Resilience is a provider's retry, hedge and breaker policy. Zero values
+// mean the default; the pointer fields distinguish an explicit 0.
+type Resilience struct {
+	// Retries is how many times a failed request is tried again (default
+	// 2; 0 disables retries).
+	Retries       *int          `yaml:"retries"`
+	BackoffBase   time.Duration `yaml:"backoff_base"`
+	BackoffMax    time.Duration `yaml:"backoff_max"`
+	MaxRetryAfter time.Duration `yaml:"max_retry_after"`
+	Breaker       Breaker       `yaml:"breaker"`
+	Hedge         Hedge         `yaml:"hedge"`
+}
+
+// Breaker configures a provider's circuit breaker.
+type Breaker struct {
+	// Failures in a row that open it (default 5; 0 disables it).
+	Failures *int          `yaml:"failures"`
+	Cooldown time.Duration `yaml:"cooldown"`
+}
+
+// Hedge configures hedged requests: a second attempt sent when the first
+// has produced no token after Delay, or after the rolling Quantile of
+// recent first-token times when Delay is zero.
+type Hedge struct {
+	Enabled    bool          `yaml:"enabled"`
+	Delay      time.Duration `yaml:"delay"`
+	Quantile   float64       `yaml:"quantile"`
+	Window     int           `yaml:"window"`
+	MinSamples int           `yaml:"min_samples"`
+	// Budget is the share of each tenant's requests that may be hedged
+	// (default 0.1), Burst the hedges a tenant may save up (default 10).
+	Budget *float64 `yaml:"budget"`
+	Burst  float64  `yaml:"burst"`
 }
 
 // FakeProvider shapes the replies of an in-process fake backend.
@@ -274,6 +313,9 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
+	for _, p := range c.Providers {
+		errs = append(errs, p.Resilience.validate(p.Name)...)
+	}
 	errs = append(errs, c.validateShared(byName)...)
 	errs = append(errs, c.validateCache()...)
 	return errors.Join(errs...)
@@ -289,4 +331,37 @@ func isHex64(s string) bool {
 		}
 	}
 	return true
+}
+
+func (r Resilience) validate(provider string) []error {
+	var errs []error
+	bad := func(format string, args ...any) {
+		errs = append(errs, fmt.Errorf("provider %q: resilience: "+format, append([]any{provider}, args...)...))
+	}
+	if r.Retries != nil && (*r.Retries < 0 || *r.Retries > 10) {
+		bad("retries must be between 0 and 10")
+	}
+	if r.BackoffBase < 0 || r.BackoffMax < 0 || r.MaxRetryAfter < 0 || r.Breaker.Cooldown < 0 || r.Hedge.Delay < 0 {
+		bad("durations must not be negative")
+	}
+	if r.BackoffBase > 0 && r.BackoffMax > 0 && r.BackoffMax < r.BackoffBase {
+		bad("backoff_max is below backoff_base")
+	}
+	if r.Breaker.Failures != nil && *r.Breaker.Failures < 0 {
+		bad("breaker.failures must not be negative")
+	}
+	h := r.Hedge
+	if h.Quantile != 0 && (h.Quantile <= 0 || h.Quantile >= 1) {
+		bad("hedge.quantile must be between 0 and 1")
+	}
+	if h.Window < 0 || h.MinSamples < 0 || h.Burst < 0 {
+		bad("hedge.window, hedge.min_samples and hedge.burst must not be negative")
+	}
+	if h.Window > 0 && h.MinSamples > h.Window {
+		bad("hedge.min_samples exceeds hedge.window")
+	}
+	if h.Budget != nil && (*h.Budget < 0 || *h.Budget > 1) {
+		bad("hedge.budget must be between 0 and 1 (a share of requests)")
+	}
+	return errs
 }

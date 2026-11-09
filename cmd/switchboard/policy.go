@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/cost"
 	"github.com/TheAsianFish/switchboard/internal/embed"
+	"github.com/TheAsianFish/switchboard/internal/hedge"
 	"github.com/TheAsianFish/switchboard/internal/pipeline"
 	"github.com/TheAsianFish/switchboard/internal/ratelimit"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
@@ -165,11 +167,22 @@ func slug(s string) string {
 	}, s)
 }
 
-// adminHandler serves the loopback admin listener: /metrics now, the admin
-// API in a later milestone.
-func adminHandler(m *telemetry.Metrics) http.Handler {
+// adminHandler serves the loopback admin listener: /metrics, /providers
+// (each provider's breaker state and hedge delays), and the admin API in a
+// later milestone.
+func adminHandler(m *telemetry.Metrics, providers []*hedge.Provider) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", m.Handler())
+	mux.HandleFunc("GET /providers", func(w http.ResponseWriter, _ *http.Request) {
+		out := make([]hedge.Health, 0, len(providers))
+		for _, p := range providers {
+			out = append(out, p.Health())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Providers []hedge.Health `json:"providers"`
+		}{out})
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
 	})
@@ -190,4 +203,48 @@ func routes(cfg *config.Config, built map[string]coreProvider, log *slog.Logger)
 		})
 	}
 	return out
+}
+
+// resilienceConfig fills a provider's resilience settings from the
+// defaults.
+func resilienceConfig(r config.Resilience) hedge.Config {
+	c := hedge.DefaultConfig
+	if r.Retries != nil {
+		c.Retries = *r.Retries
+	}
+	if r.BackoffBase > 0 {
+		c.BackoffBase = r.BackoffBase
+	}
+	if r.BackoffMax > 0 {
+		c.BackoffMax = r.BackoffMax
+	}
+	if r.MaxRetryAfter > 0 {
+		c.MaxRetryAfter = r.MaxRetryAfter
+	}
+	if r.Breaker.Failures != nil {
+		c.Breaker.Failures = *r.Breaker.Failures
+	}
+	if r.Breaker.Cooldown > 0 {
+		c.Breaker.Cooldown = r.Breaker.Cooldown
+	}
+	h := r.Hedge
+	c.Hedge.Enabled, c.Hedge.Delay = h.Enabled, h.Delay
+	if h.Quantile > 0 {
+		c.Hedge.Quantile = h.Quantile
+	}
+	if h.Window > 0 {
+		c.Hedge.Window = h.Window
+	}
+	if h.MinSamples > 0 {
+		c.Hedge.MinSamples = h.MinSamples
+	}
+	if h.Budget != nil {
+		c.Hedge.Budget = *h.Budget
+	}
+	if h.Burst > 0 {
+		c.Hedge.Burst = h.Burst
+	}
+	// A window smaller than the default sample floor must still hedge.
+	c.Hedge.MinSamples = min(c.Hedge.MinSamples, c.Hedge.Window)
+	return c
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/cacheeval"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/core"
+	"github.com/TheAsianFish/switchboard/internal/hedge"
 	"github.com/TheAsianFish/switchboard/internal/limitseval"
 	"github.com/TheAsianFish/switchboard/internal/pipeline"
 	"github.com/TheAsianFish/switchboard/internal/provider"
@@ -145,7 +146,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	slog.SetDefault(log)
 
+	metrics := telemetry.NewMetrics(true)
 	built := make(map[string]coreProvider, len(cfg.Providers))
+	var health []*hedge.Provider
 	for _, p := range cfg.Providers {
 		prov, err := provider.Build(p)
 		if err != nil {
@@ -154,13 +157,20 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		if provider.Disabled(prov) {
 			log.Warn("provider has no API key; its models will refuse requests",
 				slog.String("provider", p.Name), slog.String("env", p.APIKeyEnv))
+			built[p.Name] = prov
+			continue
 		}
-		built[p.Name] = prov
+		rc := resilienceConfig(p.Resilience)
+		h := hedge.New(p.Name, prov, rc, hedge.WithObserver(metrics))
+		log.Info("provider resilience", slog.String("provider", p.Name), slog.Int("retries", rc.Retries),
+			slog.Int("breaker_failures", rc.Breaker.Failures), slog.Bool("hedge", rc.Hedge.Enabled),
+			slog.Duration("hedge_delay", rc.Hedge.Delay), slog.Float64("hedge_budget", rc.Hedge.Budget))
+		built[p.Name] = h
+		health = append(health, h)
 	}
 	if len(cfg.Keys) == 0 {
 		log.Warn("no API keys configured; every request will be refused")
 	}
-	metrics := telemetry.NewMetrics(true)
 	pol, closePolicy, err := buildPolicy(ctx, cfg, metrics, log)
 	if err != nil {
 		return err
@@ -175,7 +185,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	defer cancel()
 	adminErr := make(chan error, 1)
 	go func() {
-		err := server.Run(ctx, cfg.AdminListen, adminHandler(metrics), log, nil)
+		err := server.Run(ctx, cfg.AdminListen, adminHandler(metrics, health), log, nil)
 		if err != nil {
 			cancel() // the gateway without its metrics is not worth running
 		}
