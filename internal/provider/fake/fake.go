@@ -13,6 +13,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -156,6 +157,16 @@ func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	if err := sleep(ctx, p.latency()); err != nil {
 		return nil, err
 	}
+	if call := toolCall(req); call != nil {
+		p.settle(entry, callTokens, true)
+		return &core.Response{
+			ID:         id,
+			Model:      req.Model,
+			ToolCalls:  []core.ToolCall{*call},
+			StopReason: core.StopToolUse,
+			Usage:      core.Usage{InputTokens: InputTokens(req), OutputTokens: callTokens},
+		}, nil
+	}
 	words, stop := p.reply(req)
 	p.settle(entry, len(words), true)
 	return &core.Response{
@@ -170,8 +181,7 @@ func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Respo
 // Stream implements core.Provider.
 func (p *Provider) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
 	id, entry := p.record(req)
-	words, stop := p.reply(req)
-	return &stream{
+	s := &stream{
 		p:     p,
 		entry: entry,
 		ctx:   ctx,
@@ -179,22 +189,72 @@ func (p *Provider) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 		delay: p.latency(),
 		id:    id,
 		model: req.Model,
-		words: words,
-		stop:  stop,
 		input: InputTokens(req),
-	}, nil
+	}
+	if s.call = toolCall(req); s.call != nil {
+		s.stop = core.StopToolUse
+	} else {
+		s.words, s.stop = p.reply(req)
+	}
+	return s, nil
 }
 
-// reply builds the deterministic word list for req: the same request always
-// gets the same reply, and different prompts get different ones.
-func (p *Provider) reply(req *core.Request) ([]string, core.StopReason) {
+// callTokens is the output a tool call reply reports.
+const callTokens = 2
+
+// toolCall returns the fake's tool call for req, or nil when it should
+// answer in text. A request offering tools whose last turn carries no tool
+// result gets one call to the first tool, as a model asked to use a tool
+// would; once the result comes back it answers in text. The call's id and
+// arguments derive from the request: each top-level property of the
+// tool's schema, in name order, gets a word.
+func toolCall(req *core.Request) *core.ToolCall {
+	n := len(req.Messages)
+	if len(req.Tools) == 0 || req.ToolChoice.Mode == core.ToolChoiceNone || n > 0 && len(req.Messages[n-1].ToolResults) > 0 {
+		return nil
+	}
+	seed := seedOf(req)
+	t := req.Tools[0]
+	if req.ToolChoice.Mode == core.ToolChoiceTool {
+		for _, c := range req.Tools {
+			if c.Name == req.ToolChoice.Name {
+				t = c
+			}
+		}
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	_ = json.Unmarshal(t.Parameters, &schema) // no schema, no arguments
+	names := make([]string, 0, len(schema.Properties))
+	for k := range schema.Properties {
+		names = append(names, k)
+	}
+	slices.Sort(names)
+	args := make(map[string]string, len(names))
+	for i, k := range names {
+		args[k] = vocabulary[(seed+uint64(i)*2654435761)%uint64(len(vocabulary))]
+	}
+	raw, _ := json.Marshal(args) // a map of strings always encodes
+	return &core.ToolCall{ID: fmt.Sprintf("call_%016x", seed), Name: t.Name, Arguments: raw}
+}
+
+// seedOf hashes the prompt: the same request always gets the same reply,
+// and different prompts get different ones.
+func seedOf(req *core.Request) uint64 {
 	h := fnv.New64a()
 	_, _ = io.WriteString(h, req.System)
 	for _, m := range req.Messages {
 		_, _ = io.WriteString(h, string(m.Role))
 		_, _ = io.WriteString(h, m.Text)
 	}
-	seed := h.Sum64()
+	return h.Sum64()
+}
+
+// reply builds the deterministic word list for req: the same request always
+// gets the same reply, and different prompts get different ones.
+func (p *Provider) reply(req *core.Request) ([]string, core.StopReason) {
+	seed := seedOf(req)
 	n := p.cfg.Tokens
 	stop := core.StopEndTurn
 	if req.MaxTokens > 0 && req.MaxTokens < n {
@@ -220,11 +280,14 @@ var vocabulary = []string{
 }
 
 // InputTokens is the fake's token count for a request: whitespace-separated
-// words in the system prompt and every message.
+// words in the system prompt and every message, tool results included.
 func InputTokens(req *core.Request) int {
 	n := len(strings.Fields(req.System))
 	for _, m := range req.Messages {
 		n += len(strings.Fields(m.Text))
+		for _, r := range m.ToolResults {
+			n += len(strings.Fields(r.Content))
+		}
 	}
 	return n
 }
@@ -238,11 +301,30 @@ type stream struct {
 	id    string
 	model string
 	words []string
+	// call, when set, is the reply instead of words: a tool call start and
+	// one arguments delta.
+	call  *core.ToolCall
 	stop  core.StopReason
 	input int
 
-	state  int // 0 before start, 1..len(words) deltas sent, then stop, then done
+	state  int // 0 before start, then the body events, then stop, then done
 	closed bool
+}
+
+// body is the number of events between start and stop.
+func (s *stream) body() int {
+	if s.call != nil {
+		return 2
+	}
+	return len(s.words)
+}
+
+// output is the output token count of the whole reply.
+func (s *stream) output() int {
+	if s.call != nil {
+		return callTokens
+	}
+	return len(s.words)
 }
 
 func (s *stream) Next() (core.Event, error) {
@@ -256,20 +338,27 @@ func (s *stream) Next() (core.Event, error) {
 		}
 		s.state++
 		return core.Event{Kind: core.EventStart, ID: s.id, Model: s.model, Usage: core.Usage{InputTokens: s.input}}, nil
-	case s.state <= len(s.words):
+	case s.state <= s.body():
 		if s.state > 1 {
 			if err := sleep(s.ctx, s.cfg.TokenInterval); err != nil {
 				return core.Event{}, err
 			}
 		}
-		w := s.words[s.state-1]
-		s.p.settle(s.entry, s.state, false)
+		i := s.state
+		s.p.settle(s.entry, min(i, s.output()), false)
 		s.state++
-		return core.Event{Kind: core.EventDelta, Text: w}, nil
-	case s.state == len(s.words)+1:
+		switch {
+		case s.call == nil:
+			return core.Event{Kind: core.EventDelta, Text: s.words[i-1]}, nil
+		case i == 1:
+			return core.Event{Kind: core.EventToolCallStart, ToolIndex: 0, ToolCallID: s.call.ID, ToolName: s.call.Name}, nil
+		default:
+			return core.Event{Kind: core.EventToolCallDelta, ToolIndex: 0, Arguments: string(s.call.Arguments)}, nil
+		}
+	case s.state == s.body()+1:
 		s.state++
-		s.p.settle(s.entry, len(s.words), true)
-		return core.Event{Kind: core.EventStop, StopReason: s.stop, Usage: core.Usage{InputTokens: s.input, OutputTokens: len(s.words)}}, nil
+		s.p.settle(s.entry, s.output(), true)
+		return core.Event{Kind: core.EventStop, StopReason: s.stop, Usage: core.Usage{InputTokens: s.input, OutputTokens: s.output()}}, nil
 	default:
 		return core.Event{}, io.EOF
 	}
