@@ -2,6 +2,7 @@ package cache_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"strings"
@@ -258,6 +259,120 @@ func TestFillSkipsIncompleteReplies(t *testing.T) {
 		if s := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, r).Status; s != cache.StatusMiss {
 			t.Errorf("%s: stored (%s)", name, s)
 		}
+	}
+}
+
+// withTools returns base with one tool and a finished tool round trip
+// before the last turn, then lets mutate change one thing.
+func withTools(mutate func(r *core.Request)) *core.Request {
+	r := req("m", "", "and tomorrow?")
+	r.Tools = []core.Tool{{Name: "weather", Description: "Weather for a city", Parameters: json.RawMessage(`{"type":"object"}`)}}
+	r.ToolChoice = core.ToolChoice{Mode: core.ToolChoiceAuto}
+	last := r.Messages[0]
+	r.Messages = []core.Message{
+		{Role: core.RoleUser, Text: "weather in Paris?"},
+		{Role: core.RoleAssistant, ToolCalls: []core.ToolCall{{ID: "c1", Name: "weather", Arguments: json.RawMessage(`{"city":"Paris"}`)}}},
+		{Role: core.RoleUser, ToolResults: []core.ToolResult{{CallID: "c1", Content: "18 C"}}},
+		{Role: core.RoleAssistant, Text: "18 C in Paris."},
+		last,
+	}
+	if mutate != nil {
+		mutate(r)
+	}
+	return r
+}
+
+// Two requests that differ only in tool content never share an entry.
+func TestExactKeyCoversTools(t *testing.T) {
+	t.Parallel()
+	results := func(rs ...core.ToolResult) func(r *core.Request) {
+		return func(r *core.Request) {
+			r.Messages = append(r.Messages[:4], core.Message{Role: core.RoleUser, ToolResults: rs})
+		}
+	}
+	base := withTools(nil)
+	resultBase := withTools(results(core.ToolResult{CallID: "c2", Content: "rain"}))
+	tests := []struct {
+		name  string
+		base  *core.Request
+		query *core.Request
+	}{
+		{"no tools", base, withTools(func(r *core.Request) { r.Tools = nil })},
+		{"tool name", base, withTools(func(r *core.Request) { r.Tools[0].Name = "forecast" })},
+		{"tool description", base, withTools(func(r *core.Request) { r.Tools[0].Description = "Weather" })},
+		{"tool schema", base, withTools(func(r *core.Request) {
+			r.Tools[0].Parameters = json.RawMessage(`{"type":"object","required":["city"]}`)
+		})},
+		{"extra tool", base, withTools(func(r *core.Request) { r.Tools = append(r.Tools, core.Tool{Name: "time"}) })},
+		{"tool choice mode", base, withTools(func(r *core.Request) { r.ToolChoice.Mode = core.ToolChoiceAny })},
+		{"tool choice unset", base, withTools(func(r *core.Request) { r.ToolChoice = core.ToolChoice{} })},
+		{"tool choice name", base, withTools(func(r *core.Request) { r.ToolChoice = core.ToolChoice{Mode: core.ToolChoiceTool, Name: "weather"} })},
+		{"parallel calls", base, withTools(func(r *core.Request) { r.ToolChoice.DisableParallel = true })},
+		{"call id", base, withTools(func(r *core.Request) { r.Messages[1].ToolCalls[0].ID = "c9" })},
+		{"call name", base, withTools(func(r *core.Request) { r.Messages[1].ToolCalls[0].Name = "forecast" })},
+		{"call arguments", base, withTools(func(r *core.Request) { r.Messages[1].ToolCalls[0].Arguments = json.RawMessage(`{"city":"Rome"}`) })},
+		{"earlier result content", base, withTools(func(r *core.Request) { r.Messages[2].ToolResults[0].Content = "30 C" })},
+		{"earlier result error flag", base, withTools(func(r *core.Request) { r.Messages[2].ToolResults[0].IsError = true })},
+		{"last turn result content", resultBase, withTools(results(core.ToolResult{CallID: "c2", Content: "snow"}))},
+		{"last turn result id", resultBase, withTools(results(core.ToolResult{CallID: "c3", Content: "rain"}))},
+		{"last turn result error flag", resultBase, withTools(results(core.ToolResult{CallID: "c2", Content: "rain", IsError: true}))},
+		{"last turn extra result", resultBase, withTools(results(core.ToolResult{CallID: "c2", Content: "rain"}, core.ToolResult{CallID: "c3"}))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c, _ := newCache(t, nil, nil, 0.0001)
+			fill(t, c, "a", cache.ModeExact, tt.base)
+			if s := c.Lookup(context.Background(), "a", target, cache.ModeExact, tt.base).Status; s != cache.StatusExact {
+				t.Fatalf("same request: %s, want exact hit", s)
+			}
+			if s := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, tt.query).Status; s != cache.StatusMiss {
+				t.Errorf("changed request: %s, want miss", s)
+			}
+		})
+	}
+}
+
+// The semantic layer does not serve requests with tool content, even when
+// the caller asks for it: the reordered prompt below has similarity 1 to
+// the stored one under the fake embedder, in the same context.
+func TestSemanticSkipsToolContent(t *testing.T) {
+	t.Parallel()
+	c, _ := newCache(t, nil, nil, 0.0001)
+	fill(t, c, "a", cache.ModeSemantic, withTools(nil))
+	reworded := withTools(func(r *core.Request) { r.Messages[4].Text = "tomorrow and?" })
+	if s := c.Lookup(context.Background(), "a", target, cache.ModeSemantic, reworded).Status; s != cache.StatusMiss {
+		t.Errorf("reworded tool request: %s, want miss", s)
+	}
+}
+
+func TestFillSkipsToolCalls(t *testing.T) {
+	t.Parallel()
+	call := []core.ToolCall{{ID: "c", Name: "weather", Arguments: json.RawMessage(`{}`)}}
+	tests := []struct {
+		name  string
+		req   *core.Request
+		resp  *core.Response
+		store bool
+	}{
+		{"tool calls", withTools(nil), &core.Response{Text: "Let me check.", ToolCalls: call, StopReason: core.StopToolUse}, false},
+		{"tool_use without calls (streamed fill)", withTools(nil), &core.Response{Text: "Let me check.", StopReason: core.StopToolUse}, false},
+		{"tool request cut off", withTools(nil), &core.Response{Text: "Let me", StopReason: core.StopMaxTokens}, false},
+		{"tool request answered", withTools(nil), &core.Response{Text: "Rain tomorrow.", StopReason: core.StopEndTurn}, true},
+		{"plain request cut off", req("m", "", "hi"), &core.Response{Text: "Hel", StopReason: core.StopMaxTokens}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c, _ := newCache(t, nil, nil, 0.9)
+			l := c.Lookup(context.Background(), "a", target, cache.ModeExact, tt.req)
+			c.Fill(context.Background(), l, tt.resp)
+			c.Wait()
+			got := c.Lookup(context.Background(), "a", target, cache.ModeExact, tt.req)
+			if (got.Status == cache.StatusExact) != tt.store {
+				t.Errorf("status %s, stored = %v", got.Status, tt.store)
+			}
+		})
 	}
 }
 

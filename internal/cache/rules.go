@@ -50,6 +50,10 @@ func ParseMode(s string) (Mode, error) {
 // mode for one request: off, exact or semantic.
 const DirectiveHeader = "X-Switchboard-Cache"
 
+// ReasonToolContent is the Decision reason when tool content keeps a
+// request out of the semantic layer.
+const ReasonToolContent = "tool content: exact matches only"
+
 // Decision is the mode a request gets and why.
 type Decision struct {
 	Mode Mode
@@ -68,6 +72,11 @@ type Decision struct {
 //     time, and a cache would quietly take that away. A client that sets
 //     the directive has said it wants caching, whatever its temperature.
 //   - A request whose last turn is not the user's is never cached.
+//   - A request with tool content (tools, a tool choice, tool calls or
+//     tool results) gets the exact layer at most. A reworded question
+//     with the same tools may well need a different call, and a tool
+//     result is data, not a prompt to paraphrase: similarity says nothing
+//     about whether a stored answer fits.
 //
 // A directive that is not a mode is a client error.
 func Decide(keyMode Mode, directive string, req *core.Request, maxTemperature float64) (Decision, error) {
@@ -88,6 +97,9 @@ func Decide(keyMode Mode, directive string, req *core.Request, maxTemperature fl
 	}
 	if n := len(req.Messages); mode != ModeOff && (n == 0 || req.Messages[n-1].Role != core.RoleUser) {
 		mode, reason = ModeOff, "last turn is not the user's"
+	}
+	if mode == ModeSemantic && req.HasToolContent() {
+		mode, reason = ModeExact, ReasonToolContent
 	}
 	return Decision{Mode: mode, Reason: reason}, nil
 }

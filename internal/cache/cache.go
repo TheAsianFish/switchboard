@@ -144,6 +144,8 @@ type Lookup struct {
 
 	keys Keys
 	mode Mode
+	// tools records that the request carried tool content (see Fill).
+	tools bool
 	// vec is the prompt's embedding, kept so a fill need not embed again.
 	vec []float32
 }
@@ -166,7 +168,11 @@ func (c *Cache) Lookup(ctx context.Context, tenant string, up Upstream, mode Mod
 	if c.bypassed(&c.downUntil) {
 		return c.record(&Lookup{Status: StatusSkip, Reason: "store unavailable"})
 	}
-	l := &Lookup{Status: StatusMiss, keys: keys, mode: mode}
+	tools := req.HasToolContent()
+	if tools && mode > ModeExact {
+		mode = ModeExact // Decide says so too; this holds for any caller
+	}
+	l := &Lookup{Status: StatusMiss, keys: keys, mode: mode, tools: tools}
 
 	start := c.opts.Now()
 	sctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
@@ -272,8 +278,20 @@ func (c *Cache) indexFor(dims int) (Index, error) {
 // background: the client has its reply already and should not wait for
 // the store. Replies cut short by a content filter, and empty ones, are
 // not stored.
+//
+// Nor are replies with tool calls: an entry holds text only. A tool call
+// is a step in the middle of a conversation whose next request (carrying
+// the tool's result) is the one an exact hit can answer, and the streamed
+// fill path sees the text of a stream, not its tool calls. For a request
+// with tool content only a reply that ended on its own (end_turn or
+// stop_sequence) is stored, so a stream cut off inside a tool call is
+// never kept as its text alone.
 func (c *Cache) Fill(ctx context.Context, l *Lookup, resp *core.Response) {
 	if !l.Fillable() || resp == nil || resp.Text == "" || resp.StopReason == core.StopContentFilter {
+		return
+	}
+	if len(resp.ToolCalls) > 0 || resp.StopReason == core.StopToolUse ||
+		l.tools && resp.StopReason != core.StopEndTurn && resp.StopReason != core.StopSequence {
 		return
 	}
 	e := entry{
