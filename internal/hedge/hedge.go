@@ -422,6 +422,8 @@ func (p *Provider) race(ctx context.Context, req *core.Request, streaming bool, 
 			endSpan(a.span, "error", a.err)
 			if !a.cancelled && countsAgainst(a.err) {
 				p.breaker.Failure()
+			} else {
+				p.breaker.Release()
 			}
 			if firstErr == nil {
 				firstErr = a.err
@@ -430,6 +432,7 @@ func (p *Provider) race(ctx context.Context, req *core.Request, streaming bool, 
 				return nil, firstErr
 			}
 		case <-ctx.Done():
+			p.breaker.Release()
 			p.abandon(running, results, rep)
 			return nil, core.Wrap(core.KindTimeout, ctx.Err(), "request cancelled")
 		}

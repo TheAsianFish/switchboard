@@ -66,7 +66,9 @@ type Breaker struct {
 }
 
 // NewBreaker returns a closed breaker. onChange, if not nil, is called
-// with the new state on every transition, outside the breaker's lock.
+// with the new state on every transition, under the breaker's lock so that
+// transitions are published in the order they happened; it must not call
+// back into the breaker.
 func NewBreaker(cfg BreakerConfig, now func() time.Time, onChange func(State)) *Breaker {
 	if now == nil {
 		now = time.Now
@@ -93,11 +95,10 @@ func (b *Breaker) Allow() bool {
 			allow = true
 		}
 	}
-	st := b.state
-	b.mu.Unlock()
 	if changed {
-		b.notify(st)
+		b.notify(b.state)
 	}
+	b.mu.Unlock()
 	return allow
 }
 
@@ -107,26 +108,46 @@ func (b *Breaker) State() State {
 		return Closed
 	}
 	b.mu.Lock()
-	changed := b.advance(b.now())
+	if b.advance(b.now()) {
+		b.notify(b.state)
+	}
 	st := b.state
 	b.mu.Unlock()
-	if changed {
-		b.notify(st)
-	}
 	return st
 }
 
-// RetryAfter is how long an open breaker will keep refusing.
+// RetryAfter is how long the breaker will keep refusing: the rest of the
+// cooldown when open, and until the running probe's slot expires when
+// half-open.
 func (b *Breaker) RetryAfter() time.Duration {
 	if b == nil {
 		return 0
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.state != Open {
+	switch b.state {
+	case Open:
+		return max(0, b.openedAt.Add(b.cfg.Cooldown).Sub(b.now()))
+	case HalfOpen:
+		return max(0, b.probeUntil.Sub(b.now()))
+	default:
 		return 0
 	}
-	return max(0, b.openedAt.Add(b.cfg.Cooldown).Sub(b.now()))
+}
+
+// Release gives back a half-open probe slot taken by an attempt that ended
+// without telling whether the provider recovered (cancelled by its client,
+// or refused for a reason of the caller's own), so the next request can
+// probe at once instead of waiting out a cooldown.
+func (b *Breaker) Release() {
+	if b == nil || b.cfg.Failures <= 0 {
+		return
+	}
+	b.mu.Lock()
+	if b.state == HalfOpen {
+		b.probeUntil = time.Time{}
+	}
+	b.mu.Unlock()
 }
 
 // advance moves an open breaker whose cooldown has passed to half-open.
@@ -148,10 +169,10 @@ func (b *Breaker) Success() {
 	b.mu.Lock()
 	changed := b.state != Closed
 	b.state, b.failures = Closed, 0
-	b.mu.Unlock()
 	if changed {
 		b.notify(Closed)
 	}
+	b.mu.Unlock()
 }
 
 // Failure records a failed attempt. A failed probe reopens the breaker at
@@ -173,10 +194,10 @@ func (b *Breaker) Failure() {
 			b.state, b.openedAt, opened = Open, now, true
 		}
 	}
-	b.mu.Unlock()
 	if opened {
 		b.notify(Open)
 	}
+	b.mu.Unlock()
 }
 
 func (b *Breaker) notify(s State) {

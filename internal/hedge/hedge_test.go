@@ -538,3 +538,60 @@ func TestClientCancelCountsEveryRunningAttempt(t *testing.T) {
 		}
 	}
 }
+
+func TestCancelledProbeGivesBackItsSlot(t *testing.T) {
+	t.Parallel()
+	clk := &clock{t: time.Unix(1000, 0)}
+	var hang atomic.Bool
+	sc := &script{plan: func(int) (time.Duration, error) {
+		if hang.Load() {
+			return 5 * time.Second, nil
+		}
+		return 0, overloaded()
+	}}
+	cfg := quick()
+	cfg.Retries = 0
+	cfg.Breaker = BreakerConfig{Failures: 1, Cooldown: 10 * time.Second}
+	p := New("up", sc, cfg, WithClock(clk.now))
+	if _, err := p.Complete(context.Background(), &core.Request{Model: "m"}); err == nil || errors.Is(err, ErrOpen) {
+		t.Fatalf("err = %v, want the provider's failure", err)
+	}
+	clk.add(10 * time.Second)
+	// The probe's client goes away before the provider answers.
+	hang.Store(true)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := p.Complete(ctx, &core.Request{Model: "m"}); err == nil || errors.Is(err, ErrOpen) {
+		t.Fatalf("probe err = %v, want a cancellation", err)
+	}
+	if s := p.Health().Breaker; s != "half_open" {
+		t.Fatalf("a cancelled probe moved the breaker to %s", s)
+	}
+	// The next request probes at once instead of waiting out a cooldown.
+	hang.Store(false)
+	sc.plan = func(int) (time.Duration, error) { return 0, nil }
+	if _, err := p.Complete(context.Background(), &core.Request{Model: "m"}); err != nil {
+		t.Fatalf("second probe: %v", err)
+	}
+	if s := p.Health().Breaker; s != "closed" {
+		t.Fatalf("breaker %s after a good probe", s)
+	}
+}
+
+func TestHalfOpenRefusalCarriesRetryAfter(t *testing.T) {
+	t.Parallel()
+	clk := &clock{t: time.Unix(1000, 0)}
+	b := NewBreaker(BreakerConfig{Failures: 1, Cooldown: 10 * time.Second}, clk.now, nil)
+	b.Failure()
+	clk.add(10 * time.Second)
+	if !b.Allow() {
+		t.Fatal("no probe after the cooldown")
+	}
+	clk.add(3 * time.Second)
+	if b.Allow() {
+		t.Fatal("a second probe while the first is running")
+	}
+	if got := b.RetryAfter(); got != 7*time.Second {
+		t.Fatalf("retry after = %v, want 7s", got)
+	}
+}
