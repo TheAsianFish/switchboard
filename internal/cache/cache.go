@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/embed"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
@@ -314,9 +316,15 @@ func (c *Cache) Fill(ctx context.Context, l *Lookup, resp *core.Response) {
 	c.fillMu.Unlock()
 	go func() {
 		defer c.fills.Done()
-		fctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
+		// A child of the request's span that may end after it: the
+		// client has its reply by now.
+		sctx, span := telemetry.StartSpan(ctx, "cache.fill", attribute.String("switchboard.cache.mode", l.mode.String()))
+		var spanErr error
+		defer func() { telemetry.EndSpan(span, spanErr) }()
+		fctx, cancel := context.WithTimeout(sctx, c.opts.Timeout)
 		defer cancel()
 		if err := c.opts.KV.Set(fctx, exactKey(l.keys), raw, c.opts.TTL); err != nil {
+			spanErr = err
 			c.opts.Metrics.CacheFill("error")
 			c.storeFailed(ctx, "set", err)
 			return
@@ -331,6 +339,7 @@ func (c *Cache) Fill(ctx context.Context, l *Lookup, resp *core.Response) {
 			if err != nil {
 				// The exact entry is stored; only the semantic one is
 				// missing.
+				spanErr = err
 				c.opts.Metrics.CacheFill("error")
 				c.indexFailed(ctx, "add", err)
 				return

@@ -16,6 +16,9 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/TheAsianFish/switchboard/internal/auth"
 	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/core"
@@ -66,10 +69,16 @@ var _ core.Gateway = (*Pipeline)(nil)
 
 // Authenticate implements core.Gateway.
 func (p *Pipeline) Authenticate(ctx context.Context, apiKey string) (context.Context, error) {
+	// The span ends here: the returned context carries the caller's span,
+	// not this one, so the later stages are its siblings.
+	_, span := telemetry.StartSpan(ctx, "auth")
 	pr, err := p.keys.Lookup(apiKey)
 	if err != nil {
+		telemetry.EndSpan(span, err)
 		return ctx, err
 	}
+	span.SetAttributes(attribute.String("switchboard.key", pr.Name))
+	span.End()
 	ctx = auth.WithPrincipal(ctx, pr)
 	return telemetry.WithAttrs(ctx, "key", pr.Name), nil
 }
@@ -90,26 +99,9 @@ func (p *Pipeline) Models(ctx context.Context) []string {
 // route and a copy of the request addressed to the upstream model.
 func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (Route, *core.Request, *admission, error) {
 	pr := auth.FromContext(ctx)
-	if pr == nil {
-		return Route{}, nil, nil, core.Errorf(core.KindAuthentication, "missing API key")
-	}
-	rt, ok := p.routes[req.Model]
-	if !ok {
-		return Route{}, nil, nil, core.Errorf(core.KindNotFound, "model %q is not configured on this gateway", req.Model)
-	}
-	if !pr.Allows(req.Model) {
-		return Route{}, nil, nil, core.Errorf(core.KindPermission, "this API key may not use model %q", req.Model)
-	}
-	var dec cache.Decision
-	if p.policy.Cache != nil {
-		// Decided before admission so that a malformed directive is
-		// refused without charging the key's limits.
-		d, err := cache.Decide(pr.Cache, cache.ReportFrom(ctx).Directive(), req, p.policy.CacheMaxTemperature)
-		if err != nil {
-			p.policy.Metrics.Call(pr.Name, rt.Model, telemetry.OutcomeError)
-			return Route{}, nil, nil, err
-		}
-		dec = d
+	rt, dec, err := p.route(ctx, pr, req)
+	if err != nil {
+		return Route{}, nil, nil, err
 	}
 	adm, err := p.admit(ctx, pr, rt, req)
 	if err != nil {
@@ -135,6 +127,39 @@ func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (Route, *core
 	return rt, &up, adm, nil
 }
 
+// route finds the request's route, checks the key may use it and decides
+// the cache mode, in the "route" span.
+func (p *Pipeline) route(ctx context.Context, pr *auth.Principal, req *core.Request) (rt Route, dec cache.Decision, err error) {
+	_, span := telemetry.StartSpan(ctx, "route", attribute.String("switchboard.model", req.Model))
+	defer func() {
+		if err == nil {
+			span.SetAttributes(attribute.String("switchboard.provider", rt.ProviderName), attribute.String("switchboard.upstream_model", rt.Upstream))
+		}
+		telemetry.EndSpan(span, err)
+	}()
+	if pr == nil {
+		return Route{}, dec, core.Errorf(core.KindAuthentication, "missing API key")
+	}
+	rt, ok := p.routes[req.Model]
+	if !ok {
+		return Route{}, dec, core.Errorf(core.KindNotFound, "model %q is not configured on this gateway", req.Model)
+	}
+	if !pr.Allows(req.Model) {
+		return Route{}, dec, core.Errorf(core.KindPermission, "this API key may not use model %q", req.Model)
+	}
+	if p.policy.Cache != nil {
+		// Decided before admission so that a malformed directive is
+		// refused without charging the key's limits.
+		d, err := cache.Decide(pr.Cache, cache.ReportFrom(ctx).Directive(), req, p.policy.CacheMaxTemperature)
+		if err != nil {
+			p.policy.Metrics.Call(pr.Name, rt.Model, telemetry.OutcomeError)
+			return Route{}, dec, err
+		}
+		dec = d
+	}
+	return rt, dec, nil
+}
+
 // Complete implements core.Gateway.
 func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Response, error) {
 	rt, up, adm, err := p.resolve(ctx, req)
@@ -150,7 +175,8 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	}
 	ctx, _ = hedge.WithReport(ctx)
 	start := p.now()
-	resp, err := rt.Provider.Complete(ctx, up)
+	pctx, span := startProvider(ctx, rt, false)
+	resp, err := rt.Provider.Complete(pctx, up)
 	elapsed := p.now().Sub(start)
 	if err != nil {
 		err = upstreamError(rt, err)
@@ -162,11 +188,13 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 			// rather than a cost the ledger never sees.
 			u.InputTokens, outcome = adm.estimate.InputTokens, telemetry.OutcomeAbandoned
 		}
+		endProvider(span, 0, core.Usage{}, outcome, err)
 		p.settle(ctx, adm, u, 0, false, outcome)
 		logCall(ctx, rt, false, elapsed, 0, core.Usage{}, err)
 		return nil, err
 	}
 	resp.Model = req.Model
+	endProvider(span, 0, resp.Usage, telemetry.OutcomeOK, nil)
 	p.settle(ctx, adm, resp.Usage, len(resp.Text), false, telemetry.OutcomeOK)
 	logCall(ctx, rt, false, elapsed, elapsed, resp.Usage, nil)
 	if lk.Fillable() {
@@ -180,17 +208,26 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 // output cap that was really sent upstream: a reply the gateway capped at
 // a key's max_output_tokens must not answer a request that had no cap.
 func (p *Pipeline) lookup(ctx context.Context, adm *admission, req, up *core.Request) (context.Context, *cache.Lookup) {
+	sctx, span := telemetry.StartSpan(ctx, "cache.lookup")
 	var lk *cache.Lookup
+	defer func() {
+		span.SetAttributes(attribute.String("switchboard.cache.status", string(lk.Status)))
+		if lk.Status == cache.StatusSemantic {
+			span.SetAttributes(attribute.Float64("switchboard.cache.similarity", lk.Similarity))
+		}
+		span.End()
+	}()
 	switch {
 	case p.policy.Cache == nil:
-		return ctx, cache.Skip("no cache")
+		lk = cache.Skip("no cache")
+		return ctx, lk
 	case adm.cache.Mode == cache.ModeOff:
 		lk = cache.Skip(adm.cache.Reason)
 	default:
 		keyed := *req
 		keyed.MaxTokens = up.MaxTokens
 		route := cache.Upstream{Provider: adm.route.ProviderName, Model: adm.route.Upstream}
-		lk = p.policy.Cache.Lookup(ctx, adm.pr.Tenant, route, adm.cache.Mode, &keyed)
+		lk = p.policy.Cache.Lookup(sctx, adm.pr.Tenant, route, adm.cache.Mode, &keyed)
 	}
 	cache.ReportFrom(ctx).Set(lk)
 	return telemetry.WithAttrs(ctx, "cache", string(lk.Status)), lk
@@ -225,14 +262,19 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 	}
 	ctx, _ = hedge.WithReport(ctx)
 	start := p.now()
-	s, err := rt.Provider.Stream(ctx, up)
+	// The provider span runs until the stream ends, in finish; the
+	// provider (and any retry or hedge wrapper around it) gets it as its
+	// parent.
+	pctx, span := startProvider(ctx, rt, true)
+	s, err := rt.Provider.Stream(pctx, up)
 	if err != nil {
 		err = upstreamError(rt, err)
+		endProvider(span, 0, core.Usage{}, telemetry.OutcomeError, err)
 		p.settle(ctx, adm, core.Usage{}, 0, true, telemetry.OutcomeError)
 		logCall(ctx, rt, true, p.now().Sub(start), 0, core.Usage{}, err)
 		return nil, err
 	}
-	return &stream{inner: s, ctx: ctx, p: p, adm: adm, route: rt, model: req.Model, start: start, now: p.now, lookup: lk}, nil
+	return &stream{inner: s, ctx: ctx, span: span, p: p, adm: adm, route: rt, model: req.Model, start: start, now: p.now, lookup: lk}, nil
 }
 
 // upstreamError keeps a provider's refusal of the gateway's own credentials
@@ -253,6 +295,8 @@ func upstreamError(rt Route, err error) error {
 type stream struct {
 	inner core.Stream
 	ctx   context.Context
+	// span is the provider span, ended with the stream.
+	span  trace.Span
 	p     *Pipeline
 	adm   *admission
 	route Route
@@ -350,6 +394,11 @@ func (s *stream) finish(err error) {
 		case err != nil:
 			outcome = telemetry.OutcomeError
 		}
+		spanErr := err
+		if outcome == telemetry.OutcomeAbandoned {
+			spanErr = nil // the client left; the upstream did not fail
+		}
+		endProvider(s.span, ttft, usage, outcome, spanErr)
 		s.p.settle(s.ctx, s.adm, usage, chars, true, outcome)
 		logCall(s.ctx, s.route, true, s.now().Sub(s.start), ttft, usage, err)
 		if err == nil && s.lookup.Fillable() {
@@ -358,6 +407,32 @@ func (s *stream) finish(err error) {
 			s.p.policy.Cache.Fill(s.ctx, s.lookup, &core.Response{Text: text, StopReason: stop, Usage: u})
 		}
 	})
+}
+
+// startProvider starts the span around the upstream call. Its context is
+// the one to hand the provider, so spans the provider starts (retries,
+// hedged attempts) are its children.
+func startProvider(ctx context.Context, rt Route, stream bool) (context.Context, trace.Span) {
+	return telemetry.StartSpan(ctx, "provider",
+		attribute.String("switchboard.provider", rt.ProviderName),
+		attribute.String("switchboard.upstream_model", rt.Upstream),
+		attribute.Bool("switchboard.stream", stream),
+	)
+}
+
+// endProvider records what the call produced and ends its span.
+func endProvider(span trace.Span, ttft time.Duration, u core.Usage, outcome string, err error) {
+	if span.IsRecording() {
+		span.SetAttributes(
+			attribute.String("switchboard.outcome", outcome),
+			attribute.Int("switchboard.input_tokens", u.InputTokens),
+			attribute.Int("switchboard.output_tokens", u.OutputTokens),
+		)
+		if ttft > 0 {
+			span.SetAttributes(attribute.Float64("switchboard.ttft_ms", ms(ttft)))
+		}
+	}
+	telemetry.EndSpan(span, err)
 }
 
 // logCall writes the one line per call that says what it cost and how long
