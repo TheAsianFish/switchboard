@@ -37,10 +37,10 @@ test-integration: ## Lua scripts against a real redis:8 ($$SWITCHBOARD_TEST_REDI
 		scripts/with-redis.sh go test -race -count=1 -tags integration ./...; \
 	fi
 
-dev: ## one gateway, Redis, Ollama and the fake provider in compose
+dev: ## one gateway, Redis, Ollama, the fake provider, Jaeger and Prometheus in compose
 	docker compose -f deploy/compose.yaml --profile dev up --build
 
-fleet: ## three gateways behind nginx sharing Redis, plus Ollama and the fake provider
+fleet: ## three gateways behind nginx sharing Redis, plus Ollama, the fake provider, Jaeger and Prometheus
 	docker compose -f deploy/compose.yaml --profile fleet up --build
 
 bench: ## Q1: gateway overhead through the fake provider (about 12 minutes)
