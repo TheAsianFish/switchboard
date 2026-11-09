@@ -38,6 +38,7 @@ type Config struct {
 	RateLimit   RateLimit    `yaml:"ratelimit"`
 	Budget      BudgetPolicy `yaml:"budget"`
 	Cache       Cache        `yaml:"cache"`
+	Tracing     Tracing      `yaml:"tracing"`
 }
 
 // Log configures the process logger.
@@ -166,6 +167,7 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		RateLimit:   RateLimit{Algorithm: "fixed_window", Replicas: 1, RetryInterval: DefaultRetryInterval},
 		Budget:      BudgetPolicy{GraceUSD: DefaultGraceUSD, ReservationTTL: 15 * time.Minute},
 		Cache:       defaultCache(),
+		Tracing:     defaultTracing(),
 	}
 	if path != "" {
 		data, err := os.ReadFile(path)
@@ -236,6 +238,9 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 			return fmt.Errorf("SWITCHBOARD_RATELIMIT_REPLICAS: %q is not a whole number", v)
 		}
 		cfg.RateLimit.Replicas = n
+	}
+	if err := applyTracingEnv(&cfg.Tracing, getenv); err != nil {
+		return err
 	}
 	for i := range cfg.Providers {
 		set(&cfg.Providers[i].BaseURL, "SWITCHBOARD_PROVIDER_"+envName(cfg.Providers[i].Name)+"_BASE_URL")
@@ -318,6 +323,7 @@ func (c *Config) Validate() error {
 	}
 	errs = append(errs, c.validateShared(byName)...)
 	errs = append(errs, c.validateCache()...)
+	errs = append(errs, c.validateTracing()...)
 	return errors.Join(errs...)
 }
 

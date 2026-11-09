@@ -150,6 +150,26 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		return err
 	}
 	slog.SetDefault(log)
+	shutdownTracing, err := telemetry.SetupTracing(ctx, telemetry.TraceConfig{
+		Endpoint: cfg.Tracing.Endpoint, SampleRatio: cfg.Tracing.SampleRatio,
+		ServiceName: cfg.Tracing.ServiceName, Version: version(),
+	}, log)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Runs after the listeners have drained, so the last requests'
+		// spans are flushed; bounded so a dead collector cannot hold up
+		// the exit.
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(sctx); err != nil {
+			log.Warn("tracing shutdown", slog.String("error", err.Error()))
+		}
+	}()
+	if cfg.Tracing.Endpoint != "" {
+		log.Info("tracing on", slog.String("endpoint", cfg.Tracing.Endpoint), slog.Float64("sample_ratio", cfg.Tracing.SampleRatio))
+	}
 
 	metrics := telemetry.NewMetrics(true)
 	built := make(map[string]coreProvider, len(cfg.Providers))
