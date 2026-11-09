@@ -102,7 +102,12 @@ listener (`admin_listen`, default `127.0.0.1:9090`).
 
 Docker: `make docker` builds a distroless image. `make dev` runs one replica
 with Redis, Ollama and the fake provider in compose, and `make fleet` runs
-three replicas behind nginx sharing one Redis.
+three replicas behind nginx sharing one Redis. Both also run Jaeger (UI on
+http://localhost:16686) and Prometheus (http://localhost:9095), which
+scrapes every replica. With tracing on (`tracing.endpoint`, set in compose)
+every request is one trace with a span per pipeline stage, and every
+response carries its trace id in `X-Trace-Id`; `scripts/trace-check.sh`
+sends a request and prints its span tree from Jaeger.
 
 ## Architecture
 
