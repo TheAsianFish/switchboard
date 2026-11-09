@@ -3,6 +3,7 @@ package anthropic
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -106,6 +107,128 @@ data: {"type":"message_stop"}
 `
 	if got := w.Body.String(); got != want {
 		t.Errorf("stream\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestMessageResponseToolCalls(t *testing.T) {
+	t.Parallel()
+	const usage = `"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}`
+	tests := []struct {
+		name string
+		resp core.Response
+		want string // body, or "" for an upstream error
+	}{
+		{
+			name: "tool calls only",
+			resp: core.Response{ID: "msg_t", Model: "m", StopReason: core.StopToolUse, ToolCalls: []core.ToolCall{
+				{ID: "toolu_1", Name: "f", Arguments: json.RawMessage(`{"city":"Paris"}`)},
+				{ID: "call_2", Name: "g"},
+			}},
+			want: `{"id":"msg_t","type":"message","role":"assistant","model":"m","content":[` +
+				`{"type":"tool_use","id":"toolu_1","name":"f","input":{"city":"Paris"}},` +
+				`{"type":"tool_use","id":"call_2","name":"g","input":{}}],"stop_reason":"tool_use","stop_sequence":null,` + usage,
+		},
+		{
+			name: "text and a tool call",
+			resp: core.Response{ID: "msg_t", Model: "m", Text: "Let me look.", StopReason: core.StopToolUse, ToolCalls: []core.ToolCall{{ID: "toolu_1", Name: "f", Arguments: json.RawMessage(`{}`)}}},
+			want: `{"id":"msg_t","type":"message","role":"assistant","model":"m","content":[` +
+				`{"type":"text","text":"Let me look."},{"type":"tool_use","id":"toolu_1","name":"f","input":{}}],"stop_reason":"tool_use","stop_sequence":null,` + usage,
+		},
+		{
+			name: "arguments not an object",
+			resp: core.Response{ID: "msg_t", Model: "m", StopReason: core.StopToolUse, ToolCalls: []core.ToolCall{{ID: "x", Name: "f", Arguments: json.RawMessage(`{"city":`)}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			resp := tt.resp
+			w := post(t, &testGateway{p: &stubProvider{resp: &resp}}, `{"model":"alias","max_tokens":5,"messages":[{"role":"user","content":"q"}]}`)
+			if tt.want == "" {
+				if w.Code != http.StatusBadGateway && w.Code != http.StatusInternalServerError {
+					t.Fatalf("status %d: %s", w.Code, w.Body)
+				}
+				return
+			}
+			if got := w.Body.String(); w.Code != http.StatusOK || got != tt.want {
+				t.Errorf("status %d, body\n got %s\nwant %s", w.Code, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStreamToolCalls(t *testing.T) {
+	t.Parallel()
+	events := []core.Event{
+		{Kind: core.EventStart, ID: "abc", Model: "m"},
+		{Kind: core.EventToolCallStart, ToolIndex: 0, ToolCallID: "toolu_a", ToolName: "f"},
+		{Kind: core.EventToolCallDelta, ToolIndex: 0, Arguments: `{"x":`},
+		{Kind: core.EventToolCallDelta, ToolIndex: 0, Arguments: ""},
+		{Kind: core.EventToolCallDelta, ToolIndex: 0, Arguments: `1}`},
+		{Kind: core.EventDelta, Text: "and"},
+		{Kind: core.EventToolCallStart, ToolIndex: 1, ToolCallID: "toolu_b", ToolName: "g"},
+		{Kind: core.EventStop, StopReason: core.StopToolUse, Usage: core.Usage{OutputTokens: 7}},
+	}
+	p := &stubProvider{newStream: func(context.Context) core.Stream { return &core.SliceStream{Events: events} }}
+	w := post(t, &testGateway{p: p}, streamBody)
+	want := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_abc","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_a","name":"f","input":{}}}
+
+event: ping
+data: {"type":"ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"x\":"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"1}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"and"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_b","name":"g","input":{}}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":7}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+	if got := w.Body.String(); got != want {
+		t.Errorf("stream\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestStreamToolDeltaForClosedCall(t *testing.T) {
+	t.Parallel()
+	events := []core.Event{
+		{Kind: core.EventStart, ID: "abc", Model: "m"},
+		{Kind: core.EventToolCallStart, ToolIndex: 0, ToolCallID: "a", ToolName: "f"},
+		{Kind: core.EventDelta, Text: "x"},
+		{Kind: core.EventToolCallDelta, ToolIndex: 0, Arguments: "{}"},
+		{Kind: core.EventStop, StopReason: core.StopToolUse},
+	}
+	p := &stubProvider{newStream: func(context.Context) core.Stream { return &core.SliceStream{Events: events} }}
+	body := post(t, &testGateway{p: p}, streamBody).Body.String()
+	if !strings.Contains(body, "event: error\n") || strings.Contains(body, "message_stop") {
+		t.Errorf("stream %s\nwant an error event and no message_stop", body)
 	}
 }
 

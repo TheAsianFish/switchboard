@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -91,6 +92,58 @@ func TestParseRequestValid(t *testing.T) {
 			body: `{"model":"m","messages":[{"role":"user","content":"日本語   😀\n"}]}`,
 			want: core.Request{Model: "m", Messages: []core.Message{user("日本語   😀\n")}},
 		},
+		{
+			name: "tools compacted, strict ignored, parameters optional",
+			body: `{"model":"m","tools":[{"type":"function","function":{"name":"f","description":"d","strict":true,"parameters":{ "type": "object" }}},{"type":"function","function":{"name":"g"}}],"messages":[{"role":"user","content":"hi"}]}`,
+			want: core.Request{Model: "m", Messages: []core.Message{user("hi")}, Tools: []core.Tool{
+				{Name: "f", Description: "d", Parameters: json.RawMessage(`{"type":"object"}`)},
+				{Name: "g"},
+			}},
+		},
+		{
+			name: "empty tools",
+			body: `{"model":"m","tools":[],"messages":[{"role":"user","content":"hi"}]}`,
+			want: core.Request{Model: "m", Messages: []core.Message{user("hi")}},
+		},
+		{
+			name: "tool_choice required, parallel off",
+			body: `{"model":"m","tool_choice":"required","parallel_tool_calls":false,"messages":[{"role":"user","content":"hi"}]}`,
+			want: core.Request{Model: "m", Messages: []core.Message{user("hi")}, ToolChoice: core.ToolChoice{Mode: core.ToolChoiceAny, DisableParallel: true}},
+		},
+		{
+			name: "tool_choice none, parallel on",
+			body: `{"model":"m","tool_choice":"none","parallel_tool_calls":true,"messages":[{"role":"user","content":"hi"}]}`,
+			want: core.Request{Model: "m", Messages: []core.Message{user("hi")}, ToolChoice: core.ToolChoice{Mode: core.ToolChoiceNone}},
+		},
+		{
+			name: "tool_choice auto",
+			body: `{"model":"m","tool_choice":"auto","messages":[{"role":"user","content":"hi"}]}`,
+			want: core.Request{Model: "m", Messages: []core.Message{user("hi")}, ToolChoice: core.ToolChoice{Mode: core.ToolChoiceAuto}},
+		},
+		{
+			name: "tool_choice named function",
+			body: `{"model":"m","tool_choice":{"type":"function","function":{"name":"f"}},"messages":[{"role":"user","content":"hi"}]}`,
+			want: core.Request{Model: "m", Messages: []core.Message{user("hi")}, ToolChoice: core.ToolChoice{Mode: core.ToolChoiceTool, Name: "f"}},
+		},
+		{
+			name: "tool calls and results",
+			body: `{"model":"m","messages":[` +
+				`{"role":"user","content":"q"},` +
+				`{"role":"assistant","content":null,"tool_calls":[{"id":"a","type":"function","function":{"name":"f","arguments":"{\"x\": 1}"}},{"id":"b","type":"function","function":{"name":"g","arguments":""}}]},` +
+				`{"role":"tool","tool_call_id":"a","content":"one"},` +
+				`{"role":"tool","tool_call_id":"b","content":[{"type":"text","text":"tw"},{"type":"text","text":"o"}]},` +
+				`{"role":"user","content":"and?"},` +
+				`{"role":"assistant","content":"sure","tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{}"}}]},` +
+				`{"role":"tool","tool_call_id":"c","content":""}]}`,
+			want: core.Request{Model: "m", Messages: []core.Message{
+				user("q"),
+				{Role: core.RoleAssistant, ToolCalls: []core.ToolCall{{ID: "a", Name: "f", Arguments: json.RawMessage(`{"x": 1}`)}, {ID: "b", Name: "g"}}},
+				{Role: core.RoleUser, ToolResults: []core.ToolResult{{CallID: "a", Content: "one"}, {CallID: "b", Content: "two"}}},
+				user("and?"),
+				{Role: core.RoleAssistant, Text: "sure", ToolCalls: []core.ToolCall{{ID: "c", Name: "f", Arguments: json.RawMessage(`{}`)}}},
+				{Role: core.RoleUser, ToolResults: []core.ToolResult{{CallID: "c"}}},
+			}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -132,16 +185,28 @@ func TestParseRequestInvalid(t *testing.T) {
 		{"numeric content", `{"model":"m","messages":[{"role":"user","content":5}]}`, "must be a string or an array"},
 		{"missing content", `{"model":"m","messages":[{"role":"user"}]}`, "content is required"},
 		{"assistant null content", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"assistant","content":null}]}`, "content is required"},
-		{"assistant tool calls", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"assistant","content":null,"tool_calls":[{"id":"1"}]}]}`, "tool use is not supported yet"},
-		{"assistant function call", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"assistant","content":"","function_call":{"name":"f"}}]}`, "tool use is not supported yet"},
-		{"tool role", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"tool","content":"r","tool_call_id":"1"}]}`, "tool use is not supported yet"},
-		{"function role", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"function","content":"r"}]}`, "tool use is not supported yet"},
+		{"tool call without name", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"assistant","content":null,"tool_calls":[{"id":"1"}]}]}`, "function.name is required"},
+		{"tool call without id", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"assistant","content":null,"tool_calls":[{"type":"function","function":{"name":"f"}}]}]}`, "tool_calls[0].id is required"},
+		{"tool call bad arguments", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"assistant","content":null,"tool_calls":[{"id":"1","type":"function","function":{"name":"f","arguments":"{x"}}]}]}`, "arguments is not valid JSON"},
+		{"custom tool call", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"assistant","content":null,"tool_calls":[{"id":"1","type":"custom","custom":{"name":"f"}}]}]}`, "only function calls"},
+		{"tool calls not an array", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"assistant","content":null,"tool_calls":{}}]}`, "must be an array"},
+		{"user tool calls", `{"model":"m","messages":[{"role":"user","content":"q","tool_calls":[{"id":"1","type":"function","function":{"name":"f"}}]}]}`, "only assistant messages carry tool calls"},
+		{"assistant function call", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"assistant","content":"","function_call":{"name":"f"}}]}`, "legacy functions API"},
+		{"tool without call id", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"tool","content":"r"}]}`, "tool_call_id is required"},
+		{"tool without content", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"tool","tool_call_id":"1"}]}`, "content is required"},
+		{"tool image content", `{"model":"m","messages":[{"role":"tool","tool_call_id":"1","content":[{"type":"image_url"}]}]}`, "only text content is supported"},
+		{"function role", `{"model":"m","messages":[{"role":"user","content":"q"},{"role":"function","content":"r"}]}`, "legacy functions API"},
 		{"unknown role", `{"model":"m","messages":[{"role":"wizard","content":"q"}]}`, "unknown role"},
 		{"missing role", `{"model":"m","messages":[{"content":"q"}]}`, "role is required"},
-		{"tools", `{"model":"m","tools":[{"type":"function"}],` + msgs + `}`, "tool use is not supported yet"},
-		{"tool_choice", `{"model":"m","tool_choice":"none",` + msgs + `}`, "tool use is not supported yet"},
-		{"functions", `{"model":"m","functions":[],` + msgs + `}`, "tool use is not supported yet"},
-		{"function_call", `{"model":"m","function_call":"auto",` + msgs + `}`, "tool use is not supported yet"},
+		{"tool without function", `{"model":"m","tools":[{"type":"function"}],` + msgs + `}`, "tools[0].function.name is required"},
+		{"custom tool", `{"model":"m","tools":[{"type":"custom","custom":{"name":"f"}}],` + msgs + `}`, "only function tools"},
+		{"tools not an array", `{"model":"m","tools":{},` + msgs + `}`, "tools must be an array"},
+		{"parameters not an object", `{"model":"m","tools":[{"type":"function","function":{"name":"f","parameters":[1]}}],` + msgs + `}`, "parameters must be a JSON schema object"},
+		{"unknown tool_choice", `{"model":"m","tool_choice":"sometimes",` + msgs + `}`, "tool_choice must be"},
+		{"allowed_tools choice", `{"model":"m","tool_choice":{"type":"allowed_tools","allowed_tools":{}},` + msgs + `}`, "tool_choice must be"},
+		{"function choice without name", `{"model":"m","tool_choice":{"type":"function","function":{}},` + msgs + `}`, "tool_choice.function.name is required"},
+		{"functions", `{"model":"m","functions":[],` + msgs + `}`, "legacy functions API"},
+		{"function_call", `{"model":"m","function_call":"auto",` + msgs + `}`, "legacy functions API"},
 		{"n=2", `{"model":"m","n":2,` + msgs + `}`, "n must be 1"},
 		{"n=0", `{"model":"m","n":0,` + msgs + `}`, "n must be 1"},
 		{"json_object format", `{"model":"m","response_format":{"type":"json_object"},` + msgs + `}`, "response_format"},

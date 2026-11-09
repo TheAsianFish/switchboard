@@ -29,10 +29,13 @@ type choice struct {
 	FinishReason string    `json:"finish_reason"`
 }
 
+// message is the reply. Content is null only when the reply is tool calls
+// and no text, as OpenAI sends it.
 type message struct {
-	Role    string  `json:"role"`
-	Content string  `json:"content"`
-	Refusal *string `json:"refusal"`
+	Role      string         `json:"role"`
+	Content   *string        `json:"content"`
+	Refusal   *string        `json:"refusal"`
+	ToolCalls []wireToolCall `json:"tool_calls,omitempty"`
 }
 
 type usage struct {
@@ -63,8 +66,24 @@ type chunkChoice struct {
 }
 
 type delta struct {
-	Role    string  `json:"role,omitempty"`
-	Content *string `json:"content,omitempty"`
+	Role      string          `json:"role,omitempty"`
+	Content   *string         `json:"content,omitempty"`
+	ToolCalls []deltaToolCall `json:"tool_calls,omitempty"`
+}
+
+// deltaToolCall is a piece of a streamed tool call: the first for a call
+// carries its id, type and name with empty arguments, the rest carry only
+// the index and a fragment of the arguments.
+type deltaToolCall struct {
+	Index    int           `json:"index"`
+	ID       string        `json:"id,omitempty"`
+	Type     string        `json:"type,omitempty"`
+	Function deltaFunction `json:"function"`
+}
+
+type deltaFunction struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments"`
 }
 
 func toUsage(u core.Usage) usage {
@@ -77,11 +96,15 @@ func toUsage(u core.Usage) usage {
 	}
 }
 
-// finishReason maps a canonical stop reason to OpenAI's finish_reason.
+// finishReason maps a canonical stop reason to OpenAI's finish_reason (the
+// table is in core). A stop sequence is "stop": OpenAI does not tell it
+// from a natural end.
 func finishReason(r core.StopReason) string {
 	switch r {
 	case core.StopMaxTokens:
 		return "length"
+	case core.StopToolUse:
+		return "tool_calls"
 	case core.StopContentFilter:
 		return "content_filter"
 	default:
@@ -96,13 +119,18 @@ func serveComplete(ctx context.Context, w http.ResponseWriter, gw core.Gateway, 
 		writeError(w, ctx, err)
 		return
 	}
+	msg := message{Role: "assistant", ToolCalls: toolCalls(resp.ToolCalls)}
+	if resp.Text != "" || len(resp.ToolCalls) == 0 {
+		text := resp.Text
+		msg.Content = &text
+	}
 	writeJSON(w, http.StatusOK, completion{
 		ID:      completionID(resp.ID),
 		Object:  "chat.completion",
 		Created: time.Now().Unix(),
 		Model:   resp.Model,
 		Choices: []choice{{
-			Message:      message{Role: "assistant", Content: resp.Text},
+			Message:      msg,
 			FinishReason: finishReason(resp.StopReason),
 		}},
 		Usage: toUsage(resp.Usage),
@@ -189,6 +217,18 @@ func serveStream(ctx context.Context, w http.ResponseWriter, gw core.Gateway, re
 			if ev.Text != "" {
 				text := ev.Text
 				if err := cw.delta(delta{Content: &text}, nil); err != nil {
+					return
+				}
+			}
+		case core.EventToolCallStart:
+			tc := deltaToolCall{Index: ev.ToolIndex, ID: toolCallID(ev.ToolCallID), Type: "function", Function: deltaFunction{Name: ev.ToolName}}
+			if err := cw.delta(delta{ToolCalls: []deltaToolCall{tc}}, nil); err != nil {
+				return
+			}
+		case core.EventToolCallDelta:
+			if ev.Arguments != "" {
+				tc := deltaToolCall{Index: ev.ToolIndex, Function: deltaFunction{Arguments: ev.Arguments}}
+				if err := cw.delta(delta{ToolCalls: []deltaToolCall{tc}}, nil); err != nil {
 					return
 				}
 			}

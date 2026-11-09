@@ -58,6 +58,45 @@ func TestParseRequest(t *testing.T) {
 			body: `{"model":"m","max_tokens":5,"system":null,"stop_sequences":[],"messages":[{"role":"user","content":"q"}]}`,
 			want: core.Request{Model: "m", MaxTokens: 5, Messages: []core.Message{user("q")}},
 		},
+		{
+			name: "tools compacted, custom type, tool_choice",
+			body: `{"model":"m","max_tokens":5,"tools":[{"name":"f","description":"d","input_schema":{ "type": "object" },"cache_control":{"type":"ephemeral"}},{"type":"custom","name":"g","input_schema":{}}],"tool_choice":{"type":"tool","name":"f","disable_parallel_tool_use":true},"messages":[{"role":"user","content":"q"}]}`,
+			want: core.Request{Model: "m", MaxTokens: 5, Messages: []core.Message{user("q")},
+				Tools:      []core.Tool{{Name: "f", Description: "d", Parameters: json.RawMessage(`{"type":"object"}`)}, {Name: "g", Parameters: json.RawMessage(`{}`)}},
+				ToolChoice: core.ToolChoice{Mode: core.ToolChoiceTool, Name: "f", DisableParallel: true},
+			},
+		},
+		{
+			name: "tool_choice modes",
+			body: `{"model":"m","max_tokens":5,"tool_choice":{"type":"any"},"messages":[{"role":"user","content":"q"}]}`,
+			want: core.Request{Model: "m", MaxTokens: 5, Messages: []core.Message{user("q")}, ToolChoice: core.ToolChoice{Mode: core.ToolChoiceAny}},
+		},
+		{
+			name: "tool_choice none",
+			body: `{"model":"m","max_tokens":5,"tool_choice":{"type":"none"},"messages":[{"role":"user","content":"q"}]}`,
+			want: core.Request{Model: "m", MaxTokens: 5, Messages: []core.Message{user("q")}, ToolChoice: core.ToolChoice{Mode: core.ToolChoiceNone}},
+		},
+		{
+			name: "tool_choice auto",
+			body: `{"model":"m","max_tokens":5,"tool_choice":{"type":"auto"},"messages":[{"role":"user","content":"q"}]}`,
+			want: core.Request{Model: "m", MaxTokens: 5, Messages: []core.Message{user("q")}, ToolChoice: core.ToolChoice{Mode: core.ToolChoiceAuto}},
+		},
+		{
+			name: "tool use and results",
+			body: `{"model":"m","max_tokens":5,"messages":[` +
+				`{"role":"user","content":"q"},` +
+				`{"role":"assistant","content":[{"type":"text","text":"let me "},{"type":"tool_use","id":"t1","name":"f","input":{ "x": 1 }},{"type":"text","text":"see"},{"type":"tool_use","id":"t2","name":"g","input":{}}]},` +
+				`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"one"},{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":[{"type":"text","text":"tw"},{"type":"text","text":"o"}]},{"type":"text","text":"thanks"}]},` +
+				`{"role":"assistant","content":[{"type":"tool_use","id":"t3","name":"f","input":{}}]},` +
+				`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t3"}]}]}`,
+			want: core.Request{Model: "m", MaxTokens: 5, Messages: []core.Message{
+				user("q"),
+				{Role: core.RoleAssistant, Text: "let me see", ToolCalls: []core.ToolCall{{ID: "t1", Name: "f", Arguments: json.RawMessage(`{"x":1}`)}, {ID: "t2", Name: "g", Arguments: json.RawMessage(`{}`)}}},
+				{Role: core.RoleUser, Text: "thanks", ToolResults: []core.ToolResult{{CallID: "t1", Content: "one"}, {CallID: "t2", Content: "two", IsError: true}}},
+				{Role: core.RoleAssistant, ToolCalls: []core.ToolCall{{ID: "t3", Name: "f", Arguments: json.RawMessage(`{}`)}}},
+				{Role: core.RoleUser, ToolResults: []core.ToolResult{{CallID: "t3"}}},
+			}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,13 +133,28 @@ func TestParseRequestInvalid(t *testing.T) {
 		{"bad role", `{"model":"m","max_tokens":5,"messages":[{"role":"system","content":"q"}]}`, `messages.0.role: must be "user" or "assistant"`},
 		{"missing content", `{"model":"m","max_tokens":5,"messages":[{"role":"user"}]}`, "messages.0.content: field required"},
 		{"numeric content", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":3}]}`, "messages.0.content: must be a string or an array"},
-		{"image block", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":[{"type":"image","source":{}}]}]}`, "messages.0.content.0: only text content is supported"},
-		{"tool_result block", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":"q"},{"role":"user","content":[{"type":"text","text":"x"},{"type":"tool_result","tool_use_id":"t"}]}]}`, "messages.1.content.1: only text content is supported"},
+		{"image block", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":[{"type":"image","source":{}}]}]}`, "messages.0.content.0: only text, tool_use and tool_result content is supported"},
+		{"thinking block", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":"q"},{"role":"assistant","content":[{"type":"thinking","thinking":"x","signature":"s"}]}]}`, "messages.1.content.0: only text, tool_use and tool_result content is supported"},
+		{"tool_result in assistant", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":"q"},{"role":"assistant","content":[{"type":"tool_result","tool_use_id":"t"}]}]}`, "messages.1.content.0: tool_result blocks are not allowed in assistant messages"},
+		{"tool_use in user", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":[{"type":"tool_use","id":"t","name":"f","input":{}}]}]}`, "messages.0.content.0: tool_use blocks are not allowed in user messages"},
+		{"tool_use without id", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":"q"},{"role":"assistant","content":[{"type":"tool_use","name":"f","input":{}}]}]}`, "messages.1.content.0.id: field required"},
+		{"tool_use without name", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":"q"},{"role":"assistant","content":[{"type":"tool_use","id":"t","input":{}}]}]}`, "messages.1.content.0.name: field required"},
+		{"tool_use without input", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":"q"},{"role":"assistant","content":[{"type":"tool_use","id":"t","name":"f"}]}]}`, "messages.1.content.0.input: field required"},
+		{"tool_use array input", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":"q"},{"role":"assistant","content":[{"type":"tool_use","id":"t","name":"f","input":[]}]}]}`, "messages.1.content.0.input: must be an object"},
+		{"tool_result without id", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":[{"type":"tool_result","content":"x"}]}]}`, "messages.0.content.0.tool_use_id: field required"},
+		{"tool_result image", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":[{"type":"image","source":{}}]}]}]}`, "messages.0.content.0.content.0: only text content is supported"},
+		{"tool_result numeric content", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":4}]}]}`, "messages.0.content.0.content: must be a string or an array"},
 		{"text block without text", `{"model":"m","max_tokens":5,"messages":[{"role":"user","content":[{"type":"text"}]}]}`, "messages.0.content.0.text: field required"},
 		{"image in system", `{"model":"m","max_tokens":5,"system":[{"type":"image"}],` + msgs + `}`, "system.0: only text content is supported"},
 		{"numeric system", `{"model":"m","max_tokens":5,"system":1,` + msgs + `}`, "system: must be a string or an array"},
-		{"tools", `{"model":"m","max_tokens":5,"tools":[{"name":"t","input_schema":{}}],` + msgs + `}`, "tool use is not supported yet"},
-		{"tool_choice", `{"model":"m","max_tokens":5,"tool_choice":{"type":"auto"},` + msgs + `}`, "tool use is not supported yet"},
+		{"server tool", `{"model":"m","max_tokens":5,"tools":[{"type":"web_search_20250305","name":"web_search"}],` + msgs + `}`, `tools.0: server tools (type "web_search_20250305") are not supported`},
+		{"tool without name", `{"model":"m","max_tokens":5,"tools":[{"input_schema":{}}],` + msgs + `}`, "tools.0.name: field required"},
+		{"tool without schema", `{"model":"m","max_tokens":5,"tools":[{"name":"t"}],` + msgs + `}`, "tools.0.input_schema: field required"},
+		{"tool schema not an object", `{"model":"m","max_tokens":5,"tools":[{"name":"t","input_schema":"x"}],` + msgs + `}`, "tools.0.input_schema: must be an object"},
+		{"tools not an array", `{"model":"m","max_tokens":5,"tools":{},` + msgs + `}`, "tools: must be an array"},
+		{"unknown tool_choice", `{"model":"m","max_tokens":5,"tool_choice":{"type":"some"},` + msgs + `}`, "tool_choice.type: must be one of"},
+		{"tool_choice tool without name", `{"model":"m","max_tokens":5,"tool_choice":{"type":"tool"},` + msgs + `}`, "tool_choice.name: field required"},
+		{"tool_choice string", `{"model":"m","max_tokens":5,"tool_choice":"auto",` + msgs + `}`, "tool_choice: must be an object"},
 		{"thinking", `{"model":"m","max_tokens":5,"thinking":{"type":"enabled","budget_tokens":1024},` + msgs + `}`, "extended thinking is not supported yet"},
 	}
 	for _, tt := range tests {
