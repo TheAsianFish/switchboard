@@ -1,5 +1,6 @@
 // Package server mounts the front ends on one HTTP handler and runs it with
-// request ids, access logs, panic recovery and graceful shutdown.
+// request ids, a root trace span, access logs, panic recovery and graceful
+// shutdown.
 package server
 
 import (
@@ -10,6 +11,12 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	anthropicapi "github.com/TheAsianFish/switchboard/internal/api/anthropic"
 	openaiapi "github.com/TheAsianFish/switchboard/internal/api/openai"
@@ -74,17 +81,27 @@ func withRequestContext(base *slog.Logger, next http.Handler) http.Handler {
 		// the Anthropic SDKs surface on errors.
 		w.Header().Set("X-Request-Id", id)
 		w.Header().Set("Request-Id", id)
-		ctx := telemetry.WithRequest(r.Context(), base, id)
+		ctx, span := startSpan(r, id)
+		ctx = telemetry.WithRequest(ctx, base, id)
+		if tid := telemetry.TraceID(ctx); tid != "" {
+			// Set before anything is written, so a streamed reply carries
+			// it too. A trace that sampling dropped still has its id.
+			w.Header().Set(TraceIDHeader, tid)
+			ctx = telemetry.WithAttrs(ctx, "trace_id", tid)
+		}
 		ctx, report := cache.WithRequest(ctx, r.Header.Get(cache.DirectiveHeader))
 		rec := &recorder{ResponseWriter: w, report: report}
 		start := time.Now()
 		defer func() {
 			log := telemetry.Logger(ctx)
 			abort := false
+			defer func() { endSpan(span, rec.statusCode()) }()
 			if p := recover(); p != nil {
 				if err, ok := p.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+					span.SetStatus(codes.Error, "handler aborted")
 					panic(p)
 				}
+				span.SetStatus(codes.Error, "panic")
 				log.Error("panic serving request", slog.Any("panic", p))
 				if rec.wroteHeader {
 					// Returning would end the response cleanly and a cut-off
@@ -110,6 +127,48 @@ func withRequestContext(base *slog.Logger, next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(rec, r.WithContext(ctx))
 	})
+}
+
+// TraceIDHeader carries the request's trace id in every response while
+// tracing is on, so a client can look its request up in Jaeger. With
+// tracing off there is no trace and no header.
+const TraceIDHeader = "X-Trace-Id"
+
+// routes are the span names' routes; anything else is named by its method
+// alone, which keeps span names few whatever paths clients send.
+var routes = map[string]bool{"/v1/chat/completions": true, "/v1/messages": true, "/v1/models": true}
+
+// startSpan starts the request's root span, continuing the caller's trace
+// when it sent a W3C traceparent. Health checks are not traced: a probe
+// every few seconds would bury the requests.
+func startSpan(r *http.Request, requestID string) (context.Context, trace.Span) {
+	ctx := r.Context()
+	if r.URL.Path == "/healthz" {
+		return ctx, trace.SpanFromContext(ctx)
+	}
+	ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
+	name := r.Method
+	attrs := []attribute.KeyValue{
+		attribute.String("http.request.method", r.Method),
+		attribute.String("url.path", jsonSafe(r.URL.Path)),
+		attribute.String("switchboard.request_id", requestID),
+	}
+	if routes[r.URL.Path] {
+		name += " " + r.URL.Path
+		attrs = append(attrs, attribute.String("http.route", r.URL.Path))
+	}
+	return telemetry.Tracer().Start(ctx, name, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attrs...))
+}
+
+// endSpan records the status and ends the root span. Only a 5xx marks it
+// failed: a 4xx is the client's error, not the server's (the stage that
+// refused it carries the reason).
+func endSpan(span trace.Span, status int) {
+	span.SetAttributes(attribute.Int("http.response.status_code", status))
+	if status >= 500 {
+		span.SetStatus(codes.Error, http.StatusText(status))
+	}
+	span.End()
 }
 
 func validRequestID(id string) bool {

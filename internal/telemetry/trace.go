@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -15,6 +16,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/TheAsianFish/switchboard/internal/core"
 )
 
 // TracerName is the instrumentation scope of the gateway's own spans.
@@ -108,22 +111,33 @@ func StartSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (c
 }
 
 // EndSpan ends span, recording err, when there is one, as the span's
-// error status. The status description is the error's kind or message,
-// never request content: errors in this code base do not carry prompts.
+// error status.
 func EndSpan(span trace.Span, err error) {
-	if err != nil {
-		SpanError(span, err)
-	}
+	SpanError(span, err)
 	span.End()
 }
 
-// SpanError marks span as failed with err.
+// SpanError marks span as failed with err. A classified error is recorded
+// by its kind and client-safe message only: its cause can be an upstream's
+// own error text, which may quote part of the gateway's credentials, and
+// spans leave the process. Other errors (store failures) are recorded as
+// they are.
 func SpanError(span trace.Span, err error) {
 	if err == nil || !span.IsRecording() {
 		return
 	}
-	span.RecordError(err)
-	span.SetStatus(codes.Error, err.Error())
+	kind, msg := "", err.Error()
+	var e *core.Error
+	if errors.As(err, &e) {
+		kind = e.Kind.String()
+		msg = kind + ": " + e.Message
+		span.SetAttributes(attribute.String("error.type", kind))
+	}
+	span.AddEvent("exception", trace.WithAttributes(
+		attribute.String("exception.type", kind),
+		attribute.String("exception.message", msg),
+	))
+	span.SetStatus(codes.Error, msg)
 }
 
 // TraceID returns the trace id of ctx's span, or "" when there is none:

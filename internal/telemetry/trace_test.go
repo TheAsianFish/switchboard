@@ -11,6 +11,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/TheAsianFish/switchboard/internal/core"
 )
 
 func TestOTLPTracesURL(t *testing.T) {
@@ -79,6 +81,21 @@ func TestEndSpanRecordsError(t *testing.T) {
 	}
 	if spans[1].Status.Code != codes.Error || spans[1].Status.Description != "upstream refused" || len(spans[1].Events) != 1 {
 		t.Errorf("failed span status = %v, events %d", spans[1].Status, len(spans[1].Events))
+	}
+	// A classified error is recorded without its cause, which may be an
+	// upstream's text quoting a credential.
+	_, wrapped := tp.Tracer("t").Start(context.Background(), "wrapped")
+	EndSpan(wrapped, core.Wrap(core.KindUpstream, errors.New("Incorrect API key provided: sk-proj-abc"), "provider rejected the gateway's credentials"))
+	w := exp.GetSpans()[2]
+	if w.Status.Code != codes.Error || strings.Contains(w.Status.Description, "sk-proj") || !strings.Contains(w.Status.Description, "credentials") {
+		t.Errorf("wrapped span status = %v", w.Status)
+	}
+	for _, ev := range w.Events {
+		for _, kv := range ev.Attributes {
+			if strings.Contains(kv.Value.String(), "sk-proj") {
+				t.Errorf("event %s leaks the cause: %s=%s", ev.Name, kv.Key, kv.Value.String())
+			}
+		}
 	}
 	if got, want := TraceID(ctx), trace.SpanContextFromContext(ctx).TraceID().String(); got != want || len(got) != 32 {
 		t.Errorf("TraceID = %q, want %q", got, want)
