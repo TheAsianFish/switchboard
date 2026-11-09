@@ -12,6 +12,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/cost"
+	"github.com/TheAsianFish/switchboard/internal/hedge"
 	"github.com/TheAsianFish/switchboard/internal/ratelimit"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
@@ -184,6 +185,14 @@ func (p *Pipeline) settle(ctx context.Context, a *admission, u core.Usage, outCh
 	estimated := false
 	if outcome == telemetry.OutcomeOK || outChars > 0 {
 		u, estimated = a.fillUsage(u, outChars)
+	}
+	if n := hedge.ReportFrom(ctx).Snapshot().Cancelled; n > 0 {
+		// Attempts cancelled because another answered first (a hedge and
+		// the attempt it raced) may have had their prompts read and
+		// billed upstream. Nothing reports what they cost, so each is
+		// charged the prompt estimate: an over-count, never a cost the
+		// ledger misses. They produced no output the client saw.
+		u.InputTokens += n * a.estimate.InputTokens
 	}
 	key, model := a.pr.Name, a.route.Model
 	if a.tokens != 0 {

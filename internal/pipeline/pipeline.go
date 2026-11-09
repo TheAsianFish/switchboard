@@ -20,6 +20,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/cost"
+	"github.com/TheAsianFish/switchboard/internal/hedge"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
 
@@ -147,6 +148,7 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 		p.serveHit(ctx, adm, resp, false)
 		return resp, nil
 	}
+	ctx, _ = hedge.WithReport(ctx)
 	start := p.now()
 	resp, err := rt.Provider.Complete(ctx, up)
 	elapsed := p.now().Sub(start)
@@ -221,6 +223,7 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 		p.serveHit(ctx, adm, resp, true)
 		return &core.SliceStream{Events: core.ResponseEvents(resp, cache.Chunks(resp.Text))}, nil
 	}
+	ctx, _ = hedge.WithReport(ctx)
 	start := p.now()
 	s, err := rt.Provider.Stream(ctx, up)
 	if err != nil {
@@ -371,6 +374,10 @@ func logCall(ctx context.Context, rt Route, stream bool, total, ttft time.Durati
 		slog.Int("cache_read_tokens", u.CacheReadTokens),
 		slog.Int("cache_write_tokens", u.CacheWriteTokens),
 	)
+	if r := hedge.ReportFrom(ctx).Snapshot(); r.Attempts > 1 {
+		attrs = append(attrs, slog.Int("attempts", r.Attempts), slog.Int("retries", r.Retries),
+			slog.Bool("hedged", r.Hedged), slog.Bool("hedge_won", r.HedgeWon), slog.Int("cancelled_attempts", r.Cancelled))
+	}
 	log := telemetry.Logger(ctx)
 	switch {
 	case err == nil:
