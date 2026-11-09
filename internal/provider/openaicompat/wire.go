@@ -1,6 +1,10 @@
 package openaicompat
 
-import "github.com/TheAsianFish/switchboard/internal/core"
+import (
+	"encoding/json"
+
+	"github.com/TheAsianFish/switchboard/internal/core"
+)
 
 // chatRequest is the upstream request body.
 type chatRequest struct {
@@ -12,11 +16,52 @@ type chatRequest struct {
 	Stop          []string       `json:"stop,omitempty"`
 	Stream        bool           `json:"stream,omitempty"`
 	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+	Tools         []tool         `json:"tools,omitempty"`
+	// ToolChoice is a string or a named function; nil leaves it unsaid.
+	ToolChoice        any   `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool `json:"parallel_tool_calls,omitempty"`
 }
 
+// chatMessage is one message. Content is always a string, empty in an
+// assistant message that only calls tools: every server tried accepts
+// that, where some refuse null.
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+type tool struct {
+	Type     string       `json:"type"`
+	Function toolFunction `json:"function"`
+}
+
+type toolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+// toolCall is a tool call in a request, a reply or (with Index set) a
+// streamed delta, where every field but Index may be missing.
+type toolCall struct {
+	Index    *int         `json:"index,omitempty"`
+	ID       string       `json:"id,omitempty"`
+	Type     string       `json:"type,omitempty"`
+	Function functionCall `json:"function"`
+}
+
+type functionCall struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments"`
+}
+
+type namedChoice struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name string `json:"name"`
+	} `json:"function"`
 }
 
 type streamOptions struct {
@@ -39,11 +84,74 @@ func buildRequest(req *core.Request, stream bool) chatRequest {
 		out.Messages = append(out.Messages, chatMessage{Role: "system", Content: req.System})
 	}
 	for _, m := range req.Messages {
-		out.Messages = append(out.Messages, chatMessage{Role: string(m.Role), Content: m.Text})
+		out.Messages = appendMessage(out.Messages, m)
+	}
+	for _, t := range req.Tools {
+		out.Tools = append(out.Tools, tool{Type: "function", Function: toolFunction{Name: t.Name, Description: t.Description, Parameters: t.Parameters}})
+	}
+	out.ToolChoice = toolChoice(req.ToolChoice)
+	if req.ToolChoice.DisableParallel {
+		off := false
+		out.ParallelToolCalls = &off
 	}
 	if stream {
 		out.Stream = true
 		out.StreamOptions = &streamOptions{IncludeUsage: true}
+	}
+	return out
+}
+
+// appendMessage renders one canonical turn. Tool results become one "tool"
+// message each, before the turn's text, which is left out when empty; the
+// is_error flag has no place in this format and is dropped. Tool call
+// arguments go as the JSON text they are, {} when there are none.
+func appendMessage(msgs []chatMessage, m core.Message) []chatMessage {
+	for _, r := range m.ToolResults {
+		msgs = append(msgs, chatMessage{Role: "tool", ToolCallID: r.CallID, Content: r.Content})
+	}
+	if len(m.ToolResults) > 0 && m.Text == "" && len(m.ToolCalls) == 0 {
+		return msgs
+	}
+	msg := chatMessage{Role: string(m.Role), Content: m.Text}
+	for _, c := range m.ToolCalls {
+		args := string(c.Arguments)
+		if args == "" {
+			args = "{}"
+		}
+		msg.ToolCalls = append(msg.ToolCalls, toolCall{ID: c.ID, Type: "function", Function: functionCall{Name: c.Name, Arguments: args}})
+	}
+	return append(msgs, msg)
+}
+
+func toolChoice(tc core.ToolChoice) any {
+	switch tc.Mode {
+	case core.ToolChoiceAuto:
+		return "auto"
+	case core.ToolChoiceNone:
+		return "none"
+	case core.ToolChoiceAny:
+		return "required"
+	case core.ToolChoiceTool:
+		var c namedChoice
+		c.Type = "function"
+		c.Function.Name = tc.Name
+		return c
+	default:
+		return nil
+	}
+}
+
+// toolCalls converts the tool calls of a non-streamed reply.
+func toolCalls(in []toolCall) []core.ToolCall {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]core.ToolCall, len(in))
+	for i, c := range in {
+		out[i] = core.ToolCall{ID: c.ID, Name: c.Function.Name}
+		if c.Function.Arguments != "" {
+			out[i].Arguments = json.RawMessage(c.Function.Arguments)
+		}
 	}
 	return out
 }
@@ -59,7 +167,8 @@ type completion struct {
 
 type choice struct {
 	Message struct {
-		Content *string `json:"content"`
+		Content   *string    `json:"content"`
+		ToolCalls []toolCall `json:"tool_calls"`
 	} `json:"message"`
 	FinishReason string `json:"finish_reason"`
 }
@@ -75,7 +184,8 @@ type chunk struct {
 
 type chunkChoice struct {
 	Delta struct {
-		Content *string `json:"content"`
+		Content   *string    `json:"content"`
+		ToolCalls []toolCall `json:"tool_calls"`
 	} `json:"delta"`
 	FinishReason *string `json:"finish_reason"`
 }

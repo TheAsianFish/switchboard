@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -22,6 +23,13 @@ type stream struct {
 	stop  core.StopReason
 	err   error // sticky: io.EOF after the stop event, or the failure
 
+	// tools counts the tool_use blocks seen; toolBlock is the content
+	// block index of the open one, -1 when none is open.
+	tools     int
+	toolBlock int64
+	// pending is an event to return before reading on.
+	pending *core.Event
+
 	once   sync.Once
 	closed atomic.Bool
 }
@@ -34,6 +42,11 @@ func (s *stream) Next() (core.Event, error) {
 	if s.closed.Load() {
 		return core.Event{}, io.EOF
 	}
+	if s.pending != nil {
+		ev := *s.pending
+		s.pending = nil
+		return ev, nil
+	}
 	for s.s.Next() {
 		ev := s.s.Current()
 		switch ev.Type {
@@ -45,9 +58,37 @@ func (s *stream) Next() (core.Event, error) {
 				CacheWriteTokens: int(u.CacheCreationInputTokens),
 			}
 			return core.Event{Kind: core.EventStart, ID: ev.Message.ID, Model: ev.Message.Model, Usage: s.usage}, nil
+		case "content_block_start":
+			if ev.ContentBlock.Type != "tool_use" {
+				continue
+			}
+			i := s.tools
+			s.tools++
+			s.toolBlock = ev.Index
+			start := core.Event{Kind: core.EventToolCallStart, ToolIndex: i, ToolCallID: ev.ContentBlock.ID, ToolName: ev.ContentBlock.Name}
+			// The API opens a tool_use block with input {} and streams
+			// the arguments; an upstream that sends them up front gets
+			// them passed on as the first fragment.
+			if in, ok := ev.ContentBlock.Input.(map[string]any); ok && len(in) > 0 {
+				if raw, err := json.Marshal(in); err == nil {
+					s.pending = &core.Event{Kind: core.EventToolCallDelta, ToolIndex: i, Arguments: string(raw)}
+				}
+			}
+			return start, nil
+		case "content_block_stop":
+			if ev.Index == s.toolBlock {
+				s.toolBlock = -1
+			}
 		case "content_block_delta":
-			if ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
+			switch {
+			case ev.Delta.Type == "text_delta" && ev.Delta.Text != "":
 				return core.Event{Kind: core.EventDelta, Text: ev.Delta.Text}, nil
+			case ev.Delta.Type == "input_json_delta" && ev.Delta.PartialJSON != "":
+				if ev.Index != s.toolBlock {
+					s.finish(core.Errorf(core.KindUpstream, "upstream sent tool arguments for block %d, which is not an open tool_use block", ev.Index))
+					return core.Event{}, s.err
+				}
+				return core.Event{Kind: core.EventToolCallDelta, ToolIndex: s.tools - 1, Arguments: ev.Delta.PartialJSON}, nil
 			}
 		case "message_delta":
 			s.stop = stopReason(ev.Delta.StopReason)

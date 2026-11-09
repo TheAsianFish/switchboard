@@ -125,7 +125,8 @@ func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	r := &core.Response{
 		ID:         out.ID,
 		Model:      out.Model,
-		StopReason: stopReason(c.FinishReason),
+		ToolCalls:  toolCalls(c.Message.ToolCalls),
+		StopReason: stopReason(c.FinishReason, len(c.Message.ToolCalls) > 0),
 	}
 	if c.Message.Content != nil {
 		r.Text = *c.Message.Content
@@ -249,14 +250,22 @@ func transportError(ctx context.Context, err error) error {
 	return core.Wrap(core.KindUpstream, err, "upstream request failed")
 }
 
-// stopReason maps finish_reason to a canonical stop reason.
-func stopReason(finish string) core.StopReason {
+// stopReason maps finish_reason to a canonical stop reason (the table is in
+// core). Some servers end a reply that called tools with "stop" rather
+// than "tool_calls"; a reply with tool calls that stopped on its own is
+// read as tool_use either way, so clients know to run the tools.
+func stopReason(finish string, calledTools bool) core.StopReason {
 	switch finish {
 	case "length":
 		return core.StopMaxTokens
 	case "content_filter":
 		return core.StopContentFilter
+	case "tool_calls", "function_call":
+		return core.StopToolUse
 	default:
+		if calledTools {
+			return core.StopToolUse
+		}
 		return core.StopEndTurn
 	}
 }

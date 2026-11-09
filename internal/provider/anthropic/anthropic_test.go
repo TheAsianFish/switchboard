@@ -414,12 +414,12 @@ func TestRequestTranslation(t *testing.T) {
 	if got["max_tokens"] != float64(77) {
 		t.Errorf("max_tokens %v, want the configured default 77", got["max_tokens"])
 	}
-	for _, k := range []string{"system", "temperature", "top_p", "stop_sequences", "stream"} {
+	for _, k := range []string{"system", "temperature", "top_p", "stop_sequences", "stream", "tools", "tool_choice"} {
 		if _, ok := got[k]; ok {
 			t.Errorf("unset field %q was sent", k)
 		}
 	}
-	want := &core.Response{ID: "msg_1", Model: "m", Text: "ab", StopReason: core.StopContentFilter, Usage: core.Usage{InputTokens: 1, OutputTokens: 2, CacheWriteTokens: 3, CacheReadTokens: 4}}
+	want := &core.Response{ID: "msg_1", Model: "m", Text: "ab", ToolCalls: []core.ToolCall{{ID: "t", Name: "n", Arguments: json.RawMessage(`{}`)}}, StopReason: core.StopContentFilter, Usage: core.Usage{InputTokens: 1, OutputTokens: 2, CacheWriteTokens: 3, CacheReadTokens: 4}}
 	if !reflect.DeepEqual(resp, want) {
 		t.Errorf("got %+v\nwant %+v", resp, want)
 	}
@@ -465,7 +465,7 @@ func TestStopReason(t *testing.T) {
 	for in, want := range map[string]core.StopReason{
 		"end_turn": core.StopEndTurn, "max_tokens": core.StopMaxTokens, "stop_sequence": core.StopSequence,
 		"model_context_window_exceeded": core.StopMaxTokens,
-		"refusal":                       core.StopContentFilter, "tool_use": core.StopEndTurn, "pause_turn": core.StopEndTurn, "": core.StopEndTurn,
+		"refusal":                       core.StopContentFilter, "tool_use": core.StopToolUse, "pause_turn": core.StopEndTurn, "": core.StopEndTurn, "unknown": core.StopEndTurn,
 	} {
 		if got := stopReason(sdk.StopReason(in)); got != want {
 			t.Errorf("stopReason(%q) = %q, want %q", in, got, want)
