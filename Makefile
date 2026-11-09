@@ -61,6 +61,7 @@ sdk-smoke: build ## unmodified OpenAI and Anthropic Python SDKs streaming throug
 
 record-fixtures: ## re-capture provider fixtures from Ollama
 	scripts/record-fixtures.sh ollama
+	scripts/record-fixtures.sh ollama-tools
 
 bench-hedge: ## Q4: hedging off and on through the fake provider's slow tail (about 3 minutes)
 	eval/hedge/run.sh
