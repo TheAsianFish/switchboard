@@ -290,15 +290,20 @@ func randEvents(r *rand.Rand) (sent, want []core.Event) {
 	calls := 0
 	for range r.Intn(20) {
 		if r.Intn(4) == 0 {
-			// A tool call, its arguments in pieces; empty pieces vanish.
+			// A tool call, its arguments in pieces; empty pieces vanish,
+			// and a call left with none reads back as "{}".
 			ev := core.Event{Kind: core.EventToolCallStart, ToolIndex: calls, ToolCallID: "call_" + randText(r, 2), ToolName: "f" + randText(r, 2)}
 			sent, want = append(sent, ev), append(want, ev)
+			args := false
 			for range r.Intn(4) {
 				d := core.Event{Kind: core.EventToolCallDelta, ToolIndex: calls, Arguments: randText(r, 3)}
 				sent = append(sent, d)
 				if d.Arguments != "" {
-					want = append(want, d)
+					want, args = append(want, d), true
 				}
+			}
+			if !args {
+				want = append(want, core.Event{Kind: core.EventToolCallDelta, ToolIndex: calls, Arguments: "{}"})
 			}
 			calls++
 			continue

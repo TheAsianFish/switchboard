@@ -495,6 +495,9 @@ func TestStreamRenderToolCalls(t *testing.T) {
 		head + `{"tool_calls":[{"index":0,"function":{"arguments":"{\"x\":"}}]}` + tail,
 		head + `{"tool_calls":[{"index":0,"function":{"arguments":"1}"}}]}` + tail,
 		head + `{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"g","arguments":""}}]}` + tail,
+		// call_b had no argument fragments: it closes with "{}", so the
+		// client's accumulated arguments are JSON.
+		head + `{"tool_calls":[{"index":1,"function":{"arguments":"{}"}}]}` + tail,
 		head + `{},"logprobs":null,"finish_reason":"tool_calls"}]}`,
 		"[DONE]",
 	}

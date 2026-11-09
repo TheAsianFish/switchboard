@@ -211,28 +211,53 @@ func serveStream(ctx context.Context, w http.ResponseWriter, gw core.Gateway, re
 		return
 	}
 
+	// A tool call that ends (at the next text, call or stop) without any
+	// argument fragment (an Anthropic
+	// upstream sends none for a tool with no input) gets "{}", as OpenAI
+	// streams it and as the unstreamed reply has it: clients parse the
+	// accumulated arguments as JSON, and "" is not JSON.
+	openTool, openArgs := -1, false
+	closeTool := func() error {
+		if openTool < 0 || openArgs {
+			return nil
+		}
+		tc := deltaToolCall{Index: openTool, Function: deltaFunction{Arguments: "{}"}}
+		openTool = -1
+		return cw.delta(delta{ToolCalls: []deltaToolCall{tc}}, nil)
+	}
 	for {
 		switch ev.Kind {
 		case core.EventDelta:
 			if ev.Text != "" {
+				if err := closeTool(); err != nil {
+					return
+				}
 				text := ev.Text
 				if err := cw.delta(delta{Content: &text}, nil); err != nil {
 					return
 				}
 			}
 		case core.EventToolCallStart:
+			if err := closeTool(); err != nil {
+				return
+			}
+			openTool, openArgs = ev.ToolIndex, false
 			tc := deltaToolCall{Index: ev.ToolIndex, ID: toolCallID(ev.ToolCallID), Type: "function", Function: deltaFunction{Name: ev.ToolName}}
 			if err := cw.delta(delta{ToolCalls: []deltaToolCall{tc}}, nil); err != nil {
 				return
 			}
 		case core.EventToolCallDelta:
 			if ev.Arguments != "" {
+				openArgs = true
 				tc := deltaToolCall{Index: ev.ToolIndex, Function: deltaFunction{Arguments: ev.Arguments}}
 				if err := cw.delta(delta{ToolCalls: []deltaToolCall{tc}}, nil); err != nil {
 					return
 				}
 			}
 		case core.EventStop:
+			if err := closeTool(); err != nil {
+				return
+			}
 			reason := finishReason(ev.StopReason)
 			if err := cw.delta(delta{}, &reason); err != nil {
 				return
