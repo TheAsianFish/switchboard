@@ -299,6 +299,11 @@ func (s *stream) Next() (core.Event, error) {
 	case core.EventStart:
 		ev.Model = s.model
 		s.usage = ev.Usage
+	case core.EventToolCallStart, core.EventToolCallDelta:
+		// A reply that is only tool calls still has a first token.
+		if s.ttft == 0 {
+			s.ttft = s.now().Sub(s.start)
+		}
 	case core.EventDelta:
 		if s.ttft == 0 {
 			s.ttft = s.now().Sub(s.start)
