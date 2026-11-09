@@ -318,6 +318,56 @@ FLAT against HNSW not measured yet. Run `make eval-cache` (Redis 8), then `make 
 {{else}}
 Not measured yet. Run `make eval-cache`, then `make results`.
 {{end}}
+## Q4: hedging
+
+Does hedging (a second request after the p95 delay) cut the tail, and at
+what cost in extra requests? Command: `make bench-hedge`
+(`eval/hedge/run.sh`), raw files in `eval/results/q4-hedge/`.
+{{with .Q4}}
+**Method.** The fake provider runs as its own process. Each request's first
+byte comes after a log-normal delay with median {{.Meta.FakeProvider.Latency}} (σ = {{.Sigma}}), and an
+independent {{.SlowPercent}}% of requests are {{.Meta.FakeProvider.SlowFactor}}× slower; then {{.Meta.FakeProvider.Tokens}} tokens follow
+{{.Meta.FakeProvider.TokenInterval}} apart. `switchboard bench` offers {{.Meta.Rate}} streamed requests per second
+through the gateway for {{.Meta.Duration}} after a {{.Meta.Warmup}} warm-up, open loop (latency from
+the scheduled time), once with hedging off and once with it on. Each arm
+starts a fresh gateway, so the hedge delay is learned from the run's own
+traffic: the p95 of the last 1000 first-token times, used once 100 are in.
+The hedge budget is 10% of the key's requests (plus 10 saved up). The
+provider's ledger counts every request that reached it, the cancelled
+ones included.
+
+| Hedging | Requests | Errors | TTFT p50 | p95 | p99 | p99 95% CI | p99.9 | Total p50 | Total p99 | Total p99 95% CI | Upstream requests | Extra | Cancelled upstream | Hedges sent / won / refused | Hedge delay at the end | Upstream tokens (in / out) | At {{.PriceModel}} prices |
+|---------|---------:|-------:|---------:|----:|----:|-----------:|------:|----------:|----------:|-----------------:|------------------:|------:|-------------------:|----------------------------|-----------------------:|---------------------------:|-----:|
+{{- range .Rows}}
+| {{.Arm}} | {{.Requests}} | {{.Errors}} | {{.TTFTP50}} | {{.TTFTP95}} | {{.TTFTP99}} | {{.TTFTP99CI}} | {{.TTFTP999}} | {{.LatencyP50}} | {{.LatencyP99}} | {{.LatencyP99CI}} | {{.Upstream}} | {{.ExtraPercent}} | {{.Cancelled}} | {{.HedgesSent}} / {{.HedgesWon}} / {{.HedgesRefused}} | {{.HedgeDelay}} | {{.InputTokens}} / {{.OutputTokens}} | {{.Spend}} |
+{{- end}}
+
+Times in milliseconds. "Requests" and the latency columns cover the
+measured window; the upstream, hedge and token columns cover the whole arm,
+warm-up included, and "Extra" is upstream requests over client requests
+minus one. The intervals are percentile-bootstrap 95% intervals over {{.Resamples}}
+resamples of the per-request samples (fixed seed).
+
+**Answer.** Hedging changed the TTFT p99 by {{.TTFTCut}} and the total
+p99 by {{.LatencyCut}}, for {{.ExtraRequests}} upstream requests and {{.ExtraSpend}} in token
+spend against hedging off. A cancelled hedge loser had produced no tokens
+yet, so it costs its prompt; with prompts this short (the bench sends a
+few words), the dollar cost is almost all output and barely moves. With a
+long prompt the cost of a hedge is closer to its share of requests, which
+is the number to plan with.
+
+- Hardware: {{.Hardware}} (generator, gateway and fake provider on one machine).
+- Commit: `{{.Meta.Commit}}`, run {{.Meta.Date}}, seed {{.Meta.FakeProvider.Seed}}. Cost: $0 (fake provider; the dollar column prices its tokens).
+- Command: `{{.Meta.Command}}`.
+
+**Limits.** The tail here is independent per request: a hedge that draws
+again usually draws fast. A real provider's slow requests are often
+correlated (a busy region, a long prompt, an overloaded model), and then a
+hedge waits as long as the request it races and only adds load. The live
+part of Q4 (below, under "To measure") is what tells the two apart.
+{{else}}
+Not measured yet. Run `make bench-hedge`, then `make results`.
+{{end}}
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -352,7 +402,12 @@ Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `
 {{- if not .Q3}}
 - Q3 semantic cache threshold sweep: `make eval-cache` (needs Ollama).
 {{- end}}
-- Q4 hedging: `make bench-hedge` (the live part needs `ANTHROPIC_API_KEY`).
+{{- if not .Q4}}
+- Q4 hedging on the synthetic tail: `make bench-hedge`.
+{{- end}}
+- Q4 on a real provider: 200 streamed requests to `claude-haiku-5-5`
+  through the gateway with hedging off and on (PLAN.md budgets under
+  $0.50; needs `ANTHROPIC_API_KEY`).
 - Q5 router frontier: `make eval-router`.
 - Q6 replica and Redis kills under load: `make chaos`.
 - Claude through the gateway with the unmodified SDKs:
