@@ -368,7 +368,35 @@ part of Q4 (below, under "To measure") is what tells the two apart.
 {{else}}
 Not measured yet. Run `make bench-hedge`, then `make results`.
 {{end}}
-## Unmodified SDKs through the gateway
+
+### Q4 against a local model
+
+Is the synthetic tail realistic, and does hedging help against a real
+backend? Command: `eval/hedge/ollama.sh` (needs Ollama), raw files in
+`eval/results/q4-hedge-ollama/`.
+{{with .Q4Ollama}}
+The same comparison through the gateway's OpenAI-compatible provider to
+`{{.Meta.Model}}` on Ollama {{.Meta.OllamaVersion}}: {{.Meta.Rate}} streamed request per second
+(open loop), `max_tokens` {{.Meta.MaxTokens}}, {{.Meta.Duration}} measured after a {{.Meta.Warmup}} warm-up, hedging off
+then on. One untimed request loads the model first. The hedge delay is the
+p95 of the last 200 first-token times, used once 20 are in; the budget is
+10%. Ollama runs on the same CPU as everything else, and both attempts of
+a hedge go to that one server.
+
+| Hedging | Requests | Errors | TTFT p50 | p95 | p99 | p99 95% CI | Total p50 | Total p99 | Total p99 95% CI | Hedges sent / won | Extra upstream |
+|---------|---------:|-------:|---------:|----:|----:|-----------:|----------:|----------:|-----------------:|------------------:|---------------:|
+{{- range .Rows}}
+| {{.Arm}} | {{.Requests}} | {{.Errors}} | {{.TTFTP50}} | {{.TTFTP95}} | {{.TTFTP99}} | {{.TTFTP99CI}} | {{.LatencyP50}} | {{.LatencyP99}} | {{.LatencyP99CI}} | {{.HedgesSent}} / {{.HedgesWon}} | {{.ExtraPercent}} |
+{{- end}}
+
+Hedging changed the TTFT p99 by {{.TTFTCut}} and the total p99 by {{.LatencyCut}}.
+
+- Hardware: {{.Hardware}}.
+- Commit: `{{.Meta.Commit}}`, run {{.Meta.Date}}. Cost: $0 (local model).
+- Command: `{{.Meta.Command}}`.
+{{else}}
+Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `eval/hedge/ollama.sh`, then `make results`.
+{{end}}## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
 format it speaks and whichever backend serves it? Command: `make sdk-smoke`

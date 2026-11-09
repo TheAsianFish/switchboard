@@ -288,3 +288,65 @@ func readCounters(path, name, label string) (map[string]float64, error) {
 	}
 	return out, nil
 }
+
+// Q4OllamaDir is the subdirectory written by eval/hedge/ollama.sh.
+const Q4OllamaDir = "q4-hedge-ollama"
+
+// Q4Ollama is the local check: the same comparison against a real model
+// on local Ollama.
+type Q4Ollama struct {
+	Meta struct {
+		Commit        string  `json:"commit"`
+		Date          string  `json:"date"`
+		Model         string  `json:"model"`
+		OllamaVersion string  `json:"ollama_version"`
+		Rate          float64 `json:"rate"`
+		Duration      string  `json:"duration"`
+		Warmup        string  `json:"warmup"`
+		MaxTokens     int     `json:"max_tokens"`
+		Command       string  `json:"command"`
+	}
+	Rows     []Q4Row
+	Hardware string
+	// TTFTCut and LatencyCut are on minus off at the p99.
+	TTFTCut, LatencyCut string
+}
+
+func loadQ4Ollama(dir string) (*Q4Ollama, error) {
+	q := &Q4Ollama{}
+	if err := readJSON(filepath.Join(dir, "meta.json"), &q.Meta); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var p99s [][2]float64
+	for _, arm := range []string{"off", "on"} {
+		var res bench.Result
+		if err := readJSON(filepath.Join(dir, arm+".json"), &res); err != nil {
+			return nil, err
+		}
+		if res.Samples == nil || len(res.Samples.TTFTMS) == 0 {
+			return nil, fmt.Errorf("results: %s/%s.json has no samples", dir, arm)
+		}
+		hedges, err := readCounters(filepath.Join(dir, arm+"-metrics.prom"), "switchboard_provider_hedges_total", "event")
+		if err != nil {
+			return nil, err
+		}
+		client := res.Requests + res.WarmupRequests
+		q.Rows = append(q.Rows, Q4Row{
+			Arm: arm, Requests: res.Requests, Errors: res.Errors(),
+			TTFTP50: f1(res.TTFT.P50), TTFTP95: f1(res.TTFT.P95), TTFTP99: f1(res.TTFT.P99),
+			TTFTP99CI:  bootstrapP99(res.Samples.TTFTMS),
+			LatencyP50: f1(res.Latency.P50), LatencyP99: f1(res.Latency.P99),
+			LatencyP99CI: bootstrapP99(res.Samples.LatencyMS),
+			ExtraPercent: fmt.Sprintf("%.1f%%", hedges["sent"]/float64(client)*100),
+			HedgesSent:   count(hedges["sent"]), HedgesWon: count(hedges["won"]), HedgesRefused: count(hedges["refused"]),
+		})
+		p99s = append(p99s, [2]float64{res.TTFT.P99, res.Latency.P99})
+		q.Hardware = describeHardware(res.Hardware)
+	}
+	q.TTFTCut = change(p99s[0][0], p99s[1][0])
+	q.LatencyCut = change(p99s[0][1], p99s[1][1])
+	return q, nil
+}

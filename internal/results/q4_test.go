@@ -91,3 +91,35 @@ func TestSummarizeLedger(t *testing.T) {
 		t.Fatal("bad input accepted")
 	}
 }
+
+func TestRenderQ4Ollama(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	q := filepath.Join(dir, Q4OllamaDir)
+	if err := os.Mkdir(q, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(q, "meta.json"), map[string]any{
+		"commit": "abc1234", "date": "2026-11-09T12:00:00Z", "model": "qwen2.5:0.5b", "ollama_version": "0.40.15",
+		"rate": 1, "duration": "180s", "warmup": "30s", "max_tokens": 16, "command": "eval/hedge/ollama.sh",
+	})
+	writeJSON(t, filepath.Join(q, "off.json"), q4Arm(180, 400))
+	writeJSON(t, filepath.Join(q, "on.json"), q4Arm(180, 450))
+	if err := os.WriteFile(filepath.Join(q, "on-metrics.prom"), []byte("switchboard_provider_hedges_total{event=\"sent\",provider=\"ollama\"} 18\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Render(dir, tmplPath, &buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"`qwen2.5:0.5b` on Ollama 0.40.15",
+		"| 18 / 0 | 9.1% |",
+		"changed the TTFT p99 by +50.0 ms (+12%)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render lacks %q", want)
+		}
+	}
+}
