@@ -1,9 +1,0 @@
-{
-  "commit": "07ca5aa",
-  "date": "2026-11-09T22:11:19Z",
-  "command": "scripts/trace-check.sh --local --save eval/results/m4-trace",
-  "jaeger_image": "jaegertracing/jaeger:2.23.0",
-  "config": "eval/trace/switchboard.yaml",
-  "fake_provider": {"latency": "20ms", "tokens": 30, "token_interval": "5ms"},
-  "expected_spans": "auth route ratelimit budget.reserve cache.lookup provider settle cache.fill"
-}

@@ -88,7 +88,7 @@ if $local; then
 	key=sk-trace
 	gateway=http://127.0.0.1:8080
 	streams=(true false)
-	expect="auth route ratelimit budget.reserve cache.lookup provider settle cache.fill"
+	expect="auth route ratelimit budget.reserve cache.lookup provider provider.attempt settle cache.fill"
 	go build -o bin/switchboard ./cmd/switchboard
 	bin/switchboard fake-provider --listen 127.0.0.1:9101 --latency 20ms --tokens 30 --token-interval 5ms \
 		>"$work/fake-provider.log" 2>&1 &

@@ -2,6 +2,8 @@
 # switched on (a request limit, a budget and the exact cache), the fake
 # provider as its own process on 127.0.0.1:9101 reached through the
 # OpenAI-compatible provider, and spans sent to Jaeger on localhost:4318.
+# The hedge delay (10 ms) is below the fake provider's first-byte delay
+# (20 ms), so every request is hedged and the trace shows both attempts.
 listen: 127.0.0.1:8080
 admin_listen: 127.0.0.1:9090
 log:
@@ -14,6 +16,8 @@ providers:
     type: openaicompat
     base_url: http://127.0.0.1:9101/v1
     timeout: 30s
+    resilience:
+      hedge: {enabled: true, delay: 10ms, budget: 1}
 cache:
   mode: exact
 models:
