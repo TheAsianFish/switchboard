@@ -16,8 +16,9 @@ type Tracing struct {
 	// has no path. Empty, the default, turns tracing off: no spans, no
 	// X-Trace-Id header, incoming traceparent headers ignored.
 	Endpoint string `yaml:"endpoint"`
-	// SampleRatio is the share of new traces exported, 0 to 1. A request
-	// that carries a traceparent follows its caller's decision.
+	// SampleRatio is the share of traces exported, 0 to 1. A request that
+	// carries a traceparent continues its caller's trace id, but the
+	// caller's sampled flag is ignored: the ratio decides.
 	SampleRatio float64 `yaml:"sample_ratio"`
 	// ServiceName is the service.name the spans are reported under.
 	ServiceName string `yaml:"service_name"`

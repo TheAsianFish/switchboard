@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/url"
 	"time"
 
@@ -75,7 +76,7 @@ func SetupTracing(ctx context.Context, cfg TraceConfig, log *slog.Logger) (shutd
 		// dropped because the queue is full is lost, not waited for.
 		sdktrace.WithBatcher(exp),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRatio))),
+		sdktrace.WithSampler(Sampler(cfg.SampleRatio)),
 	)
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
@@ -85,6 +86,34 @@ func SetupTracing(ctx context.Context, cfg TraceConfig, log *slog.Logger) (shutd
 		log.Warn("tracing", slog.String("error", err.Error()))
 	}))
 	return tp.Shutdown, nil
+}
+
+// Sampler keeps ratio of new traces and follows the gateway's own
+// decisions inside a trace. A caller's traceparent is continued (its trace
+// id joins the caller's trace) but its sampled flag is not trusted: it
+// arrives before authentication, and a flag forcing every request to be
+// exported would let any caller flood the collector and push other traces
+// out of the batch queue. Remote parents are sampled at random at ratio,
+// not by trace id, because the caller chooses the trace id.
+func Sampler(ratio float64) sdktrace.Sampler {
+	random := randomSampler{ratio: ratio}
+	return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(ratio),
+		sdktrace.WithRemoteParentSampled(random),
+		sdktrace.WithRemoteParentNotSampled(random))
+}
+
+type randomSampler struct{ ratio float64 }
+
+func (s randomSampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	d := sdktrace.Drop
+	if s.ratio >= 1 || (s.ratio > 0 && rand.Float64() < s.ratio) {
+		d = sdktrace.RecordAndSample
+	}
+	return sdktrace.SamplingResult{Decision: d, Tracestate: trace.SpanContextFromContext(p.ParentContext).TraceState()}
+}
+
+func (s randomSampler) Description() string {
+	return fmt.Sprintf("RandomRemoteParent{%g}", s.ratio)
 }
 
 // otlpTracesURL turns a collector base URL into the traces endpoint, the

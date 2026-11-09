@@ -101,3 +101,27 @@ func TestEndSpanRecordsError(t *testing.T) {
 		t.Errorf("TraceID = %q, want %q", got, want)
 	}
 }
+
+// A caller's sampled flag neither forces export past the ratio nor opts a
+// request out of it.
+func TestSamplerIgnoresTheCallersFlag(t *testing.T) {
+	t.Parallel()
+	tid, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	sid, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
+	for _, tt := range []struct {
+		ratio   float64
+		flags   trace.TraceFlags
+		sampled bool
+	}{
+		{0, trace.FlagsSampled, false},
+		{1, 0, true},
+		{1, trace.FlagsSampled, true},
+	} {
+		parent := trace.ContextWithRemoteSpanContext(context.Background(),
+			trace.NewSpanContext(trace.SpanContextConfig{TraceID: tid, SpanID: sid, TraceFlags: tt.flags, Remote: true}))
+		res := Sampler(tt.ratio).ShouldSample(sdktrace.SamplingParameters{ParentContext: parent, TraceID: tid, Name: "x"})
+		if got := res.Decision == sdktrace.RecordAndSample; got != tt.sampled {
+			t.Errorf("ratio %v, caller flags %v: sampled = %v, want %v", tt.ratio, tt.flags, got, tt.sampled)
+		}
+	}
+}
