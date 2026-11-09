@@ -390,6 +390,14 @@ a hedge go to that one server.
 {{- end}}
 
 Hedging changed the TTFT p99 by {{.TTFTCut}} and the total p99 by {{.LatencyCut}}.
+With hedging off, the local model's TTFT p99 was {{.TailRatio}}× its median{{if .SyntheticTailRatio}}, against
+{{.SyntheticTailRatio}}× for the synthetic run above{{end}}: one model on one server, at one request at a time,
+has no slow mode for a second attempt to escape, and a hedge only queues
+behind the request it races on the same CPU. Read the two p99 intervals
+before reading the change: where they overlap, this run cannot tell
+hedging from no hedging. The fake provider's independent slow tail is
+therefore a model of a fleet (many replicas, some busy), not of a single
+local server.
 
 - Hardware: {{.Hardware}}.
 - Commit: `{{.Meta.Commit}}`, run {{.Meta.Date}}. Cost: $0 (local model).

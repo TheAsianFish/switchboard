@@ -120,6 +120,9 @@ func Render(resultsDir, templatePath string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if q4 != nil && q4o != nil {
+		q4o.SyntheticTailRatio = ratio(q4.Rows[0].ttftP99, q4.Rows[0].ttftP50)
+	}
 	tmpl, err := template.New(filepath.Base(templatePath)).Option("missingkey=error").ParseFiles(templatePath)
 	if err != nil {
 		return fmt.Errorf("results: parse template: %w", err)

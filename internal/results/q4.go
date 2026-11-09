@@ -133,6 +133,7 @@ type Q4Row struct {
 	Spend                       string
 	upstreamPerClient, spendUSD float64
 	ttftP99, latencyP99         float64
+	ttftP50                     float64
 }
 
 // q4Resamples is the bootstrap's resample count; the seed is fixed so
@@ -169,6 +170,8 @@ func loadQ4(dir string) (*Q4, error) {
 	q.ExtraSpend = fmt.Sprintf("%+.1f%%", (on.spendUSD-off.spendUSD)/off.spendUSD*100)
 	return q, nil
 }
+
+func ratio(p99, p50 float64) string { return strconv.FormatFloat(p99/p50, 'f', 1, 64) }
 
 func change(before, after float64) string {
 	return fmt.Sprintf("%+.1f ms (%+.0f%%)", after-before, (after-before)/before*100)
@@ -216,11 +219,15 @@ func loadQ4Arm(dir, arm string, price cost.Price) (Q4Row, string, error) {
 		Spend:             fmt.Sprintf("$%.4f", spent.USD()),
 		upstreamPerClient: float64(led.Requests) / float64(client),
 		spendUSD:          spent.USD(),
-		ttftP99:           res.TTFT.P99, latencyP99: res.Latency.P99,
+		ttftP99:           res.TTFT.P99, latencyP99: res.Latency.P99, ttftP50: res.TTFT.P50,
 	}
+	// The hedging-off arm keeps a latency window too, but no request used
+	// it as a delay.
 	for _, p := range health.Providers {
 		for _, d := range p.HedgeDelayMS {
-			row.HedgeDelay = f1(d)
+			if arm == "on" {
+				row.HedgeDelay = f1(d)
+			}
 		}
 	}
 	return row, describeHardware(res.Hardware), nil
@@ -310,6 +317,9 @@ type Q4Ollama struct {
 	Hardware string
 	// TTFTCut and LatencyCut are on minus off at the p99.
 	TTFTCut, LatencyCut string
+	// TailRatio is the hedging-off arm's TTFT p99 over its p50, and
+	// SyntheticTailRatio the same for the synthetic run when there is one.
+	TailRatio, SyntheticTailRatio string
 }
 
 func loadQ4Ollama(dir string) (*Q4Ollama, error) {
@@ -321,6 +331,7 @@ func loadQ4Ollama(dir string) (*Q4Ollama, error) {
 		return nil, err
 	}
 	var p99s [][2]float64
+	var p50s []float64
 	for _, arm := range []string{"off", "on"} {
 		var res bench.Result
 		if err := readJSON(filepath.Join(dir, arm+".json"), &res); err != nil {
@@ -344,9 +355,11 @@ func loadQ4Ollama(dir string) (*Q4Ollama, error) {
 			HedgesSent:   count(hedges["sent"]), HedgesWon: count(hedges["won"]), HedgesRefused: count(hedges["refused"]),
 		})
 		p99s = append(p99s, [2]float64{res.TTFT.P99, res.Latency.P99})
+		p50s = append(p50s, res.TTFT.P50)
 		q.Hardware = describeHardware(res.Hardware)
 	}
 	q.TTFTCut = change(p99s[0][0], p99s[1][0])
 	q.LatencyCut = change(p99s[0][1], p99s[1][1])
+	q.TailRatio = ratio(p99s[0][0], p50s[0])
 	return q, nil
 }
