@@ -346,8 +346,9 @@ resamples of the per-request samples (fixed seed).
 
 **Answer.** Hedging changed the TTFT p99 by -413.9 ms (-65%) and the total
 p99 by -414.4 ms (-52%), for +5.3% upstream requests and +0.2% in token
-spend against hedging off. A cancelled hedge loser had produced no tokens
-yet, so it costs its prompt; with prompts this short (the bench sends a
+spend against hedging off. A cancelled attempt had produced almost no
+output (the ledger's output count is at most a few tokens over the
+completed replies'), so it costs its prompt; with prompts this short (the bench sends a
 few words), the dollar cost is almost all output and barely moves. With a
 long prompt the cost of a hedge is closer to its share of requests, which
 is the number to plan with.

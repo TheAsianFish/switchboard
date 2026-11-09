@@ -202,7 +202,11 @@ func loadQ4Arm(dir, arm string, price cost.Price) (Q4Row, string, error) {
 		return Q4Row{}, "", err
 	}
 	client := res.Requests + res.WarmupRequests
-	spent := price.Of(core.Usage{InputTokens: led.InputTokens, OutputTokens: led.OutputTokens})
+	// The ledger sums a whole arm, and Of picks its rates from one
+	// request's prompt size: an arm past a long-context threshold would be
+	// priced as one long request. Each bench request is short, so the base
+	// rates apply.
+	spent := cost.Price{Base: price.Base}.Of(core.Usage{InputTokens: led.InputTokens, OutputTokens: led.OutputTokens})
 	row := Q4Row{
 		Arm:      arm,
 		Requests: res.Requests, Errors: res.Errors(),
