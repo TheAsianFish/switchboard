@@ -315,6 +315,86 @@ queries per configuration: 1000; Redis 8.10.3.
 - Every number comes from one machine, with Ollama and Redis sharing its
   CPU.
 
+## Q4: hedging
+
+Does hedging (a second request after the p95 delay) cut the tail, and at
+what cost in extra requests? Command: `make bench-hedge`
+(`eval/hedge/run.sh`), raw files in `eval/results/q4-hedge/`.
+
+**Method.** The fake provider runs as its own process. Each request's first
+byte comes after a log-normal delay with median 50ms (σ = 0.3), and an
+independent 5% of requests are 10× slower; then 30 tokens follow
+5ms apart. `switchboard bench` offers 200 streamed requests per second
+through the gateway for 60s after a 5s warm-up, open loop (latency from
+the scheduled time), once with hedging off and once with it on. Each arm
+starts a fresh gateway, so the hedge delay is learned from the run's own
+traffic: the p95 of the last 1000 first-token times, used once 100 are in.
+The hedge budget is 10% of the key's requests (plus 10 saved up). The
+provider's ledger counts every request that reached it, the cancelled
+ones included.
+
+| Hedging | Requests | Errors | TTFT p50 | p95 | p99 | p99 95% CI | p99.9 | Total p50 | Total p99 | Total p99 95% CI | Upstream requests | Extra | Cancelled upstream | Hedges sent / won / refused | Hedge delay at the end | Upstream tokens (in / out) | At claude-haiku-5-5 prices |
+|---------|---------:|-------:|---------:|----:|----:|-----------:|------:|----------:|----------:|-----------------:|------------------:|------:|-------------------:|----------------------------|-----------------------:|---------------------------:|-----:|
+| off | 12000 | 0 | 53.0 | 125.9 | 638.3 | 622.4–661.0 | 952.7 | 209.7 | 796.0 | 777.8–818.9 | 13000 | 0.0% | 0 | 0 / 0 / 0 | n/a | 65000 / 390000 | $0.2015 |
+| on | 12000 | 0 | 53.5 | 125.1 | 224.4 | 216.2–232.5 | 484.1 | 211.9 | 381.6 | 374.3–392.9 | 13684 | 5.3% | 684 | 687 / 608 / 0 | 99.0 | 68420 / 390001 | $0.2018 |
+
+Times in milliseconds. "Requests" and the latency columns cover the
+measured window; the upstream, hedge and token columns cover the whole arm,
+warm-up included, and "Extra" is upstream requests over client requests
+minus one. The intervals are percentile-bootstrap 95% intervals over 1000
+resamples of the per-request samples (fixed seed).
+
+**Answer.** Hedging changed the TTFT p99 by -413.9 ms (-65%) and the total
+p99 by -414.4 ms (-52%), for +5.3% upstream requests and +0.2% in token
+spend against hedging off. A cancelled hedge loser had produced no tokens
+yet, so it costs its prompt; with prompts this short (the bench sends a
+few words), the dollar cost is almost all output and barely moves. With a
+long prompt the cost of a hedge is closer to its share of requests, which
+is the number to plan with.
+
+- Hardware: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0 (generator, gateway and fake provider on one machine).
+- Commit: `84a20db`, run 2026-11-09T22:15:33Z, seed 1. Cost: $0 (fake provider; the dollar column prices its tokens).
+- Command: `RATE=200 DURATION=60s WARMUP=5s SEED=1 eval/hedge/run.sh`.
+
+**Limits.** The tail here is independent per request: a hedge that draws
+again usually draws fast. A real provider's slow requests are often
+correlated (a busy region, a long prompt, an overloaded model), and then a
+hedge waits as long as the request it races and only adds load. The live
+part of Q4 (below, under "To measure") is what tells the two apart.
+
+
+### Q4 against a local model
+
+Is the synthetic tail realistic, and does hedging help against a real
+backend? Command: `eval/hedge/ollama.sh` (needs Ollama), raw files in
+`eval/results/q4-hedge-ollama/`.
+
+The same comparison through the gateway's OpenAI-compatible provider to
+`qwen2.5:0.5b` on Ollama 0.40.15: 1 streamed request per second
+(open loop), `max_tokens` 16, 180s measured after a 30s warm-up, hedging off
+then on. One untimed request loads the model first. The hedge delay is the
+p95 of the last 200 first-token times, used once 20 are in; the budget is
+10%. Ollama runs on the same CPU as everything else, and both attempts of
+a hedge go to that one server.
+
+| Hedging | Requests | Errors | TTFT p50 | p95 | p99 | p99 95% CI | Total p50 | Total p99 | Total p99 95% CI | Hedges sent / won | Extra upstream |
+|---------|---------:|-------:|---------:|----:|----:|-----------:|----------:|----------:|-----------------:|------------------:|---------------:|
+| off | 180 | 0 | 107.3 | 122.4 | 142.6 | 124.2–173.5 | 685.6 | 810.6 | 750.5–853.3 | 0 / 0 | 0.0% |
+| on | 180 | 0 | 109.1 | 130.1 | 145.5 | 131.5–184.1 | 688.7 | 760.5 | 751.3–820.2 | 16 / 0 | 7.6% |
+
+Hedging changed the TTFT p99 by +2.9 ms (+2%) and the total p99 by -50.2 ms (-6%).
+With hedging off, the local model's TTFT p99 was 1.3× its median, against
+12.0× for the synthetic run above: one model on one server, at one request at a time,
+has no slow mode for a second attempt to escape, and a hedge only queues
+behind the request it races on the same CPU. Read the two p99 intervals
+before reading the change: where they overlap, this run cannot tell
+hedging from no hedging. The fake provider's independent slow tail is
+therefore a model of a fleet (many replicas, some busy), not of a single
+local server.
+
+- Hardware: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Commit: `84a20db`, run 2026-11-09T22:17:53Z. Cost: $0 (local model).
+- Command: `MODEL=qwen2.5:0.5b RATE=1 DURATION=180s WARMUP=30s MAX_TOKENS=16 eval/hedge/ollama.sh`.
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -345,7 +425,9 @@ Recorded 2026-10-27 on the machine in Q1. Cost: $0 (local Ollama only).
 - Q2 with GCRA: `ALGORITHMS=gcra make test-limits` once the GCRA limiter
   is implemented (`internal/ratelimit/gcra.go`; its contract tests skip
   until then).
-- Q4 hedging: `make bench-hedge` (the live part needs `ANTHROPIC_API_KEY`).
+- Q4 on a real provider: 200 streamed requests to `claude-haiku-5-5`
+  through the gateway with hedging off and on (PLAN.md budgets under
+  $0.50; needs `ANTHROPIC_API_KEY`).
 - Q5 router frontier: `make eval-router`.
 - Q6 replica and Redis kills under load: `make chaos`.
 - Claude through the gateway with the unmodified SDKs:

@@ -1,0 +1,2 @@
+switchboard_provider_hedges_total{event="lost",provider="ollama"} 16
+switchboard_provider_hedges_total{event="sent",provider="ollama"} 16

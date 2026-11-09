@@ -1,0 +1,1 @@
+{"providers":[{"provider":"ollama","breaker":"closed","hedging":false,"hedge_delay_ms":{"qwen2.5:0.5b/stream":122.689}}]}

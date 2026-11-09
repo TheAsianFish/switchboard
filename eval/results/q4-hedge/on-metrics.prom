@@ -1,0 +1,3 @@
+switchboard_provider_hedges_total{event="lost",provider="fake"} 79
+switchboard_provider_hedges_total{event="sent",provider="fake"} 687
+switchboard_provider_hedges_total{event="won",provider="fake"} 608

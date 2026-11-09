@@ -1,0 +1,17 @@
+{
+  "commit": "84a20db",
+  "date": "2026-11-09T22:15:33Z",
+  "fake_provider": {
+    "latency": "50ms",
+    "latency_sigma": 0.3,
+    "slow_fraction": 0.05,
+    "slow_factor": 10,
+    "tokens": 30,
+    "token_interval": "5ms",
+    "seed": 1
+  },
+  "rate": 200,
+  "duration": "60s",
+  "warmup": "5s",
+  "command": "RATE=200 DURATION=60s WARMUP=5s SEED=1 eval/hedge/run.sh"
+}
