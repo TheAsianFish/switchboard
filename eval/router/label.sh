@@ -25,6 +25,11 @@ if [[ $models == *qwen* ]] && ! curl -fsS -o /dev/null "$ollama/api/version"; th
 	exit 1
 fi
 
+if [[ $models == *qwen* ]]; then
+	mkdir -p eval/recordings/router
+	curl -fsS "$ollama/api/version" | sed -E 's/.*"version":"([^"]*)".*/\1/' >eval/recordings/router/ollama-version
+fi
+
 logs=$(mktemp -d "${TMPDIR:-/tmp}/switchboard-q5.XXXXXX")
 go build -o bin/switchboard ./cmd/switchboard
 SWITCHBOARD_PROVIDER_OLLAMA_BASE_URL="$ollama/v1" SWITCHBOARD_CONFIG=eval/router/switchboard.yaml \

@@ -23,7 +23,11 @@ import (
 // RecordingPath is where a candidate's labels are kept: one JSONL file per
 // model, named after it with characters unsafe in a file name replaced.
 func RecordingPath(dir, model string) string {
-	return filepath.Join(dir, strings.NewReplacer(":", "_", "/", "_").Replace(model)+".jsonl")
+	return filepath.Join(dir, safeName(model)+".jsonl")
+}
+
+func safeName(model string) string {
+	return strings.NewReplacer(":", "_", "/", "_").Replace(model)
 }
 
 func labelMain(ctx context.Context, args []string, stdout, stderr io.Writer) error {

@@ -20,6 +20,10 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = dataMain(ctx, args[1:], stdout, stderr)
 	case "label":
 		err = labelMain(ctx, args[1:], stdout, stderr)
+	case "run":
+		err = runMain(ctx, args[1:], stdout, stderr)
+	case "embed":
+		err = embedMain(ctx, args[1:], stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown eval router command %q\n", args[0])
 		return 2
