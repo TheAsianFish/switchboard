@@ -4,7 +4,7 @@ BIN := $(CURDIR)/bin
 GOLANGCI := $(BIN)/golangci-lint
 export GOTOOLCHAIN ?= auto
 
-.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results docker clean
+.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results ui ui-check docker clean
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -29,6 +29,16 @@ test:
 
 build: ## build ./bin/switchboard
 	CGO_ENABLED=0 go build -trimpath -o $(BIN)/switchboard ./cmd/switchboard
+
+ui: ## build the admin page into internal/admin/ui/dist (Node 22+)
+	cd web && npm ci && npm run build
+
+ui-check: ## typecheck, lint, test and rebuild the admin page; fails if the committed build is stale
+	cd web && npm ci && npm run typecheck && npm run lint && npm test && npm run build
+	@git diff --exit-code -- internal/admin/ui/dist || { echo "internal/admin/ui/dist is stale: run make ui and commit internal/admin/ui/dist"; exit 1; }
+	@if [ -n "$$(git status --porcelain -- internal/admin/ui/dist | grep '^??')" ]; then \
+		echo "untracked files in internal/admin/ui/dist: run make ui and commit internal/admin/ui/dist"; exit 1; \
+	fi
 
 test-integration: ## Lua scripts against a real redis:8 ($$SWITCHBOARD_TEST_REDIS_URL, or a throwaway container)
 	@if [ -n "$$SWITCHBOARD_TEST_REDIS_URL" ]; then \
