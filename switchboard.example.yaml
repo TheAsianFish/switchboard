@@ -61,11 +61,28 @@ tracing:
   sample_ratio: 1           # share of traces kept; a caller's traceparent sampled flag is ignored
   service_name: switchboard
 
+# model "auto": the router sends each request to the cheapest candidate
+# that is likely to answer it correctly (RESULTS.md, Q5). The built-in
+# weights choose between the three local qwen2.5 models below and embed
+# prompts with nomic-embed-text (ollama pull all four). Off by default.
+router:
+  enabled: false
+  embed_url: http://localhost:11434   # Ollama, without /v1
+  # weights: path/to/weights.json     # default: built in, from make eval-router
+  # quality_target: 0.6               # default: the eval's; higher sends more to the larger models
+  timeout: 1s                         # a slower embedding sends the request to the fallback model
+
 models:
   # Prices are dollars per million tokens. Claude models fall back to the
   # built-in list prices; a model with no price is not counted in spend and
   # keys with a budget may not use it.
   - name: qwen2.5:0.5b
+    provider: ollama
+    price: {input: 0, output: 0}
+  - name: qwen2.5:1.5b
+    provider: ollama
+    price: {input: 0, output: 0}
+  - name: qwen2.5:3b
     provider: ollama
     price: {input: 0, output: 0}
   - name: claude-haiku-5-5

@@ -39,7 +39,9 @@ make check
 | `make eval-cache` | semantic cache threshold sweep and FLAT vs HNSW check (Q3); needs Ollama with `all-minilm` and `nomic-embed-text`, and Docker | local, manual workflow |
 | `make eval-cache-data` | rebuild the Q3 pair sets in `eval/cache/data/` (about 2.5 h; needs Ollama with `qwen2.5:3b`) | local |
 | `make bench-hedge` | hedging benchmark (Q4); live part needs a key | local, manual workflow |
-| `make eval-router` | router frontier (Q5); replays recordings, labels live with a key | local, manual workflow |
+| `make eval-router` | router frontier (Q5): 5-fold cross-validation from the committed recordings and embeddings, offline, $0; writes the shipped weights | local, manual workflow |
+| `make eval-router-label` | Q5 labels: every candidate answers the 600 questions through the gateway (local ladder on Ollama by default, about 3 h on a laptop CPU; `MODELS=claude-...` with a key); resumes | local |
+| `make eval-router-embed` / `make eval-router-data` | re-embed the eval prompts (Ollama with `nomic-embed-text`) / rebuild the eval set from GSM8K and MMLU | local |
 | `make chaos` | the phased kill run (Q6) | local, manual workflow |
 | `make results` | re-render RESULTS.md from `eval/results/` | after any of the above |
 

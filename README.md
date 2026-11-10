@@ -10,8 +10,9 @@ latency tail, an exact and a semantic cache with a measured false-hit rate, a
 and model, OpenTelemetry traces, Prometheus metrics and a small admin page.
 Every feature ships with the benchmark or eval that says what it is worth.
 
-**Status: M4 of 7.** The streaming spine (M1), shared state (M2), the
-response cache (M3) and resilience and observability (M4) work: both front
+**Status: M5 of 7.** The streaming spine (M1), shared state (M2), the
+response cache (M3), resilience and observability (M4) and the evaluated
+router (M5) work: both front
 ends, with text and tool calls, in and out of every backend; the Anthropic,
 OpenAI-compatible and fake providers; per-key request and token rate limits
 and dollar budgets shared by every replica through Redis, with a degrade
@@ -19,8 +20,10 @@ policy for when Redis is down; cost accounting from a price table; an exact
 plus semantic response cache in Redis, namespaced per tenant, whose
 threshold comes from `make eval-cache`; retries, hedged requests with a
 per-tenant hedge budget and a circuit breaker per provider; OpenTelemetry
-traces with a span per stage, and Prometheus metrics. The router and the
-admin page follow (see [PLAN.md](PLAN.md)).
+traces with a span per stage, and Prometheus metrics; and `model: "auto"`,
+served from router weights trained and cross-validated by
+`make eval-router`. The admin page, the chaos run and the release follow
+(see [PLAN.md](PLAN.md)).
 Every measured number lives in [RESULTS.md](RESULTS.md), which is rendered
 from the raw files under `eval/results/`.
 
@@ -97,6 +100,24 @@ not, whichever format filled it. A hit costs nothing against the key's
 token limit or budget, but still counts as a request against its request
 limit.
 
+`model: "auto"` lets the gateway choose. With `router.enabled: true` the
+router predicts, for each candidate, the chance it answers the prompt
+correctly, and sends the request to the cheapest candidate whose chance
+clears the quality target (the most accurate one when none does). The
+built-in weights choose between `qwen2.5:0.5b`, `1.5b` and `3b` and embed
+prompts with `nomic-embed-text`; the reply's `model` field names the model
+that answered:
+
+```yaml
+router: {enabled: true, embed_url: "http://localhost:11434"}   # quality_target defaults to the eval's
+keys:
+  - {name: team-a, key: sk-team-a, models: [auto, "qwen2.5:0.5b", "qwen2.5:1.5b", "qwen2.5:3b"]}
+```
+
+A key's model list also caps what `auto` may choose. If the embedding call
+fails or takes more than `router.timeout`, the request goes to the most
+accurate candidate instead of failing.
+
 A refused request gets each API's own error: `429 rate_limit_error` with
 `Retry-After` for a rate limit, and for a spent budget OpenAI's `429
 insufficient_quota` or Anthropic's `402 billing_error`. Per-key requests,
@@ -124,7 +145,7 @@ flowchart LR
   subgraph gw["switchboard serve (×3)"]
     FO[api/openai<br/>/v1/chat/completions]
     FA[api/anthropic<br/>/v1/messages]
-    P[pipeline<br/>auth · route · limits · budget<br/>cache · provider · settle · log]
+    P[pipeline<br/>auth · route · router · limits · budget<br/>cache · provider · settle · log]
     H[hedge<br/>retries · hedging · breaker]
     M[admin listener<br/>/metrics · /providers]
     FO --> P
@@ -136,7 +157,7 @@ flowchart LR
   LB --> FO
   LB --> FA
   P <-->|Lua: fixed window or GCRA,<br/>reserve / settle,<br/>exact keys, vector index| R[(Redis 8)]
-  P -->|/api/embed<br/>last user turn| E[Ollama embeddings]
+  P -->|/api/embed<br/>last user turn<br/>cache and router| E[Ollama embeddings]
   P -->|OTLP spans| J[Jaeger]
   P --> H
   H --> PA[provider/anthropic<br/>anthropic-sdk-go]
@@ -245,6 +266,26 @@ fast after consecutive provider failures and probes after a cooldown.
 RESULTS.md (Q4) has both. Every stage, and both attempts of a hedge, are
 spans in one trace (`eval/results/m4-trace/`).
 
+**The hard part in M5: proving a router is worth having.** Any mix of a
+cheap and a dear model trades accuracy for cost: sending a random share of
+requests to each traces a straight line between the two, with no
+intelligence at all. So the router (`internal/router`) is judged only by
+how far its held-out frontier sits above that line. Every candidate answers
+a committed set of GSM8K and MMLU questions through the gateway once
+(`make eval-router-label`); the replies are recorded and re-graded on every
+run, so the experiment (`make eval-router`) is offline and free. One L2
+logistic regression per candidate predicts, from cheap text features and
+the prompt's embedding, whether that candidate will be right, and a request
+goes to the cheapest candidate whose prediction clears the quality target.
+The numbers come from 5-fold cross-validation in which everything the
+router learns (scaling, regularisation by an inner cross-validation, the
+candidates' cost order and the fallback) is fitted on the training folds
+only. The shipped target is picked by a rule written down before the run,
+with a bootstrap interval that re-applies the rule in every resample. The
+weights trained on the whole set are built into the binary, and a test
+keeps them equal to the eval's. RESULTS.md (Q5) has the frontier, the
+baselines and the plot.
+
 How the M1 streaming path is checked:
 
 - recorded real streams from Ollama in both formats replay through the
@@ -280,6 +321,11 @@ How the M1 streaming path is checked:
 | Hedge budget and breaker per replica | A ratio held on each replica's share of traffic holds for the fleet, and a breaker learns from its own traffic in a few requests; neither is worth a Redis round trip per request. | Shared in Redis: a round trip on every request to save a handful of failures. |
 | Tracing off unless `tracing.endpoint` is set | No cost on the request path when nobody collects traces. | Always-on tracing with a no-op exporter: spans are still built. |
 | Continue a caller's `traceparent`, ignore its sampled flag | The header arrives before authentication; trusting the flag would let any caller force every request into the collector. | Parent-based sampling on the caller's flag: an unauthenticated knob on the collector's load. |
+| Judge the router against the random-mix line, on held-out folds | A coin flip between the cheapest and the best model already reaches every cost in between; only accuracy above that line is the router's doing. | "X% of the best model's accuracy at Y% of its cost": true of the coin flip too. |
+| One logistic regression per candidate over cheap features and the prompt embedding, trained in Go | A prediction costs one embedding call and a dot product per candidate, and every weight can be read; the eval set has hundreds of rows, not millions. | An LLM as the router: a paid call per request. Matrix factorisation (RouteLLM): needs preference pairs this set does not have. |
+| Compute (2 × parameters × tokens) as the cost of a local model | Free models still differ in what they cost to run, per token and in how much they write. | Latency: measured on a shared CPU, it moves with load. Dollars: zero for every local model. |
+| A key's model list caps what `auto` may choose | Operators use model lists to cap spend; `auto` must not be a way around them. | `auto` as its own permission reaching every candidate. |
+| An embedder failure sends `auto` to the most accurate candidate | A router must not turn an embedding outage into an API outage. | Failing the request: worse than no router. The cheapest candidate: silently worse answers. |
 | Open-loop load generator | Requests leave on schedule whether or not earlier ones finished, so a slow target cannot hide its queueing (coordinated omission). | Closed-loop workers: under-report the tail. |
 
 ## Development
@@ -290,7 +336,9 @@ minutes. `make bench` reruns the overhead benchmark, `make sdk-smoke` the SDK
 check against Ollama, `make test-limits` the three-replica limit and budget
 test in compose (about 12 minutes), `make eval-cache` the semantic cache
 sweep and the FLAT against HNSW check, `make bench-hedge` the hedging
-benchmark, `make test-integration` the Lua
+benchmark, `make eval-router` the router's cross-validation from the
+committed recordings (`make eval-router-label` re-labels through the
+gateway), `make test-integration` the Lua
 scripts and the vector index against a real Redis 8, and `make results`
 re-renders RESULTS.md.
 
@@ -303,7 +351,8 @@ rate on adversarial pairs) · Q4 against Claude
 per attempt, so a provider that accepts connections and never answers opens
 the breaker instead of waiting on client disconnects · accept tool-call
 arguments that are not JSON in OpenAI-format history (a cut-off call echoed
-back is refused today) · M5 the evaluated router ·
+back is refused today) · the router's Claude candidates (needs a key) and
+a router evaluated on harder, mixed prompts ·
 M6 admin page, chaos run and the per-feature overhead breakdown · M7 release.
 
 ## Licence
