@@ -113,8 +113,9 @@ baselines at two rates.
 
 - Between the two direct runs at one rate and mode, p50 moved by up to 0.09 ms and p99 by up to 0.12 ms; a step smaller than that is within the baseline's own drift, whatever its interval says.
 - The largest step at p50 (non-streaming total) is + semantic: +35.97 ms.
-- Steps whose 95% interval at p50 (non-streaming total) lies above zero: none (against direct) (+0.37 ms), + limits (+0.67 ms), + budget (+0.09 ms), + exact (+0.10 ms), + tracing (+0.11 ms), + semantic (+35.97 ms).
-- Steps whose interval at p50 (non-streaming total) includes zero or lies below it, so not distinguishable from noise in this run: + router.
+- Steps whose 95% interval at p50 (non-streaming total) lies above zero and that are larger than the direct runs' drift: none (against direct) (+0.37 ms), + limits (+0.67 ms), + exact (+0.10 ms), + tracing (+0.11 ms), + semantic (+35.97 ms).
+- Steps whose interval excludes zero but that are no larger than the direct runs' drift, so not resolved by one run: + budget (+0.09 ms).
+- Steps whose interval at p50 (non-streaming total) includes zero or lies below it, so no added cost is resolved: + router (-0.46 ms).
 - Ollama CPU per request (container CPU over the window divided by rate times window): `semantic` nonstream 152 ms, `semantic` stream 156 ms, `router` nonstream 152 ms, `router` stream 155 ms.
 
 Direct baselines (p50 / p99 in ms per run, in run order):

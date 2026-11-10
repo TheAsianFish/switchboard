@@ -104,8 +104,8 @@ baselines at two rates.
 
 - Between the two direct runs at one rate and mode, p50 moved by up to 0.10 ms and p99 by up to 0.55 ms; a step smaller than that is within the baseline's own drift, whatever its interval says.
 - The largest step at p50 (non-streaming total) is + semantic: +43.44 ms.
-- Steps whose 95% interval at p50 (non-streaming total) lies above zero: none (against direct) (+0.38 ms), + limits (+0.30 ms), + exact (+0.30 ms), + semantic (+43.44 ms).
-- Steps whose interval at p50 (non-streaming total) includes zero or lies below it, so not distinguishable from noise in this run: + tracing.
+- Steps whose 95% interval at p50 (non-streaming total) lies above zero and that are larger than the direct runs' drift: none (against direct) (+0.38 ms), + limits (+0.30 ms), + exact (+0.30 ms), + semantic (+43.44 ms).
+- Steps whose interval at p50 (non-streaming total) includes zero or lies below it, so no added cost is resolved: + tracing (+0.03 ms).
 - Cache lookups other than clean misses: `semantic` nonstream: embed errors 2, semantic layer ran for 150 of 161 lookups; `semantic` stream: embed errors 2, semantic layer ran for 150 of 161 lookups.
 - Ollama CPU per request (container CPU over the window divided by rate times window): `semantic` nonstream 80 ms, `semantic` stream 80 ms.
 

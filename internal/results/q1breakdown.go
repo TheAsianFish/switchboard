@@ -694,16 +694,22 @@ func reading(q *Q1Breakdown, steps []stepNote, spread50, spread99 float64, cache
 		out = append(out, fmt.Sprintf("Between the two direct runs at one rate and mode, p50 moved by up to %s ms and p99 by up to %s ms; a step smaller than that is within the baseline's own drift, whatever its interval says.",
 			msf(spread50), msf(spread99)))
 	}
-	var above, within []string
+	// A step is resolved only when its interval excludes zero and the step
+	// is larger than the direct runs' drift: the interval covers sampling
+	// noise within a run, not the run-to-run movement the drift shows.
+	var above, drift, within []string
 	best, bestV := "", math.Inf(-1)
 	for _, s := range steps {
 		if !s.p50.ok {
 			continue
 		}
-		if s.p50.lo > 0 {
+		switch {
+		case (s.p50.lo > 0 || s.p50.hi < 0) && len(q.Baselines) > 0 && math.Abs(s.p50.v) <= spread50:
+			drift = append(drift, fmt.Sprintf("%s (%s ms)", s.stage, added(s.p50.v)))
+		case s.p50.lo > 0:
 			above = append(above, fmt.Sprintf("%s (%s ms)", s.stage, added(s.p50.v)))
-		} else {
-			within = append(within, s.stage)
+		default:
+			within = append(within, fmt.Sprintf("%s (%s ms)", s.stage, added(s.p50.v)))
 		}
 		if s.p50.v > bestV {
 			best, bestV = s.stage, s.p50.v
@@ -713,10 +719,13 @@ func reading(q *Q1Breakdown, steps []stepNote, spread50, spread99 float64, cache
 		out = append(out, fmt.Sprintf("The largest step at p50 (non-streaming total) is %s: %s ms.", best, added(bestV)))
 	}
 	if len(above) > 0 {
-		out = append(out, "Steps whose 95% interval at p50 (non-streaming total) lies above zero: "+strings.Join(above, ", ")+".")
+		out = append(out, "Steps whose 95% interval at p50 (non-streaming total) lies above zero and that are larger than the direct runs' drift: "+strings.Join(above, ", ")+".")
+	}
+	if len(drift) > 0 {
+		out = append(out, "Steps whose interval excludes zero but that are no larger than the direct runs' drift, so not resolved by one run: "+strings.Join(drift, ", ")+".")
 	}
 	if len(within) > 0 {
-		out = append(out, "Steps whose interval at p50 (non-streaming total) includes zero or lies below it, so not distinguishable from noise in this run: "+strings.Join(within, ", ")+".")
+		out = append(out, "Steps whose interval at p50 (non-streaming total) includes zero or lies below it, so no added cost is resolved: "+strings.Join(within, ", ")+".")
 	}
 	if len(cacheNotes) > 0 {
 		out = append(out, "Cache lookups other than clean misses: "+strings.Join(cacheNotes, "; ")+".")

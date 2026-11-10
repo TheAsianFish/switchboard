@@ -321,3 +321,26 @@ switchboard_up 1
 		t.Errorf("missing file = %v, %v", none, err)
 	}
 }
+
+// A step is called resolved only when its interval excludes zero and it is
+// larger than the drift between the direct runs.
+func TestReadingSortsStepsAgainstTheDrift(t *testing.T) {
+	t.Parallel()
+	q := &Q1Breakdown{Baselines: []BaselineRow{{}}}
+	steps := []stepNote{
+		{stage: "+ limits", p50: Est{ok: true, v: 0.70, lo: 0.65, hi: 0.75}},
+		{stage: "+ budget", p50: Est{ok: true, v: 0.09, lo: 0.05, hi: 0.12}},
+		{stage: "+ router", p50: Est{ok: true, v: -0.46, lo: -0.65, hi: -0.15}},
+		{stage: "+ tracing", p50: Est{ok: true, v: 0.03, lo: -0.02, hi: 0.08}},
+	}
+	got := strings.Join(reading(q, steps, 0.09, 0.5, nil), "\n")
+	for _, want := range []string{
+		"larger than the direct runs' drift: + limits (+0.70 ms).",
+		"no larger than the direct runs' drift, so not resolved by one run: + budget (+0.09 ms).",
+		"no added cost is resolved: + router (-0.46 ms), + tracing (+0.03 ms).",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("reading lacks %q:\n%s", want, got)
+		}
+	}
+}
