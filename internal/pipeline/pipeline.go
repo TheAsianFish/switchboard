@@ -241,7 +241,7 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 		endProvider(span, 0, core.Usage{}, outcome, err)
 		u, spent := p.settle(ctx, adm, u, 0, false, outcome)
 		logCall(ctx, rt, false, elapsed, 0, core.Usage{}, err)
-		p.observeCall(ctx, adm, req, lk, false, elapsed, 0, u, spent, outcomeErr(outcome, err))
+		p.observeCall(ctx, adm, req, lk, false, p.now().Sub(adm.start), 0, u, spent, outcomeErr(outcome, err))
 		return nil, err
 	}
 	// The route's name, not the request's: for auto, the client learns
@@ -250,7 +250,7 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	endProvider(span, 0, resp.Usage, telemetry.OutcomeOK, nil)
 	u, spent := p.settle(ctx, adm, resp.Usage, len(resp.Text), false, telemetry.OutcomeOK)
 	logCall(ctx, rt, false, elapsed, elapsed, resp.Usage, nil)
-	p.observeCall(ctx, adm, req, lk, false, elapsed, 0, u, spent, nil)
+	p.observeCall(ctx, adm, req, lk, false, p.now().Sub(adm.start), 0, u, spent, nil)
 	if lk.Fillable() {
 		p.policy.Cache.Fill(ctx, lk, resp)
 	}
@@ -359,7 +359,7 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 		u, spent := p.settle(ctx, adm, u, 0, true, outcome)
 		total := p.now().Sub(start)
 		logCall(ctx, rt, true, total, 0, core.Usage{}, err)
-		p.observeCall(ctx, adm, req, lk, true, total, 0, u, spent, outcomeErr(outcome, err))
+		p.observeCall(ctx, adm, req, lk, true, p.now().Sub(adm.start), 0, u, spent, outcomeErr(outcome, err))
 		return nil, err
 	}
 	return &stream{inner: s, ctx: ctx, span: span, p: p, adm: adm, req: req, route: rt, model: rt.Model, start: start, now: p.now, lookup: lk}, nil
@@ -509,7 +509,14 @@ func (s *stream) finish(err error) {
 		billed, spent := s.p.settle(s.ctx, s.adm, usage, chars, true, outcome)
 		total := s.now().Sub(s.start)
 		logCall(s.ctx, s.route, true, total, ttft, usage, err)
-		s.p.observeCall(s.ctx, s.adm, s.req, s.lookup, true, total, ttft, billed, spent, err)
+		// The log line times the upstream call; the admin record times the
+		// request from admission, as a cache hit and the duration metric do,
+		// so the cache lookup and limit round trips count on a miss too.
+		sinceAdmit, ttftAdmit := s.now().Sub(s.adm.start), time.Duration(0)
+		if ttft > 0 {
+			ttftAdmit = ttft + s.start.Sub(s.adm.start)
+		}
+		s.p.observeCall(s.ctx, s.adm, s.req, s.lookup, true, sinceAdmit, ttftAdmit, billed, spent, err)
 		if err == nil && s.lookup.Fillable() {
 			// Only a stream that reached its stop event is a whole reply.
 			u, _ := s.adm.fillUsage(usage, chars)

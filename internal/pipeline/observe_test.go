@@ -225,3 +225,105 @@ func TestAutoAndSemanticCacheShareOneEmbedding(t *testing.T) {
 		t.Fatalf("embedding calls = %d after a second request, want 2", n)
 	}
 }
+
+// stepClock is a test clock that the embedder and the provider advance.
+type stepClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *stepClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *stepClock) Add(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+// slowEmbedder advances the clock on every call, as an embedding would.
+type slowEmbedder struct {
+	embed.Fake
+	clk *stepClock
+	d   time.Duration
+}
+
+func (e *slowEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	e.clk.Add(e.d)
+	return e.Fake.Embed(ctx, texts)
+}
+
+// slowProvider advances the clock before answering, before its first token
+// when streaming.
+type slowProvider struct {
+	core.Provider
+	clk *stepClock
+	d   time.Duration
+}
+
+func (p *slowProvider) Complete(ctx context.Context, req *core.Request) (*core.Response, error) {
+	p.clk.Add(p.d)
+	return p.Provider.Complete(ctx, req)
+}
+
+func (p *slowProvider) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
+	p.clk.Add(p.d)
+	return p.Provider.Stream(ctx, req)
+}
+
+// A miss is timed from admission, like a hit and the duration metric: the
+// semantic lookup's embedding counts, not just the upstream call.
+func TestOnCallTimesAMissFromAdmission(t *testing.T) {
+	t.Parallel()
+	const embedTime, upstream = 40 * time.Millisecond, 10 * time.Millisecond
+	for _, stream := range []bool{false, true} {
+		clk := &stepClock{t: time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)}
+		c := cache.New(cache.Options{
+			KV:        cache.NewMemoryKV(100, clk.Now),
+			NewIndex:  func(d int) (cache.Index, error) { return cache.NewMemoryIndex(d, 100, clk.Now), nil },
+			Embedder:  &slowEmbedder{Fake: embed.Fake{Dims: 16}, clk: clk, d: embedTime},
+			Threshold: 0.9,
+			TTL:       time.Hour,
+		})
+		keys := auth.NewKeys([]config.Key{{Name: "s", Key: "sk-s", Tenant: "t", Cache: "semantic"}})
+		prov := &slowProvider{Provider: fake.New(fake.Config{Tokens: 3}), clk: clk, d: upstream}
+		var cs calls
+		p := New(keys, []Route{{Model: "m", ProviderName: "fake", Upstream: "fake-m", Provider: prov, Price: price, Priced: true, OutputEstimate: 8}},
+			Policy{Cache: c, Metrics: telemetry.NewMetrics(false), OnCall: cs.observe})
+		p.now = clk.Now
+
+		ctx, _ := cache.WithRequest(context.Background(), "")
+		ctx, err := p.Authenticate(ctx, "sk-s")
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := zeroTemp("m", "a prompt nobody has sent before")
+		req.Stream = stream
+		if stream {
+			s, err := p.Stream(ctx, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := core.Collect(s); err != nil {
+				t.Fatal(err)
+			}
+			_ = s.Close()
+		} else if _, err := p.Complete(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+		c.Wait()
+		got := cs.take(t)
+		if got.Cache != cache.StatusMiss {
+			t.Fatalf("stream=%v: cache = %q, want a miss", stream, got.Cache)
+		}
+		if want := embedTime + upstream; got.Duration != want {
+			t.Errorf("stream=%v: duration = %v, want %v (embedding + upstream)", stream, got.Duration, want)
+		}
+		if stream && got.TTFT != embedTime+upstream {
+			t.Errorf("stream=%v: ttft = %v, want %v", stream, got.TTFT, embedTime+upstream)
+		}
+	}
+}
