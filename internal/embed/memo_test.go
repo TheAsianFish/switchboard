@@ -77,3 +77,31 @@ func TestMemoizedDoesNotStoreFailures(t *testing.T) {
 		t.Fatalf("calls = %d, want a retry after a failure", inner.calls.Load())
 	}
 }
+
+// named is a counting embedder with its own model name and width.
+type named struct {
+	counting
+	model string
+}
+
+func (n *named) Model() string { return n.model }
+
+// The router and the semantic cache may use different models; a vector
+// from one must never answer the other.
+func TestMemoizedKeepsModelsApart(t *testing.T) {
+	t.Parallel()
+	small := &named{counting: counting{Fake: Fake{Dims: 4}}, model: "all-minilm"}
+	large := &named{counting: counting{Fake: Fake{Dims: 16}}, model: "nomic-embed-text"}
+	ctx := WithMemo(context.Background())
+	const text = "what is 2 + 2?"
+	if _, err := Memoized(small).Embed(ctx, []string{text}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := Memoized(large).Embed(ctx, []string{text})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if large.calls.Load() != 1 || len(v[0]) != 16 {
+		t.Fatalf("second model: %d calls, %d dims; want 1 call and 16 dims", large.calls.Load(), len(v[0]))
+	}
+}
