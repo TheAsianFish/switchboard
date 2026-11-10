@@ -207,6 +207,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		return err
 	}
 	defer closePolicy()
+	if pol.Router, err = buildRouter(cfg, log); err != nil {
+		return err
+	}
 	gw := pipeline.New(auth.NewKeys(cfg.Keys), routes(cfg, built, log), pol)
 	log.Info("gateway configured",
 		slog.String("config", *path), slog.Int("providers", len(cfg.Providers)),

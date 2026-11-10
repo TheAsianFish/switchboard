@@ -54,12 +54,19 @@ type Pipeline struct {
 	now    func() time.Time
 }
 
-// New builds a pipeline over a key table and routes, enforcing pol.
+// AutoModel is the model name that asks the router to choose.
+const AutoModel = "auto"
+
+// New builds a pipeline over a key table and routes, enforcing pol. With
+// a router in pol, AutoModel is one of the gateway's models.
 func New(keys *auth.Keys, routes []Route, pol Policy) *Pipeline {
 	p := &Pipeline{keys: keys, routes: make(map[string]Route, len(routes)), policy: pol, now: time.Now}
 	for _, r := range routes {
 		p.routes[r.Model] = r
 		p.names = append(p.names, r.Model)
+	}
+	if pol.Router != nil {
+		p.names = append(p.names, AutoModel)
 	}
 	sort.Strings(p.names)
 	return p
@@ -141,11 +148,16 @@ func (p *Pipeline) route(ctx context.Context, pr *auth.Principal, req *core.Requ
 		return Route{}, dec, core.Errorf(core.KindAuthentication, "missing API key")
 	}
 	rt, ok := p.routes[req.Model]
-	if !ok {
+	if !ok && (req.Model != AutoModel || p.policy.Router == nil) {
 		return Route{}, dec, core.Errorf(core.KindNotFound, "model %q is not configured on this gateway", req.Model)
 	}
 	if !pr.Allows(req.Model) {
 		return Route{}, dec, core.Errorf(core.KindPermission, "this API key may not use model %q", req.Model)
+	}
+	if req.Model == AutoModel && p.policy.Router != nil {
+		if rt, err = p.choose(ctx, req); err != nil {
+			return Route{}, dec, err
+		}
 	}
 	if p.policy.Cache != nil {
 		// Decided before admission so that a malformed directive is
@@ -160,6 +172,39 @@ func (p *Pipeline) route(ctx context.Context, pr *auth.Principal, req *core.Requ
 	return rt, dec, nil
 }
 
+// choose runs the router for a request that asked for AutoModel, in the
+// "router" span. A key allowed to use AutoModel reaches the router's
+// candidates through it, whatever else its model list says: auto is the
+// product, and the candidates are the router's to pick. The router never
+// fails a request over its own trouble: when the prompt cannot be
+// embedded it sends the request to its fallback and the cause is logged.
+func (p *Pipeline) choose(ctx context.Context, req *core.Request) (Route, error) {
+	_, span := telemetry.StartSpan(ctx, "router")
+	d, err := p.policy.Router.Route(ctx, req, func(m string) bool { _, ok := p.routes[m]; return ok })
+	if err != nil {
+		err = core.Wrap(core.KindNotFound, err, "no model the router may choose is configured on this gateway")
+		telemetry.EndSpan(span, err)
+		return Route{}, err
+	}
+	span.SetAttributes(
+		attribute.String("switchboard.router.model", d.Model),
+		attribute.String("switchboard.router.reason", d.Reason),
+		attribute.Float64("switchboard.router.target", p.policy.Router.Target()),
+	)
+	for i, c := range p.policy.Router.Weights().Candidates {
+		if i < len(d.Probs) {
+			span.SetAttributes(attribute.Float64("switchboard.router.p."+c.Model, d.Probs[i]))
+		}
+	}
+	span.End()
+	p.policy.Metrics.Routed(d.Model, d.Reason)
+	if d.Err != nil {
+		telemetry.Logger(ctx).Warn("router could not predict; using its fallback",
+			slog.String("model", d.Model), slog.String("error", d.Err.Error()))
+	}
+	return p.routes[d.Model], nil
+}
+
 // Complete implements core.Gateway.
 func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Response, error) {
 	rt, up, adm, err := p.resolve(ctx, req)
@@ -169,7 +214,7 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	ctx, lk := p.lookup(ctx, adm, req, up)
 	if lk.Response != nil {
 		resp := lk.Response
-		resp.Model = req.Model
+		resp.Model = rt.Model
 		p.serveHit(ctx, adm, resp, false)
 		return resp, nil
 	}
@@ -186,7 +231,9 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 		logCall(ctx, rt, false, elapsed, 0, core.Usage{}, err)
 		return nil, err
 	}
-	resp.Model = req.Model
+	// The route's name, not the request's: for auto, the client learns
+	// which model answered.
+	resp.Model = rt.Model
 	endProvider(span, 0, resp.Usage, telemetry.OutcomeOK, nil)
 	p.settle(ctx, adm, resp.Usage, len(resp.Text), false, telemetry.OutcomeOK)
 	logCall(ctx, rt, false, elapsed, elapsed, resp.Usage, nil)
@@ -219,6 +266,9 @@ func (p *Pipeline) lookup(ctx context.Context, adm *admission, req, up *core.Req
 	default:
 		keyed := *req
 		keyed.MaxTokens = up.MaxTokens
+		// An auto request is cached as a request to the model that
+		// answered it, so it shares entries with direct requests there.
+		keyed.Model = adm.route.Model
 		route := cache.Upstream{Provider: adm.route.ProviderName, Model: adm.route.Upstream}
 		lk = p.policy.Cache.Lookup(sctx, adm.pr.Tenant, route, adm.cache.Mode, &keyed)
 	}
@@ -249,7 +299,7 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 		// Replayed as canonical events, so the front end renders it in
 		// the client's own wire format whichever format filled it.
 		resp := lk.Response
-		resp.Model = req.Model
+		resp.Model = rt.Model
 		p.serveHit(ctx, adm, resp, true)
 		return &core.SliceStream{Events: core.ResponseEvents(resp, cache.Chunks(resp.Text))}, nil
 	}
@@ -268,7 +318,7 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 		logCall(ctx, rt, true, p.now().Sub(start), 0, core.Usage{}, err)
 		return nil, err
 	}
-	return &stream{inner: s, ctx: ctx, span: span, p: p, adm: adm, route: rt, model: req.Model, start: start, now: p.now, lookup: lk}, nil
+	return &stream{inner: s, ctx: ctx, span: span, p: p, adm: adm, route: rt, model: rt.Model, start: start, now: p.now, lookup: lk}, nil
 }
 
 // abandonedUsage is what a call that failed before any output is charged.

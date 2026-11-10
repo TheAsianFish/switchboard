@@ -17,6 +17,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/cost"
 	"github.com/TheAsianFish/switchboard/internal/hedge"
 	"github.com/TheAsianFish/switchboard/internal/ratelimit"
+	"github.com/TheAsianFish/switchboard/internal/router"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
 
@@ -37,6 +38,9 @@ type Policy struct {
 	// SettleTimeout bounds the store calls made after a reply, which run
 	// even when the client has gone; zero means DefaultSettleTimeout.
 	SettleTimeout time.Duration
+	// Router chooses a model for requests that ask for AutoModel; nil
+	// means the gateway has no auto model.
+	Router *router.Router
 }
 
 // DefaultSettleTimeout bounds settlement after a reply.
