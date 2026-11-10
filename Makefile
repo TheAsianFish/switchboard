@@ -57,7 +57,7 @@ eval-cache-data: ## rebuild the Q3 pair sets in eval/cache/data (Ollama with qwe
 	go run ./cmd/switchboard eval cache-data
 
 eval-router: ## Q5: 5-fold cross-validated router frontier against the random-mix line, from the committed recordings ($$0, offline)
-	go run ./cmd/switchboard eval router run
+	go run ./cmd/switchboard eval router run --models "$(or $(MODELS),qwen2.5:0.5b,qwen2.5:1.5b,qwen2.5:3b)"
 	go run ./cmd/switchboard eval results
 
 eval-router-embed: ## Q5: re-embed the eval set's prompts (Ollama with nomic-embed-text)

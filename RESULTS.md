@@ -396,6 +396,15 @@ local server.
 - Hardware: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
 - Commit: `84a20db`, run 2026-11-09T22:17:53Z. Cost: $0 (local model).
 - Command: `MODEL=qwen2.5:0.5b RATE=1 DURATION=180s WARMUP=30s MAX_TOKENS=16 eval/hedge/ollama.sh`.
+
+## Q5: evaluated router
+
+Can a router trained on an offline eval set beat the random-mix line
+between the cheapest and the best model? Command: `make eval-router`, raw
+files in `eval/results/q5-router/`.
+
+Not measured yet. Run `make eval-router`, then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -430,6 +439,9 @@ Recorded 2026-10-27 on the machine in Q1. Cost: $0 (local Ollama only).
   through the gateway with hedging off and on (PLAN.md budgets under
   $0.50; needs `ANTHROPIC_API_KEY`).
 - Q5 router frontier: `make eval-router`.
+- Q5 with the Claude candidates: `ANTHROPIC_API_KEY=...
+  MODELS=claude-haiku-5-5,claude-sonnet-5-5,claude-opus-5-5 eval/router/label.sh`,
+  then the same `MODELS=... make eval-router`.
 - Q6 replica and Redis kills under load: `make chaos`.
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with

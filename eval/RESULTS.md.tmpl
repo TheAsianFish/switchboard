@@ -405,7 +405,128 @@ local server.
 - Command: `{{.Meta.Command}}`.
 {{else}}
 Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `eval/hedge/ollama.sh`, then `make results`.
-{{end}}## Unmodified SDKs through the gateway
+{{end}}
+## Q5: evaluated router
+
+Can a router trained on an offline eval set beat the random-mix line
+between the cheapest and the best model? Command: `make eval-router`, raw
+files in `eval/results/q5-router/`.
+{{with .Q5}}
+**Method.** The eval set is {{.Questions}} committed questions ({{.Datasets}};
+`eval/router/data/questions.jsonl`): GSM8K is graded on the final number,
+MMLU on the answer letter. Every candidate in the table below answered every
+question once, streamed through the gateway; correctness, usage and latency
+are recorded per question and candidate under `eval/recordings/router/`, so
+the eval replays them at $0.
+{{- if .USD}} Cost is the gateway's price table applied to each
+reply's usage, in dollars per 1,000 requests drawn like the eval set.
+{{- else}} Local models have no price, so cost is compute:
+GFLOPs = 2 × parameters × (input + output tokens), the forward-pass
+approximation for a dense decoder, summed per 1,000 requests drawn like the
+eval set{{if .Params}} (parameters: {{.Params}}){{end}}.
+{{- end}}
+
+The router sees cheap text features of the prompt (length, numbers, code
+fences, question words) plus its embedding from {{.Embedding}}. One
+L2-regularised logistic model per candidate predicts the probability that
+the candidate answers correctly; the L2 strength is chosen by an inner
+cross-validation on the training folds only. The outer loop is {{.Folds}}-fold
+cross-validation by question (seed {{.Seed}}), and every router number below is
+on held-out folds. The routing rule sends a question to the cheapest
+candidate whose predicted probability of a correct answer is at least the
+target, and to the most accurate candidate when none clears it; sweeping
+the target traces the frontier. The random-mix line sends a fraction p of
+requests to `{{.Best}}` and the rest to `{{.Cheapest}}`, for every p; a
+router that does not sit above it buys nothing a coin could not. The
+operating point the gateway ships is fixed by rule before looking at the
+gain: the lowest target whose held-out accuracy is at least {{.AccuracyRule}} of
+`{{.Best}}`'s. Its gain over the line has a bootstrap 95% interval from
+{{.Bootstrap}} resamples of the questions, re-applying the selection rule in every
+resample. Accuracy intervals are Wilson 95%.
+
+![Held-out router frontier against the random-mix line](eval/results/q5-router/frontier.svg)
+{{with .Operating}}{{if .Variant}}
+**Operating point.** `{{.Variant}}` at target {{.Target}}: {{.Accuracy}} accuracy at
+{{.Cost}} {{$.Q5.CostAxis}}, {{.Sentence}}.
+{{- if not .Met}} No target reached the rule's accuracy, so this is the
+most accurate point on the frontier instead.{{end}}
+{{- if .ShareByDataset}} Routing share ({{$.Q5.ShareHeader}}) per dataset: {{.ShareByDataset}}.{{end}}
+{{end}}{{end}}
+**Candidates.** Each model alone on every question.
+
+| Model | Accuracy (95% CI) | GSM8K | MMLU | {{.CostAxis}} | Latency p50 (s) | p95 (s) | Mean output tokens | Truncated | Spent labelling |
+|-------|------------------:|------:|-----:|------:|----------------:|--------:|-------------------:|----------:|------:|
+{{- range .Candidates}}
+| `{{.Model}}` | {{.Accuracy}} | {{.GSM8K}} | {{.MMLU}} | {{.Cost}} | {{.P50}} | {{.P95}} | {{.OutputTokens}} | {{.Truncated}} | {{.Spent}} |
+{{- end}}
+
+**Baselines.** The fixed policies the router is measured against, and the
+operating point beside them. "Knows the dataset" sends each dataset to one
+fixed candidate; it sees which dataset a question came from, which the
+router does not, so it is a reference, not a policy the router could have
+learned.{{if lt .RulesShown .RulesAll}} Of the {{.RulesAll}} such rules, the most and the least accurate are
+shown; `summary.json` has them all.{{end}}
+
+| Policy | Accuracy (95% CI) | {{.CostAxis}} | Accuracy vs `{{.Best}}` | Cost vs `{{.Best}}` |
+|--------|------------------:|------:|------------------------:|--------------------:|
+{{- range .Baselines}}
+| {{.Policy}} | {{.Accuracy}} | {{.Cost}} | {{.OfBestAccuracy}} | {{.OfBestCost}} |
+{{- end}}
+{{range .Variants}}
+**Frontier of `{{.Name}}`**{{if .Description}} ({{.Description}}){{end}}, held out. Line accuracy is
+the random mix at the same cost; gain is the difference in accuracy points.
+Mean gain over the line across the frontier's cost range: {{.AUCGain}} points.
+
+| Target | Accuracy (95% CI) | {{$.Q5.CostAxis}} | Line accuracy | Gain (points) | Share ({{$.Q5.ShareHeader}}) |
+|-------:|------------------:|------:|--------------:|--------------:|------|
+{{- range .Rows}}
+| {{.Target}}{{if .Operating}} (operating point){{end}} | {{.Accuracy}} | {{.Cost}} | {{.LineAccuracy}} | {{.Gain}} | {{.Share}} |
+{{- end}}
+{{end}}
+**Correctness models.** How well each candidate's held-out probability of a
+correct answer separates right from wrong answers (AUROC, 0.5 is chance)
+and how close it is to the outcome (Brier score, lower is better), with the
+L2 strength the inner cross-validation chose (the mode over folds).
+
+| Variant | Candidate | AUROC | Brier | L2 |
+|---------|-----------|------:|------:|---:|
+{{- range .Calibration}}
+| `{{.Variant}}` | `{{.Model}}` | {{.AUROC}} | {{.Brier}} | {{.L2}} |
+{{- end}}
+
+- Hardware: {{.Hardware}}{{if .Ollama}} (Ollama {{.Ollama}} on the same machine){{end}}.
+- Labels: {{if .LabelledFrom}}{{.LabelledFrom}} to {{.LabelledTo}}, {{end}}{{.LabelTime}} of summed request time.
+- Commit: `{{.Commit}}`, run {{.Date}}.
+- Command: `{{.Command}}`.
+- Cost: {{.Spent}}{{if not .Live}} (local models only){{end}}.
+
+{{/* Q5 findings: written after the run */ -}}
+**Limitations.**
+{{if not .Live}}
+- Every candidate is a local model on one machine, so the cost axis is
+  compute, not money, and latency includes queueing on a shared CPU. Priced
+  models put different ratios between the candidates' costs, and the line
+  and the frontier move with them.
+{{- end}}
+- {{.Questions}} questions ({{.Datasets}}), all with short gradable answers;
+  prompts in real traffic are longer and more varied.
+- Each candidate answered each question once; how much its answers vary
+  from one attempt to the next is not in any interval here.
+- Policies are compared on the same questions, so the bootstrap interval of
+  the gain, not whether two accuracy intervals overlap, is the test of a
+  difference.
+{{- if .TruncatedTotal}}
+- {{.TruncatedTotal}} replies were cut off by the output cap ({{.Truncated}}) and are graded
+  on what they contain.
+{{- end}}
+{{- if and .Operating.Variant (not .Operating.Met)}}
+- No target reached {{.AccuracyRule}} of `{{.Best}}`'s accuracy, so the shipped operating
+  point does not meet the rule.
+{{- end}}
+{{else}}
+Not measured yet. Run `make eval-router`, then `make results`.
+{{end}}
+## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
 format it speaks and whichever backend serves it? Command: `make sdk-smoke`
@@ -445,7 +566,17 @@ Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `
 - Q4 on a real provider: 200 streamed requests to `claude-haiku-5-5`
   through the gateway with hedging off and on (PLAN.md budgets under
   $0.50; needs `ANTHROPIC_API_KEY`).
+{{- if not .Q5}}
 - Q5 router frontier: `make eval-router`.
+{{- end}}
+{{- if not (and .Q5 .Q5.Live)}}
+- Q5 with the Claude candidates: `ANTHROPIC_API_KEY=...
+  MODELS=claude-haiku-5-5,claude-sonnet-5-5,claude-opus-5-5 eval/router/label.sh`,
+  then the same `MODELS=... make eval-router`
+{{- with .Q5}}{{with .Estimate}} (estimated {{.Total}}: {{range $i, $m := .Models}}{{if $i}}, {{end}}`{{$m.Model}}` {{$m.USD}}{{end}};
+  estimated from `{{.From}}`'s token counts at list prices; Claude's own
+  replies will differ){{end}}{{end}}.
+{{- end}}
 - Q6 replica and Redis kills under load: `make chaos`.
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with

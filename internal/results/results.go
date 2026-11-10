@@ -57,6 +57,7 @@ type Data struct {
 	Q4 *Q4
 	// Q4Ollama is Q4's check against a local model.
 	Q4Ollama *Q4Ollama
+	Q5       *Q5
 	SDK      *SDK
 }
 
@@ -120,6 +121,10 @@ func Render(resultsDir, templatePath string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	q5, err := loadQ5(filepath.Join(resultsDir, Q5Dir))
+	if err != nil {
+		return err
+	}
 	if q4 != nil && q4o != nil {
 		q4o.SyntheticTailRatio = ratio(q4.Rows[0].ttftP99, q4.Rows[0].ttftP50)
 	}
@@ -128,7 +133,7 @@ func Render(resultsDir, templatePath string, w io.Writer) error {
 		return fmt.Errorf("results: parse template: %w", err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, SDK: sdk}); err != nil {
+	if err := tmpl.Execute(&buf, Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q5: q5, SDK: sdk}); err != nil {
 		return fmt.Errorf("results: render template: %w", err)
 	}
 	if _, err := w.Write(buf.Bytes()); err != nil {

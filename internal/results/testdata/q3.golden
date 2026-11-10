@@ -213,6 +213,15 @@ backend? Command: `eval/hedge/ollama.sh` (needs Ollama), raw files in
 `eval/results/q4-hedge-ollama/`.
 
 Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `eval/hedge/ollama.sh`, then `make results`.
+
+## Q5: evaluated router
+
+Can a router trained on an offline eval set beat the random-mix line
+between the cheapest and the best model? Command: `make eval-router`, raw
+files in `eval/results/q5-router/`.
+
+Not measured yet. Run `make eval-router`, then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -241,6 +250,9 @@ Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `
   through the gateway with hedging off and on (PLAN.md budgets under
   $0.50; needs `ANTHROPIC_API_KEY`).
 - Q5 router frontier: `make eval-router`.
+- Q5 with the Claude candidates: `ANTHROPIC_API_KEY=...
+  MODELS=claude-haiku-5-5,claude-sonnet-5-5,claude-opus-5-5 eval/router/label.sh`,
+  then the same `MODELS=... make eval-router`.
 - Q6 replica and Redis kills under load: `make chaos`.
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with
