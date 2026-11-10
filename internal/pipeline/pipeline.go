@@ -23,6 +23,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/cost"
+	"github.com/TheAsianFish/switchboard/internal/embed"
 	"github.com/TheAsianFish/switchboard/internal/hedge"
 	"github.com/TheAsianFish/switchboard/internal/router"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
@@ -108,6 +109,9 @@ func (p *Pipeline) Models(ctx context.Context) []string {
 // auto request the returned context's log lines say so, since every
 // later line names the model the router chose.
 func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (context.Context, Route, *core.Request, *admission, error) {
+	// The router and the semantic cache may both embed the last user
+	// turn; with one memo per request they share the vector.
+	ctx = embed.WithMemo(ctx)
 	pr := auth.FromContext(ctx)
 	rt, dec, rd, err := p.route(ctx, pr, req)
 	if err != nil {

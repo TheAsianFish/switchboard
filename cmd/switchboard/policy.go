@@ -146,7 +146,7 @@ func buildCache(cfg *config.Config, rdb *redis.Client, m *telemetry.Metrics, log
 		opts.KV = cache.NewMemoryKV(c.MaxEntries, time.Now)
 	}
 	if semantic {
-		opts.Embedder = &embed.Ollama{BaseURL: c.Semantic.EmbedURL, Name: c.Semantic.Model, Timeout: c.Timeout}
+		opts.Embedder = embed.Memoized(&embed.Ollama{BaseURL: c.Semantic.EmbedURL, Name: c.Semantic.Model, Timeout: c.Timeout})
 		opts.NewIndex = func(dims int) (cache.Index, error) {
 			if rdb == nil {
 				return cache.NewMemoryIndex(dims, c.MaxEntries, time.Now), nil

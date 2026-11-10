@@ -4,13 +4,17 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/TheAsianFish/switchboard/internal/auth"
 	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/core"
+	"github.com/TheAsianFish/switchboard/internal/embed"
 	"github.com/TheAsianFish/switchboard/internal/provider/fake"
+	"github.com/TheAsianFish/switchboard/internal/router"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
 
@@ -158,5 +162,66 @@ func (r *autoRig) callCtx(t *testing.T, ctx context.Context, key string, req *co
 	defer r.cache.Wait()
 	if _, err := r.p.Complete(ctx, req); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// countingEmbedder counts the embedding calls that reach the fake.
+type countingEmbedder struct {
+	embed.Fake
+	n atomic.Int64
+}
+
+func (c *countingEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	c.n.Add(1)
+	return c.Fake.Embed(ctx, texts)
+}
+
+// An auto request with the semantic cache on embeds its prompt once: the
+// router and the cache use the same model on the same text, and share
+// the vector through the request's memo.
+func TestAutoAndSemanticCacheShareOneEmbedding(t *testing.T) {
+	t.Parallel()
+	const dims = 16
+	inner := &countingEmbedder{Fake: embed.Fake{Dims: dims}}
+	r, err := router.New(testWeights(t, dims), embed.Memoized(inner), router.Options{Target: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := cache.New(cache.Options{
+		KV:        cache.NewMemoryKV(100, time.Now),
+		NewIndex:  func(d int) (cache.Index, error) { return cache.NewMemoryIndex(d, 100, time.Now), nil },
+		Embedder:  embed.Memoized(inner),
+		Threshold: 0.99,
+		TTL:       time.Hour,
+	})
+	f := fake.New(fake.Config{Tokens: 3})
+	p := New(auth.NewKeys([]config.Key{{Name: "k", Key: "sk-k", Cache: "semantic"}}), []Route{
+		{Model: "small", ProviderName: "fake", Upstream: "fake-small", Provider: f},
+		{Model: "big", ProviderName: "fake", Upstream: "fake-big", Provider: f},
+	}, Policy{Router: r, Cache: c, Metrics: telemetry.NewMetrics(false)})
+	var cs calls
+	p.policy.OnCall = cs.observe
+
+	ctx, err := p.Authenticate(context.Background(), "sk-k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Complete(ctx, zeroTemp(AutoModel, "name a colour")); err != nil {
+		t.Fatal(err)
+	}
+	c.Wait()
+	if got := cs.take(t); got.Cache != cache.StatusMiss || got.Router == nil {
+		t.Fatalf("call = %+v, want a semantic miss routed by the router", got)
+	}
+	if n := inner.n.Load(); n != 1 {
+		t.Fatalf("embedding calls = %d, want 1 shared by the router and the cache", n)
+	}
+	// The next request is a new memo: it embeds again.
+	if _, err := p.Complete(ctx, zeroTemp(AutoModel, "name a fruit")); err != nil {
+		t.Fatal(err)
+	}
+	c.Wait()
+	if n := inner.n.Load(); n != 2 {
+		t.Fatalf("embedding calls = %d after a second request, want 2", n)
 	}
 }
