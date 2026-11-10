@@ -1,0 +1,25 @@
+# Gateway config for `make eval-router-label`. Every candidate the router
+# may choose is a model here. The local models are served by Ollama; the
+# Claude models need ANTHROPIC_API_KEY and refuse requests without it.
+# The cache is off: each question is labelled once, from the model.
+listen: 127.0.0.1:8091
+admin_listen: 127.0.0.1:9191
+log: {format: json, level: warn}
+providers:
+  - name: ollama
+    type: openaicompat
+    base_url: http://127.0.0.1:11434/v1
+    timeout: 5m
+  - name: anthropic
+    type: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    timeout: 5m
+models:
+  - {name: "qwen2.5:0.5b", provider: ollama}
+  - {name: "qwen2.5:1.5b", provider: ollama}
+  - {name: "qwen2.5:3b", provider: ollama}
+  - {name: claude-haiku-5-5, provider: anthropic}
+  - {name: claude-sonnet-5-5, provider: anthropic}
+  - {name: claude-opus-5-5, provider: anthropic}
+keys:
+  - {name: router-eval, key: sk-router-eval, cache: "off"}

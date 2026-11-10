@@ -1,0 +1,13 @@
+{
+  "sources": {
+    "gsm8k": "https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/test.jsonl",
+    "mmlu": "https://people.eecs.berkeley.edu/~hendrycks/data.tar"
+  },
+  "seed": 5,
+  "gsm8k": 300,
+  "mmlu": 300,
+  "subjects": 57,
+  "built": "2026-11-10T08:21:54Z",
+  "command": "switchboard eval router data",
+  "licences": "GSM8K (openai/grade-school-math) MIT; MMLU (hendrycks/test) MIT"
+}

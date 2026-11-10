@@ -396,6 +396,226 @@ local server.
 - Hardware: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
 - Commit: `84a20db`, run 2026-11-09T22:17:53Z. Cost: $0 (local model).
 - Command: `MODEL=qwen2.5:0.5b RATE=1 DURATION=180s WARMUP=30s MAX_TOKENS=16 eval/hedge/ollama.sh`.
+
+## Q5: evaluated router
+
+Can a router trained on an offline eval set beat the random-mix line
+between the cheapest and the best model? Command: `make eval-router`, raw
+files in `eval/results/q5-router/`.
+
+**Method.** The eval set is 600 committed questions (300 GSM8K and 300 MMLU;
+`eval/router/data/questions.jsonl`): GSM8K is graded on the final number,
+MMLU on the answer letter. Every candidate in the table below answered every
+question once, streamed through the gateway; correctness, usage and latency
+are recorded per question and candidate under `eval/recordings/router/`, so
+the eval replays them at $0. Local models have no price, so cost is compute:
+GFLOPs = 2 × parameters × (input + output tokens), the forward-pass
+approximation for a dense decoder, summed per 1,000 requests drawn like the
+eval set (parameters: `qwen2.5:0.5b` 0.49 B; `qwen2.5:1.5b` 1.54 B; `qwen2.5:3b` 3.09 B).
+
+The router sees cheap text features of the prompt (length, numbers, code
+fences, question words) plus its embedding from nomic-embed-text (768 dimensions). One
+L2-regularised logistic model per candidate predicts the probability that
+the candidate answers correctly; the L2 strength is chosen by an inner
+cross-validation on the training folds only. The outer loop is 5-fold
+cross-validation by question (seed 1), and every router number below is
+on held-out folds. The routing rule sends a question to the cheapest
+candidate whose predicted probability of a correct answer is at least the
+target, and to the most accurate candidate when none clears it; sweeping
+the target traces the frontier. The random-mix line sends a fraction p of
+requests to `qwen2.5:3b` and the rest to `qwen2.5:0.5b`, for every p; a
+router that does not sit above it buys nothing a coin could not. With
+more than two candidates a middle one can sit above that line by itself,
+so the frontier is also compared with the candidates' hull: the best
+random mix of any two of them (added after the first run, when the middle
+candidate turned out to sit above the line). The
+operating point the gateway ships is fixed by rule before looking at the
+gain: the lowest target whose held-out accuracy is at least 95% of
+`qwen2.5:3b`'s. Its gain over the line has a bootstrap 95% interval from
+2000 resamples of the questions, re-applying the selection rule in every
+resample. Accuracy intervals are Wilson 95%.
+
+![Held-out router frontier against the random-mix line](eval/results/q5-router/frontier.svg)
+
+**Operating point.** `router` at target 0.64: 72.2% (68.4–75.6) accuracy at
+1,436,090 GFLOPs per 1,000 requests, 95.2% of `qwen2.5:3b`'s accuracy at 92.9% of its cost; gain over the line -0.8 points (95% CI -1.8 to +1.0), over the candidates' hull -1.4 points (-2.2 to +0.1). Routing share (`qwen2.5:0.5b` / `qwen2.5:1.5b` / `qwen2.5:3b`) per dataset: GSM8K 0% / 11% / 88%; MMLU 2% / 20% / 78%.
+
+**Candidates.** Each model alone on every question.
+
+| Model | Accuracy (95% CI) | GSM8K | MMLU | GFLOPs per 1,000 requests | Latency p50 (s) | p95 (s) | Mean output tokens | Truncated | Spent labelling |
+|-------|------------------:|------:|-----:|------:|----------------:|--------:|-------------------:|----------:|------:|
+| `qwen2.5:0.5b` | 42.2% (38.3–46.2) | 43.7% | 40.7% | 251,878 | 4.11 | 16.77 | 142.1 | 73 | $0.00 |
+| `qwen2.5:1.5b` | 56.8% (52.8–60.7) | 57.3% | 56.3% | 631,333 | 5.52 | 20.62 | 90.1 | 29 | $0.00 |
+| `qwen2.5:3b` | 75.8% (72.3–79.1) | 83.7% | 68.0% | 1,546,040 | 22.25 | 49.21 | 135.2 | 10 | $0.00 |
+
+**Baselines.** The fixed policies the router is measured against, and the
+operating point beside them. "Knows the dataset" sends each dataset to one
+fixed candidate; it sees which dataset a question came from, which the
+router does not, so it is a reference, not a policy the router could have
+learned.
+
+| Policy | Accuracy (95% CI) | GFLOPs per 1,000 requests | Accuracy vs `qwen2.5:3b` | Cost vs `qwen2.5:3b` |
+|--------|------------------:|------:|------------------------:|--------------------:|
+| always the cheapest (`qwen2.5:0.5b`) | 42.2% (38.3–46.2) | 251,878 | 55.6% | 16.3% |
+| always the best (`qwen2.5:3b`) | 75.8% (72.3–79.1) | 1,546,040 | 100.0% | 100.0% |
+| oracle (cheapest correct candidate) | 87.0% (84.1–89.5) | 639,369 | 114.7% | 41.4% |
+| `router` at target 0.64 (operating point, held out) | 72.2% (68.4–75.6) | 1,436,090 | 95.2% | 92.9% |
+| knows the dataset: GSM8K to `qwen2.5:3b`, MMLU to `qwen2.5:3b` | 75.8% (72.3–79.1) | 1,546,040 | 100.0% | 100.0% |
+| knows the dataset: GSM8K to `qwen2.5:3b`, MMLU to `qwen2.5:1.5b` | 70.0% (66.2–73.5) | 1,353,747 | 92.3% | 87.6% |
+| knows the dataset: GSM8K to `qwen2.5:1.5b`, MMLU to `qwen2.5:3b` | 62.7% (58.7–66.4) | 823,626 | 82.6% | 53.3% |
+| knows the dataset: GSM8K to `qwen2.5:3b`, MMLU to `qwen2.5:0.5b` | 62.2% (58.2–66.0) | 1,218,772 | 82.0% | 78.8% |
+| knows the dataset: GSM8K to `qwen2.5:1.5b`, MMLU to `qwen2.5:1.5b` | 56.8% (52.8–60.7) | 631,333 | 74.9% | 40.8% |
+| knows the dataset: GSM8K to `qwen2.5:0.5b`, MMLU to `qwen2.5:3b` | 55.8% (51.8–59.8) | 579,146 | 73.6% | 37.5% |
+| knows the dataset: GSM8K to `qwen2.5:0.5b`, MMLU to `qwen2.5:1.5b` | 50.0% (46.0–54.0) | 386,853 | 65.9% | 25.0% |
+| knows the dataset: GSM8K to `qwen2.5:1.5b`, MMLU to `qwen2.5:0.5b` | 49.0% (45.0–53.0) | 496,358 | 64.6% | 32.1% |
+| knows the dataset: GSM8K to `qwen2.5:0.5b`, MMLU to `qwen2.5:0.5b` | 42.2% (38.3–46.2) | 251,878 | 55.6% | 16.3% |
+
+**Frontier of `router`** (cheap text features and the prompt embedding), held out. Line accuracy is
+the random mix at the same cost and hull accuracy the best random mix of
+any two candidates; gains are differences in accuracy points. Mean gain
+across the line's cost range: +1.1 points over the line (95% CI -1.0 to +3.3),
+-1.3 over the hull (-2.7 to +0.1); the intervals resample questions with
+the routing decisions held fixed. 14 of the 66 distinct policies are shown (the
+ends, the operating point, the largest gain and loss against the hull, and
+evenly spaced points); `summary.json` has them all.
+
+| Target | Accuracy (95% CI) | GFLOPs per 1,000 requests | Line accuracy | Gain over line | Hull accuracy | Gain over hull | Share (`qwen2.5:0.5b` / `qwen2.5:1.5b` / `qwen2.5:3b`) |
+|------:|------------------:|------:|--------------:|---------------:|--------------:|---------------:|------|
+| 0.00 | 42.2% (38.3–46.2) | 251,878 | 42.2% | +0.0 | 42.2% | +0.0 | 100% / 0% / 0% |
+| 0.22 | 42.2% (38.3–46.2) | 254,948 | 42.2% | -0.1 | 42.3% | -0.1 | 99% / 1% / 0% |
+| 0.27 | 43.2% (39.3–47.2) | 281,051 | 42.9% | +0.2 | 43.3% | -0.1 | 94% / 6% / 0% |
+| 0.32 | 43.5% (39.6–47.5) | 309,989 | 43.7% | -0.2 | 44.4% | -0.9 | 87% / 13% / 0% |
+| 0.37 | 47.0% (43.0–51.0) | 377,082 | 45.4% | +1.6 | 47.0% | +0.0 | 71% / 28% / 1% |
+| 0.40 | 50.8% (46.8–54.8) | 439,479 | 47.0% | +3.8 | 49.4% | +1.4 | 59% / 39% / 2% |
+| 0.42 | 52.3% (48.3–56.3) | 483,712 | 48.2% | +4.1 | 51.1% | +1.2 | 51% / 46% / 3% |
+| 0.47 | 55.0% (51.0–58.9) | 599,341 | 51.2% | +3.8 | 55.6% | -0.6 | 31% / 63% / 7% |
+| 0.52 | 59.5% (55.5–63.4) | 784,107 | 56.0% | +3.5 | 60.0% | -0.5 | 16% / 66% / 19% |
+| 0.56 | 63.5% (59.6–67.3) | 1,112,232 | 64.5% | -1.0 | 66.8% | -3.3 | 7% / 48% / 45% |
+| 0.57 | 66.5% (62.6–70.2) | 1,215,084 | 67.2% | -0.7 | 69.0% | -2.5 | 7% / 39% / 55% |
+| 0.62 | 70.7% (66.9–74.2) | 1,398,815 | 72.0% | -1.3 | 72.8% | -2.1 | 2% / 20% / 79% |
+| 0.64 (operating point) | 72.2% (68.4–75.6) | 1,436,090 | 73.0% | -0.8 | 73.5% | -1.4 | 1% / 16% / 83% |
+| 0.83 | 75.8% (72.3–79.1) | 1,546,040 | 75.8% | +0.0 | 75.8% | +0.0 | 0% / 0% / 100% |
+
+**Frontier of `router-cheap`** (the nine cheap text features alone), held out. Line accuracy is
+the random mix at the same cost and hull accuracy the best random mix of
+any two candidates; gains are differences in accuracy points. Mean gain
+across the line's cost range: +0.5 points over the line (95% CI -1.2 to +2.2),
+-1.9 over the hull (-3.6 to -0.2); the intervals resample questions with
+the routing decisions held fixed. 14 of the 79 distinct policies are shown (the
+ends, the operating point, the largest gain and loss against the hull, and
+evenly spaced points); `summary.json` has them all.
+
+| Target | Accuracy (95% CI) | GFLOPs per 1,000 requests | Line accuracy | Gain over line | Hull accuracy | Gain over hull | Share (`qwen2.5:0.5b` / `qwen2.5:1.5b` / `qwen2.5:3b`) |
+|------:|------------------:|------:|--------------:|---------------:|--------------:|---------------:|------|
+| 0.00 | 42.2% (38.3–46.2) | 251,878 | 42.2% | +0.0 | 42.2% | +0.0 | 100% / 0% / 0% |
+| 0.12 | 42.5% (38.6–46.5) | 265,820 | 42.5% | +0.0 | 42.7% | -0.2 | 99% / 1% / 1% |
+| 0.19 | 42.8% (38.9–46.8) | 286,740 | 43.1% | -0.2 | 43.5% | -0.7 | 96% / 3% / 1% |
+| 0.25 | 43.5% (39.6–47.5) | 321,916 | 44.0% | -0.5 | 44.9% | -1.4 | 91% / 7% / 2% |
+| 0.31 | 44.5% (40.6–48.5) | 387,409 | 45.7% | -1.2 | 47.4% | -2.9 | 85% / 10% / 6% |
+| 0.37 | 47.8% (43.9–51.8) | 490,873 | 48.4% | -0.6 | 51.4% | -3.6 | 72% / 18% / 10% |
+| 0.40 | 49.5% (45.5–53.5) | 561,446 | 50.2% | -0.7 | 54.1% | -4.6 | 64% / 23% / 14% |
+| 0.43 | 52.8% (48.8–56.8) | 633,306 | 52.1% | +0.7 | 56.9% | -4.0 | 54% / 30% / 17% |
+| 0.49 | 58.2% (54.2–62.0) | 840,495 | 57.5% | +0.7 | 61.2% | -3.0 | 32% / 42% / 26% |
+| 0.55 | 64.8% (60.9–68.5) | 1,050,338 | 62.9% | +1.9 | 65.5% | -0.7 | 11% / 51% / 38% |
+| 0.61 | 69.0% (65.2–72.6) | 1,223,932 | 67.5% | +1.5 | 69.1% | -0.1 | 3% / 44% / 54% |
+| 0.64 | 71.0% (67.2–74.5) | 1,297,044 | 69.4% | +1.6 | 70.7% | +0.3 | 1% / 36% / 63% |
+| 0.67 | 72.0% (68.3–75.4) | 1,370,988 | 71.3% | +0.7 | 72.2% | -0.2 | 0% / 27% / 72% |
+| 0.93 | 75.8% (72.3–79.1) | 1,546,040 | 75.8% | +0.0 | 75.8% | +0.0 | 0% / 0% / 100% |
+
+**Frontier of `router-cost`** (router-cheap's predictions; each question goes to the candidate with the highest P(correct) − weight × its predicted cost there; eval only), held out. Line accuracy is
+the random mix at the same cost and hull accuracy the best random mix of
+any two candidates; gains are differences in accuracy points. Mean gain
+across the line's cost range: +3.7 points over the line (95% CI +1.5 to +6.1),
++1.4 over the hull (-0.5 to +3.2); the intervals resample questions with
+the routing decisions held fixed. 14 of the 56 distinct policies are shown (the
+ends, the operating point, the largest gain and loss against the hull, and
+evenly spaced points); `summary.json` has them all.
+
+| Cost weight | Accuracy (95% CI) | GFLOPs per 1,000 requests | Line accuracy | Gain over line | Hull accuracy | Gain over hull | Share (`qwen2.5:0.5b` / `qwen2.5:1.5b` / `qwen2.5:3b`) |
+|------:|------------------:|------:|--------------:|---------------:|--------------:|---------------:|------|
+| 0 | 75.5% (71.9–78.8) | 1,530,213 | 75.4% | +0.1 | 75.5% | +0.0 | 0% / 4% / 96% |
+| 0.0251 | 75.3% (71.7–78.6) | 1,525,976 | 75.3% | +0.0 | 75.4% | -0.1 | 0% / 5% / 95% |
+| 0.0708 | 74.7% (71.0–78.0) | 1,513,559 | 75.0% | -0.3 | 75.2% | -0.5 | 0% / 6% / 94% |
+| 0.112 | 74.7% (71.0–78.0) | 1,496,934 | 74.6% | +0.1 | 74.8% | -0.1 | 1% / 8% / 92% |
+| 0.178 | 74.2% (70.5–77.5) | 1,426,343 | 72.7% | +1.4 | 73.3% | +0.8 | 1% / 14% / 85% |
+| 0.316 | 63.2% (59.2–66.9) | 857,695 | 57.9% | +5.2 | 61.5% | +1.6 | 12% / 43% / 45% |
+| 0.501 | 53.0% (49.0–57.0) | 509,728 | 48.9% | +4.1 | 52.1% | +0.9 | 36% / 40% / 25% |
+| 0.794 | 50.2% (46.2–54.2) | 367,422 | 45.2% | +5.0 | 46.6% | +3.5 | 64% / 21% / 15% |
+| 1.26 | 46.5% (42.5–50.5) | 300,980 | 43.4% | +3.1 | 44.1% | +2.4 | 82% / 9% / 8% |
+| 2.24 | 43.8% (39.9–47.8) | 272,676 | 42.7% | +1.1 | 43.0% | +0.9 | 93% / 2% / 5% |
+| 3.55 | 43.7% (39.8–47.7) | 264,758 | 42.5% | +1.2 | 42.7% | +1.0 | 96% / 1% / 3% |
+| 5.62 | 43.2% (39.3–47.2) | 260,292 | 42.4% | +0.8 | 42.5% | +0.7 | 98% / 0% / 2% |
+| 8.91 | 42.7% (38.8–46.7) | 257,621 | 42.3% | +0.4 | 42.4% | +0.3 | 98% / 0% / 2% |
+| 100 | 42.5% (38.6–46.5) | 253,741 | 42.2% | +0.3 | 42.2% | +0.3 | 100% / 0% / 1% |
+
+**Correctness models.** How well each candidate's held-out probability of a
+correct answer separates right from wrong answers (AUROC, 0.5 is chance)
+and how close it is to the outcome (Brier score, lower is better), with the
+L2 strength the inner cross-validation chose (the mode over folds).
+
+| Variant | Candidate | AUROC | Brier | L2 |
+|---------|-----------|------:|------:|---:|
+| `router` | `qwen2.5:0.5b` | 0.601 | 0.238 | 1000 |
+| `router` | `qwen2.5:1.5b` | 0.566 | 0.241 | 1000 |
+| `router` | `qwen2.5:3b` | 0.619 | 0.178 | 1000 |
+| `router-cheap` | `qwen2.5:0.5b` | 0.644 | 0.232 | 10 |
+| `router-cheap` | `qwen2.5:1.5b` | 0.651 | 0.232 | 10 |
+| `router-cheap` | `qwen2.5:3b` | 0.683 | 0.175 | 10 |
+
+- Hardware: AMD EPYC 9V74 80-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0 (Ollama 0.40.16 on the same machine).
+- Labels: 2026-11-10 to 2026-11-10, 5 h 58 min of summed request time.
+- Commit: `aea4a71`, run 2026-11-10.
+- Command: `make eval-router`.
+- Cost: $0.00 (local models only).
+
+
+**What it says.**
+
+- **The served router does not clearly beat the line, and
+  sits below the candidates' hull.** Across the line's cost
+  range `router` averages +1.1 points over the line (-1.0 to +3.3) and -1.3
+  over the hull (-2.7 to +0.1). The hull is not the line here: `qwen2.5:1.5b` (+4.8 points)
+  sits above the line on its own, so a router can gain over the line just
+  by sending traffic to it, and only the gain over the hull is routing.
+- **Correctness is hard to predict from the prompt.** Held-out AUROC of
+  the correctness models is 0.57 to 0.68 (0.5 is chance). Adding the 768-dimension
+  embedding to the nine cheap features moves the frontier from -1.9 to
+  -1.3 points over the hull, but the
+  correctness models table shows it ranks right from wrong answers worse
+  than the cheap features alone: a few hundred training prompts are too
+  few for that many dimensions, even with the L2 strength the inner
+  cross-validation picked. Meanwhile the oracle reaches 87.0% accuracy at 41.4% of `qwen2.5:3b`'s cost:
+  the candidates do differ question by question; the features cannot see
+  where.
+- **The serving rule ignores that cost varies by question.** It orders the
+  candidates by their mean cost, but a multiple-choice reply is a few
+  tokens while a worked solution is hundreds. The dataset rule GSM8K to `qwen2.5:0.5b`, MMLU to `qwen2.5:1.5b`
+  is +2.6 points above the hull: the larger of its two models answers
+  only the multiple-choice questions, where its replies are short. `router-cost` keeps `router-cheap`'s predictions and adds a
+  per-question cost estimate (a ridge regression on the same cheap
+  features, out of fold), sending each question to the candidate with the
+  highest P(correct) − weight × cost. It averages +3.7 points over the line
+  (+1.5 to +6.1) and +1.4 over the hull (-0.5 to +3.2). It was designed after the first run
+  showed the problem, so it is a diagnosis to confirm on fresh questions,
+  not a result; the gateway still serves the threshold rule.
+
+
+**Limitations.**
+
+- Every candidate is a local model on one machine, so the cost axis is
+  compute, not money, and latency includes queueing on a shared CPU. Priced
+  models put different ratios between the candidates' costs, and the line
+  and the frontier move with them.
+- 600 questions (300 GSM8K and 300 MMLU), all with short gradable answers;
+  prompts in real traffic are longer and more varied.
+- Each candidate answered each question once; how much its answers vary
+  from one attempt to the next is not in any interval here.
+- Policies are compared on the same questions, so the bootstrap interval of
+  the gain, not whether two accuracy intervals overlap, is the test of a
+  difference.
+- 112 replies were cut off by the output cap (`qwen2.5:0.5b` 73, `qwen2.5:1.5b` 29, `qwen2.5:3b` 10) and are graded
+  on what they contain.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -429,7 +649,11 @@ Recorded 2026-10-27 on the machine in Q1. Cost: $0 (local Ollama only).
 - Q4 on a real provider: 200 streamed requests to `claude-haiku-5-5`
   through the gateway with hedging off and on (PLAN.md budgets under
   $0.50; needs `ANTHROPIC_API_KEY`).
-- Q5 router frontier: `make eval-router`.
+- Q5 with the Claude candidates: `ANTHROPIC_API_KEY=...
+  MODELS=claude-haiku-5-5,claude-sonnet-5-5,claude-opus-5-5 eval/router/label.sh`,
+  then the same `MODELS=... make eval-router` (estimated $2.90: `claude-haiku-5-5` $0.05, `claude-sonnet-5-5` $0.95, `claude-opus-5-5` $1.90;
+  estimated from `qwen2.5:3b`'s token counts at list prices; Claude's own
+  replies will differ).
 - Q6 replica and Redis kills under load: `make chaos`.
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with

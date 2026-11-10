@@ -39,6 +39,7 @@ type Config struct {
 	Budget      BudgetPolicy `yaml:"budget"`
 	Cache       Cache        `yaml:"cache"`
 	Tracing     Tracing      `yaml:"tracing"`
+	Router      Router       `yaml:"router"`
 }
 
 // Log configures the process logger.
@@ -168,6 +169,7 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		Budget:      BudgetPolicy{GraceUSD: DefaultGraceUSD, ReservationTTL: 15 * time.Minute},
 		Cache:       defaultCache(),
 		Tracing:     defaultTracing(),
+		Router:      defaultRouter(),
 	}
 	if path != "" {
 		data, err := os.ReadFile(path)
@@ -230,6 +232,8 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	set(&cfg.RateLimit.Algorithm, "SWITCHBOARD_RATELIMIT_ALGORITHM")
 	set(&cfg.Cache.Mode, "SWITCHBOARD_CACHE_MODE")
 	set(&cfg.Cache.Semantic.EmbedURL, "SWITCHBOARD_CACHE_EMBED_URL")
+	set(&cfg.Router.EmbedURL, "SWITCHBOARD_ROUTER_EMBED_URL")
+	set(&cfg.Router.Weights, "SWITCHBOARD_ROUTER_WEIGHTS")
 	if v := getenv("SWITCHBOARD_RATELIMIT_REPLICAS"); v != "" {
 		// A typo must not fall back to the file's count: with too few
 		// replicas, each one takes too big a share during an outage.
@@ -313,7 +317,7 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("key %q: sha256 must be 64 hex characters", k.Name))
 		}
 		for _, m := range k.Models {
-			if !models[m] {
+			if !models[m] && (m != AutoModel || !c.Router.Enabled) {
 				errs = append(errs, fmt.Errorf("key %q: unknown model %q", k.Name, m))
 			}
 		}
@@ -324,6 +328,7 @@ func (c *Config) Validate() error {
 	errs = append(errs, c.validateShared(byName)...)
 	errs = append(errs, c.validateCache()...)
 	errs = append(errs, c.validateTracing()...)
+	errs = append(errs, c.validateRouter()...)
 	return errors.Join(errs...)
 }
 

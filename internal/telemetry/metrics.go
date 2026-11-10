@@ -40,6 +40,7 @@ type Metrics struct {
 	cacheFills   *prometheus.CounterVec
 	cacheErrs    *prometheus.CounterVec
 	cacheSaved   *prometheus.CounterVec
+	routed       *prometheus.CounterVec
 
 	resilience
 }
@@ -103,9 +104,13 @@ func NewMetrics(runtime bool) *Metrics {
 			Name: "switchboard_cache_saved_dollars_total",
 			Help: "What the replies served from the cache cost when they were first generated, in US dollars, by key and model.",
 		}, []string{"key", "model"}),
+		routed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "switchboard_router_decisions_total",
+			Help: "Requests for model auto, by the model the router chose and why (target, fallback, best_allowed, no_embedding).",
+		}, []string{"model", "reason"}),
 	}
 	m.reg.MustRegister(m.requests, m.tokens, m.dollars, m.unpriced, m.duration, m.refusals, m.degraded, m.storeErrs,
-		m.cacheLookups, m.cacheLatency, m.cacheFills, m.cacheErrs, m.cacheSaved)
+		m.cacheLookups, m.cacheLatency, m.cacheFills, m.cacheErrs, m.cacheSaved, m.routed)
 	m.resilience = newResilience(m.reg)
 	if runtime {
 		m.reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
@@ -220,6 +225,14 @@ func (m *Metrics) CacheError(op string) {
 		return
 	}
 	m.cacheErrs.WithLabelValues(op).Inc()
+}
+
+// Routed records a router decision for a request for model auto.
+func (m *Metrics) Routed(model, reason string) {
+	if m == nil {
+		return
+	}
+	m.routed.WithLabelValues(model, reason).Inc()
 }
 
 // CacheSaved records the original cost of a reply served from the cache.

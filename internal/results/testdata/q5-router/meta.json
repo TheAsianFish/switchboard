@@ -1,0 +1,14 @@
+{
+  "commit": "abc1234",
+  "date": "2026-11-10T09:00:00Z",
+  "command": "switchboard eval router run",
+  "embedding": "nomic-embed-text",
+  "dimensions": 768,
+  "hardware": {"num_cpu": 8, "gomaxprocs": 8, "goos": "linux", "goarch": "amd64", "go_version": "go1.27.0", "cpu_model": "Test CPU @ 3.00GHz"},
+  "labelled_from": "2026-11-09T18:02:11Z",
+  "labelled_to": "2026-11-10T02:47:30Z",
+  "label_seconds": 26745,
+  "nanodollars": 0,
+  "params": {"qwen2.5:0.5b": 0.49, "qwen2.5:1.5b": 1.54, "qwen2.5:3b": 3.09},
+  "ollama": "0.40.15"
+}

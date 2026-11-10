@@ -4,7 +4,7 @@ BIN := $(CURDIR)/bin
 GOLANGCI := $(BIN)/golangci-lint
 export GOTOOLCHAIN ?= auto
 
-.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge eval-cache eval-cache-data sdk-smoke record-fixtures results docker clean
+.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results docker clean
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -55,6 +55,21 @@ eval-cache: ## Q3: semantic cache threshold sweep (Ollama with all-minilm and no
 
 eval-cache-data: ## rebuild the Q3 pair sets in eval/cache/data (Ollama with qwen2.5:3b, about 2.5 h on a laptop CPU; resumes)
 	go run ./cmd/switchboard eval cache-data
+
+ROUTER_MODELS := qwen2.5:0.5b,qwen2.5:1.5b,qwen2.5:3b
+
+eval-router: ## Q5: 5-fold cross-validated router frontier against the random-mix line, from the committed recordings ($$0, offline)
+	go run ./cmd/switchboard eval router run --models "$(or $(MODELS),$(ROUTER_MODELS))"
+	go run ./cmd/switchboard eval results
+
+eval-router-embed: ## Q5: re-embed the eval set's prompts (Ollama with nomic-embed-text)
+	go run ./cmd/switchboard eval router embed
+
+eval-router-data: ## rebuild the Q5 eval set in eval/router/data (downloads GSM8K and MMLU test splits)
+	go run ./cmd/switchboard eval router data
+
+eval-router-label: ## Q5 labels: every candidate answers every question through the gateway (local ladder by default; resumes; MODELS=claude-... with a key)
+	eval/router/label.sh
 
 sdk-smoke: build ## unmodified OpenAI and Anthropic Python SDKs streaming through the gateway (needs Ollama)
 	eval/sdk/smoke.sh
