@@ -5,8 +5,9 @@
 #                limits and budgets through Redis (profile fleet)
 #
 # The API is on http://localhost:8080 either way. Each replica's admin
-# listener (/metrics) is published on loopback: 9090 for the dev replica,
-# 9091-9093 for the fleet. Both profiles also run Jaeger, which the gateways
+# listener (the admin page at /, its API at /api/overview, /metrics) is
+# published on loopback: 9090 for the dev replica, 9091-9093 for the
+# fleet; any fleet replica's page shows all three. Both profiles also run Jaeger, which the gateways
 # send their traces to (UI on http://localhost:16686; every response carries
 # its trace id in X-Trace-Id), and Prometheus, which scrapes every replica
 # (UI on http://localhost:9095).
@@ -27,6 +28,8 @@ x-gateway: &gateway
     # nomic-embed-text into it first).
     SWITCHBOARD_CACHE_EMBED_URL: http://ollama:11434
     SWITCHBOARD_TRACING_ENDPOINT: http://jaeger:4318
+    # The admin page links each request to its trace in Jaeger's UI.
+    SWITCHBOARD_ADMIN_TRACE_URL: http://localhost:16686/trace/{trace_id}
 
 x-replica-env: &replica-env
   <<: *gateway-env
@@ -54,17 +57,23 @@ services:
   switchboard-1:
     <<: *gateway
     profiles: [fleet]
-    environment: *replica-env
+    environment:
+      <<: *replica-env
+      SWITCHBOARD_REPLICA_ID: switchboard-1
     ports: ["127.0.0.1:9091:9090"]
   switchboard-2:
     <<: *gateway
     profiles: [fleet]
-    environment: *replica-env
+    environment:
+      <<: *replica-env
+      SWITCHBOARD_REPLICA_ID: switchboard-2
     ports: ["127.0.0.1:9092:9090"]
   switchboard-3:
     <<: *gateway
     profiles: [fleet]
-    environment: *replica-env
+    environment:
+      <<: *replica-env
+      SWITCHBOARD_REPLICA_ID: switchboard-3
     ports: ["127.0.0.1:9093:9090"]
 
   lb:
