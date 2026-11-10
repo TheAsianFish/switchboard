@@ -53,7 +53,7 @@ dev: ## one gateway, Redis, Ollama, the fake provider, Jaeger and Prometheus in 
 fleet: ## three gateways behind nginx sharing Redis, plus Ollama, the fake provider, Jaeger and Prometheus
 	docker compose -f deploy/compose.yaml --profile fleet up --build
 
-bench: ## Q1: gateway overhead through the fake provider (about 12 minutes)
+bench: ## Q1: gateway overhead through the fake provider, passthrough and per feature (about 26 minutes; Docker for Redis, Jaeger and Ollama)
 	eval/bench/q1.sh
 
 test-limits: ## Q2: over-admission and shared budget across three replicas in compose (about 12 minutes)
