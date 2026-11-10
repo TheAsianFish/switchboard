@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"strings"
 
 	"github.com/TheAsianFish/switchboard/internal/budget"
@@ -95,6 +96,30 @@ func keyBudget(b *config.KeyBudget) *budget.Budget {
 	}
 	usd, _ := cost.ParseUSD(string(b.USD)) // config.Validate rejects bad amounts
 	return &budget.Budget{Limit: usd, Period: budget.Period(b.Period)}
+}
+
+// Principals lists every configured key's principal, sorted by name, for
+// the admin API.
+func (t *Keys) Principals() []*Principal {
+	out := make([]*Principal, 0, len(t.byDigest))
+	for _, p := range t.byDigest {
+		out = append(out, p)
+	}
+	slices.SortFunc(out, func(a, b *Principal) int { return strings.Compare(a.Name, b.Name) })
+	return out
+}
+
+// Models is the principal's allow list, sorted; nil allows every model.
+func (p *Principal) Models() []string {
+	if p.models == nil {
+		return nil
+	}
+	out := make([]string, 0, len(p.models))
+	for m := range p.models {
+		out = append(out, m)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Lookup resolves a presented key. The lookup is by SHA-256 digest, so the

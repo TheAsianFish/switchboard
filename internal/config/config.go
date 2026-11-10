@@ -30,16 +30,32 @@ type Config struct {
 	Providers []Provider `yaml:"providers"`
 	Models    []Model    `yaml:"models"`
 	Keys      []Key      `yaml:"keys"`
-	// AdminListen serves /metrics (and, later, the admin API). It is a
+	// AdminListen serves /metrics, the admin API and its page. It is a
 	// separate listener so per-key names and spend never reach the public
 	// port; the default is loopback only.
 	AdminListen string       `yaml:"admin_listen"`
+	Admin       Admin        `yaml:"admin"`
 	Redis       Redis        `yaml:"redis"`
 	RateLimit   RateLimit    `yaml:"ratelimit"`
 	Budget      BudgetPolicy `yaml:"budget"`
 	Cache       Cache        `yaml:"cache"`
 	Tracing     Tracing      `yaml:"tracing"`
 	Router      Router       `yaml:"router"`
+}
+
+// Admin configures the admin API and page on the admin listener.
+type Admin struct {
+	// ReplicaID names this process in the fleet view; the default is the
+	// host name. Env SWITCHBOARD_REPLICA_ID.
+	ReplicaID string `yaml:"replica_id"`
+	// TraceURL is a link template for a request's trace, with
+	// "{trace_id}" replaced, e.g. http://localhost:16686/trace/{trace_id}.
+	// Empty shows trace ids without links. Env SWITCHBOARD_ADMIN_TRACE_URL.
+	TraceURL string `yaml:"trace_url"`
+	// AllowedHosts are Host header names the API and page answer besides
+	// loopback names and IP literals, for an admin listener reached
+	// through a proxy or a container name.
+	AllowedHosts []string `yaml:"allowed_hosts"`
 }
 
 // Log configures the process logger.
@@ -228,6 +244,8 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	set(&cfg.Log.Format, "SWITCHBOARD_LOG_FORMAT")
 	set(&cfg.Log.Level, "SWITCHBOARD_LOG_LEVEL")
 	set(&cfg.AdminListen, "SWITCHBOARD_ADMIN_LISTEN")
+	set(&cfg.Admin.ReplicaID, "SWITCHBOARD_REPLICA_ID")
+	set(&cfg.Admin.TraceURL, "SWITCHBOARD_ADMIN_TRACE_URL")
 	set(&cfg.Redis.URL, "SWITCHBOARD_REDIS_URL")
 	set(&cfg.RateLimit.Algorithm, "SWITCHBOARD_RATELIMIT_ALGORITHM")
 	set(&cfg.Cache.Mode, "SWITCHBOARD_CACHE_MODE")

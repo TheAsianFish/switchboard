@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/TheAsianFish/switchboard/internal/admin"
 	"github.com/TheAsianFish/switchboard/internal/auth"
 	"github.com/TheAsianFish/switchboard/internal/bench"
 	"github.com/TheAsianFish/switchboard/internal/cacheeval"
@@ -202,24 +203,30 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	if len(cfg.Keys) == 0 {
 		log.Warn("no API keys configured; every request will be refused")
 	}
-	pol, closePolicy, err := buildPolicy(ctx, cfg, metrics, log)
+	rtr, err := buildRouter(cfg, log)
+	if err != nil {
+		return err
+	}
+	rec := admin.NewRecorder(admin.RecorderOptions{Candidates: routerCandidates(rtr)})
+	pol, closePolicy, rdb, err := buildPolicy(ctx, cfg, metrics, rec.SetDegraded, log)
 	if err != nil {
 		return err
 	}
 	defer closePolicy()
-	if pol.Router, err = buildRouter(cfg, log); err != nil {
-		return err
-	}
-	gw := pipeline.New(auth.NewKeys(cfg.Keys), routes(cfg, built, log), pol)
+	pol.Router, pol.OnCall = rtr, rec.Observe
+	keys := auth.NewKeys(cfg.Keys)
+	gw := pipeline.New(keys, routes(cfg, built, log), pol)
+	adm := buildAdmin(cfg, rec, rdb, keys, pol, health, log)
 	log.Info("gateway configured",
 		slog.String("config", *path), slog.Int("providers", len(cfg.Providers)),
 		slog.Int("models", len(cfg.Models)), slog.Int("keys", len(cfg.Keys)), slog.String("version", version()))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	go adm.Run(ctx)
 	adminErr := make(chan error, 1)
 	go func() {
-		err := server.Run(ctx, cfg.AdminListen, adminHandler(metrics, health), log, nil)
+		err := server.Run(ctx, cfg.AdminListen, adminHandler(metrics, health, adm), log, nil)
 		if err != nil {
 			cancel() // the gateway without its metrics is not worth running
 		}
