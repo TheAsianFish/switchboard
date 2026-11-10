@@ -1,0 +1,3862 @@
+{
+  "cost_unit": "gflops",
+  "questions": 600,
+  "by_dataset": {
+    "gsm8k": 300,
+    "mmlu": 300
+  },
+  "folds": 5,
+  "seed": 1,
+  "bootstrap": 2000,
+  "accuracy_rule": 0.95,
+  "l2": {
+    "router": {
+      "qwen2.5:0.5b": 1000,
+      "qwen2.5:1.5b": 1000,
+      "qwen2.5:3b": 1000
+    },
+    "router-cheap": {
+      "qwen2.5:0.5b": 10,
+      "qwen2.5:1.5b": 10,
+      "qwen2.5:3b": 10
+    }
+  },
+  "candidates": [
+    {
+      "model": "qwen2.5:0.5b",
+      "accuracy": 0.421667,
+      "accuracy_ci": [
+        0.382774,
+        0.461556
+      ],
+      "cost_per_1k": 251877.966667,
+      "by_dataset": {
+        "gsm8k": 0.436667,
+        "mmlu": 0.406667
+      },
+      "latency_p50_ms": 4112.809,
+      "latency_p95_ms": 16774.681,
+      "mean_input_tokens": 114.921667,
+      "mean_output_tokens": 142.096667,
+      "truncated": 73,
+      "nanodollars": 0
+    },
+    {
+      "model": "qwen2.5:1.5b",
+      "accuracy": 0.568333,
+      "accuracy_ci": [
+        0.52839,
+        0.607407
+      ],
+      "cost_per_1k": 631333.266667,
+      "by_dataset": {
+        "gsm8k": 0.573333,
+        "mmlu": 0.563333
+      },
+      "latency_p50_ms": 5515.97,
+      "latency_p95_ms": 20624.409,
+      "mean_input_tokens": 114.921667,
+      "mean_output_tokens": 90.056667,
+      "truncated": 29,
+      "nanodollars": 0
+    },
+    {
+      "model": "qwen2.5:3b",
+      "accuracy": 0.758333,
+      "accuracy_ci": [
+        0.722506,
+        0.790874
+      ],
+      "cost_per_1k": 1546040.3,
+      "by_dataset": {
+        "gsm8k": 0.836667,
+        "mmlu": 0.68
+      },
+      "latency_p50_ms": 22247.556,
+      "latency_p95_ms": 49206.545,
+      "mean_input_tokens": 114.921667,
+      "mean_output_tokens": 135.246667,
+      "truncated": 10,
+      "nanodollars": 0
+    }
+  ],
+  "cheapest": "qwen2.5:0.5b",
+  "best": "qwen2.5:3b",
+  "hull": [
+    "qwen2.5:0.5b",
+    "qwen2.5:1.5b",
+    "qwen2.5:3b"
+  ],
+  "oracle": {
+    "accuracy": 0.87,
+    "accuracy_ci": [
+      0.840719,
+      0.894573
+    ],
+    "cost_per_1k": 639368.8
+  },
+  "dataset_rules": [
+    {
+      "gsm8k": "qwen2.5:0.5b",
+      "mmlu": "qwen2.5:0.5b",
+      "accuracy": 0.421667,
+      "accuracy_ci": [
+        0.382774,
+        0.461556
+      ],
+      "cost_per_1k": 251877.966667
+    },
+    {
+      "gsm8k": "qwen2.5:0.5b",
+      "mmlu": "qwen2.5:1.5b",
+      "accuracy": 0.5,
+      "accuracy_ci": [
+        0.46012,
+        0.53988
+      ],
+      "cost_per_1k": 386852.9
+    },
+    {
+      "gsm8k": "qwen2.5:0.5b",
+      "mmlu": "qwen2.5:3b",
+      "accuracy": 0.558333,
+      "accuracy_ci": [
+        0.518353,
+        0.597572
+      ],
+      "cost_per_1k": 579146.133333
+    },
+    {
+      "gsm8k": "qwen2.5:1.5b",
+      "mmlu": "qwen2.5:0.5b",
+      "accuracy": 0.49,
+      "accuracy_ci": [
+        0.450191,
+        0.529936
+      ],
+      "cost_per_1k": 496358.333333
+    },
+    {
+      "gsm8k": "qwen2.5:1.5b",
+      "mmlu": "qwen2.5:1.5b",
+      "accuracy": 0.568333,
+      "accuracy_ci": [
+        0.52839,
+        0.607407
+      ],
+      "cost_per_1k": 631333.266667
+    },
+    {
+      "gsm8k": "qwen2.5:1.5b",
+      "mmlu": "qwen2.5:3b",
+      "accuracy": 0.626667,
+      "accuracy_ci": [
+        0.587273,
+        0.664448
+      ],
+      "cost_per_1k": 823626.5
+    },
+    {
+      "gsm8k": "qwen2.5:3b",
+      "mmlu": "qwen2.5:0.5b",
+      "accuracy": 0.621667,
+      "accuracy_ci": [
+        0.582203,
+        0.659582
+      ],
+      "cost_per_1k": 1218772.133333
+    },
+    {
+      "gsm8k": "qwen2.5:3b",
+      "mmlu": "qwen2.5:1.5b",
+      "accuracy": 0.7,
+      "accuracy_ci": [
+        0.662155,
+        0.735301
+      ],
+      "cost_per_1k": 1353747.066667
+    },
+    {
+      "gsm8k": "qwen2.5:3b",
+      "mmlu": "qwen2.5:3b",
+      "accuracy": 0.758333,
+      "accuracy_ci": [
+        0.722506,
+        0.790874
+      ],
+      "cost_per_1k": 1546040.3
+    }
+  ],
+  "variants": [
+    {
+      "name": "router",
+      "description": "cheap text features and the prompt embedding",
+      "knob": "target",
+      "frontier": [
+        {
+          "target": 0,
+          "accuracy": 0.421667,
+          "accuracy_ci": [
+            0.382774,
+            0.461556
+          ],
+          "cost_per_1k": 251877.966667,
+          "line_accuracy": 0.421667,
+          "gain": 0,
+          "hull_accuracy": 0.421667,
+          "hull_gain": 0,
+          "share": {
+            "qwen2.5:0.5b": 1
+          }
+        },
+        {
+          "target": 0.13,
+          "accuracy": 0.42,
+          "accuracy_ci": [
+            0.381139,
+            0.459879
+          ],
+          "cost_per_1k": 252328.533333,
+          "line_accuracy": 0.421784,
+          "gain": -0.001784,
+          "hull_accuracy": 0.421841,
+          "hull_gain": -0.001841,
+          "share": {
+            "qwen2.5:0.5b": 0.998333,
+            "qwen2.5:1.5b": 0.001667
+          }
+        },
+        {
+          "target": 0.19,
+          "accuracy": 0.421667,
+          "accuracy_ci": [
+            0.382774,
+            0.461556
+          ],
+          "cost_per_1k": 252821.333333,
+          "line_accuracy": 0.421912,
+          "gain": -0.000245,
+          "hull_accuracy": 0.422031,
+          "hull_gain": -0.000364,
+          "share": {
+            "qwen2.5:0.5b": 0.996667,
+            "qwen2.5:1.5b": 0.003333
+          }
+        },
+        {
+          "target": 0.2,
+          "accuracy": 0.421667,
+          "accuracy_ci": [
+            0.382774,
+            0.461556
+          ],
+          "cost_per_1k": 253190.466667,
+          "line_accuracy": 0.422008,
+          "gain": -0.000341,
+          "hull_accuracy": 0.422174,
+          "hull_gain": -0.000507,
+          "share": {
+            "qwen2.5:0.5b": 0.995,
+            "qwen2.5:1.5b": 0.005
+          }
+        },
+        {
+          "target": 0.21,
+          "accuracy": 0.421667,
+          "accuracy_ci": [
+            0.382774,
+            0.461556
+          ],
+          "cost_per_1k": 253780.1,
+          "line_accuracy": 0.422161,
+          "gain": -0.000494,
+          "hull_accuracy": 0.422402,
+          "hull_gain": -0.000735,
+          "share": {
+            "qwen2.5:0.5b": 0.993333,
+            "qwen2.5:1.5b": 0.006667
+          }
+        },
+        {
+          "target": 0.22,
+          "accuracy": 0.421667,
+          "accuracy_ci": [
+            0.382774,
+            0.461556
+          ],
+          "cost_per_1k": 254948.166667,
+          "line_accuracy": 0.422465,
+          "gain": -0.000798,
+          "hull_accuracy": 0.422853,
+          "hull_gain": -0.001186,
+          "share": {
+            "qwen2.5:0.5b": 0.991667,
+            "qwen2.5:1.5b": 0.008333
+          }
+        },
+        {
+          "target": 0.23,
+          "accuracy": 0.42,
+          "accuracy_ci": [
+            0.381139,
+            0.459879
+          ],
+          "cost_per_1k": 256455.033333,
+          "line_accuracy": 0.422857,
+          "gain": -0.002857,
+          "hull_accuracy": 0.423436,
+          "hull_gain": -0.003436,
+          "share": {
+            "qwen2.5:0.5b": 0.986667,
+            "qwen2.5:1.5b": 0.013333
+          }
+        },
+        {
+          "target": 0.24,
+          "accuracy": 0.423333,
+          "accuracy_ci": [
+            0.38441,
+            0.463233
+          ],
+          "cost_per_1k": 258519.8,
+          "line_accuracy": 0.423394,
+          "gain": -0.000061,
+          "hull_accuracy": 0.424234,
+          "hull_gain": -0.000901,
+          "share": {
+            "qwen2.5:0.5b": 0.981667,
+            "qwen2.5:1.5b": 0.018333
+          }
+        },
+        {
+          "target": 0.25,
+          "accuracy": 0.426667,
+          "accuracy_ci": [
+            0.387682,
+            0.466585
+          ],
+          "cost_per_1k": 268701.3,
+          "line_accuracy": 0.426043,
+          "gain": 0.000624,
+          "hull_accuracy": 0.428169,
+          "hull_gain": -0.001502,
+          "share": {
+            "qwen2.5:0.5b": 0.965,
+            "qwen2.5:1.5b": 0.035
+          }
+        },
+        {
+          "target": 0.26,
+          "accuracy": 0.43,
+          "accuracy_ci": [
+            0.390955,
+            0.469935
+          ],
+          "cost_per_1k": 274451.8,
+          "line_accuracy": 0.427539,
+          "gain": 0.002461,
+          "hull_accuracy": 0.430392,
+          "hull_gain": -0.000392,
+          "share": {
+            "qwen2.5:0.5b": 0.953333,
+            "qwen2.5:1.5b": 0.046667
+          }
+        },
+        {
+          "target": 0.27,
+          "accuracy": 0.431667,
+          "accuracy_ci": [
+            0.392593,
+            0.47161
+          ],
+          "cost_per_1k": 281051.4,
+          "line_accuracy": 0.429256,
+          "gain": 0.002411,
+          "hull_accuracy": 0.432943,
+          "hull_gain": -0.001276,
+          "share": {
+            "qwen2.5:0.5b": 0.94,
+            "qwen2.5:1.5b": 0.06
+          }
+        },
+        {
+          "target": 0.28,
+          "accuracy": 0.428333,
+          "accuracy_ci": [
+            0.389318,
+            0.46826
+          ],
+          "cost_per_1k": 285335.633333,
+          "line_accuracy": 0.43037,
+          "gain": -0.002037,
+          "hull_accuracy": 0.434599,
+          "hull_gain": -0.006266,
+          "share": {
+            "qwen2.5:0.5b": 0.926667,
+            "qwen2.5:1.5b": 0.073333
+          }
+        },
+        {
+          "target": 0.29,
+          "accuracy": 0.433333,
+          "accuracy_ci": [
+            0.394231,
+            0.473284
+          ],
+          "cost_per_1k": 290121.533333,
+          "line_accuracy": 0.431615,
+          "gain": 0.001718,
+          "hull_accuracy": 0.436449,
+          "hull_gain": -0.003116,
+          "share": {
+            "qwen2.5:0.5b": 0.918333,
+            "qwen2.5:1.5b": 0.081667
+          }
+        },
+        {
+          "target": 0.3,
+          "accuracy": 0.433333,
+          "accuracy_ci": [
+            0.394231,
+            0.473284
+          ],
+          "cost_per_1k": 297006.966667,
+          "line_accuracy": 0.433407,
+          "gain": -0.000074,
+          "hull_accuracy": 0.43911,
+          "hull_gain": -0.005777,
+          "share": {
+            "qwen2.5:0.5b": 0.905,
+            "qwen2.5:1.5b": 0.095
+          }
+        },
+        {
+          "target": 0.31,
+          "accuracy": 0.435,
+          "accuracy_ci": [
+            0.39587,
+            0.474957
+          ],
+          "cost_per_1k": 305335.1,
+          "line_accuracy": 0.435573,
+          "gain": -0.000573,
+          "hull_accuracy": 0.442329,
+          "hull_gain": -0.007329,
+          "share": {
+            "qwen2.5:0.5b": 0.886667,
+            "qwen2.5:1.5b": 0.113333
+          }
+        },
+        {
+          "target": 0.32,
+          "accuracy": 0.435,
+          "accuracy_ci": [
+            0.39587,
+            0.474957
+          ],
+          "cost_per_1k": 309989.4,
+          "line_accuracy": 0.436784,
+          "gain": -0.001784,
+          "hull_accuracy": 0.444128,
+          "hull_gain": -0.009128,
+          "share": {
+            "qwen2.5:0.5b": 0.871667,
+            "qwen2.5:1.5b": 0.128333
+          }
+        },
+        {
+          "target": 0.33,
+          "accuracy": 0.431667,
+          "accuracy_ci": [
+            0.392593,
+            0.47161
+          ],
+          "cost_per_1k": 327612.133333,
+          "line_accuracy": 0.441368,
+          "gain": -0.009701,
+          "hull_accuracy": 0.450939,
+          "hull_gain": -0.019272,
+          "share": {
+            "qwen2.5:0.5b": 0.833333,
+            "qwen2.5:1.5b": 0.166667
+          }
+        },
+        {
+          "target": 0.34,
+          "accuracy": 0.443333,
+          "accuracy_ci": [
+            0.404069,
+            0.483319
+          ],
+          "cost_per_1k": 335541.966667,
+          "line_accuracy": 0.443431,
+          "gain": -0.000098,
+          "hull_accuracy": 0.454004,
+          "hull_gain": -0.010671,
+          "share": {
+            "qwen2.5:0.5b": 0.811667,
+            "qwen2.5:1.5b": 0.188333
+          }
+        },
+        {
+          "target": 0.35,
+          "accuracy": 0.455,
+          "accuracy_ci": [
+            0.415567,
+            0.495006
+          ],
+          "cost_per_1k": 347104.566667,
+          "line_accuracy": 0.446439,
+          "gain": 0.008561,
+          "hull_accuracy": 0.458474,
+          "hull_gain": -0.003474,
+          "share": {
+            "qwen2.5:0.5b": 0.781667,
+            "qwen2.5:1.5b": 0.218333
+          }
+        },
+        {
+          "target": 0.36,
+          "accuracy": 0.468333,
+          "accuracy_ci": [
+            0.428734,
+            0.508335
+          ],
+          "cost_per_1k": 360753.4,
+          "line_accuracy": 0.44999,
+          "gain": 0.018343,
+          "hull_accuracy": 0.463749,
+          "hull_gain": 0.004584,
+          "share": {
+            "qwen2.5:0.5b": 0.74,
+            "qwen2.5:1.5b": 0.26
+          }
+        },
+        {
+          "target": 0.37,
+          "accuracy": 0.47,
+          "accuracy_ci": [
+            0.430382,
+            0.51
+          ],
+          "cost_per_1k": 377082.133333,
+          "line_accuracy": 0.454238,
+          "gain": 0.015762,
+          "hull_accuracy": 0.47006,
+          "hull_gain": -0.00006,
+          "share": {
+            "qwen2.5:0.5b": 0.71,
+            "qwen2.5:1.5b": 0.281667,
+            "qwen2.5:3b": 0.008333
+          }
+        },
+        {
+          "target": 0.38,
+          "accuracy": 0.478333,
+          "accuracy_ci": [
+            0.438628,
+            0.518314
+          ],
+          "cost_per_1k": 400595.7,
+          "line_accuracy": 0.460354,
+          "gain": 0.017979,
+          "hull_accuracy": 0.479149,
+          "hull_gain": -0.000816,
+          "share": {
+            "qwen2.5:0.5b": 0.666667,
+            "qwen2.5:1.5b": 0.321667,
+            "qwen2.5:3b": 0.011667
+          }
+        },
+        {
+          "target": 0.39,
+          "accuracy": 0.493333,
+          "accuracy_ci": [
+            0.453499,
+            0.533252
+          ],
+          "cost_per_1k": 419960.533333,
+          "line_accuracy": 0.465392,
+          "gain": 0.027941,
+          "hull_accuracy": 0.486634,
+          "hull_gain": 0.006699,
+          "share": {
+            "qwen2.5:0.5b": 0.626667,
+            "qwen2.5:1.5b": 0.355,
+            "qwen2.5:3b": 0.018333
+          }
+        },
+        {
+          "target": 0.4,
+          "accuracy": 0.508333,
+          "accuracy_ci": [
+            0.468406,
+            0.548155
+          ],
+          "cost_per_1k": 439479.4,
+          "line_accuracy": 0.47047,
+          "gain": 0.037863,
+          "hull_accuracy": 0.494178,
+          "hull_gain": 0.014155,
+          "share": {
+            "qwen2.5:0.5b": 0.59,
+            "qwen2.5:1.5b": 0.388333,
+            "qwen2.5:3b": 0.021667
+          }
+        },
+        {
+          "target": 0.41,
+          "accuracy": 0.511667,
+          "accuracy_ci": [
+            0.471723,
+            0.551462
+          ],
+          "cost_per_1k": 457023.933333,
+          "line_accuracy": 0.475034,
+          "gain": 0.036633,
+          "hull_accuracy": 0.500959,
+          "hull_gain": 0.010708,
+          "share": {
+            "qwen2.5:0.5b": 0.563333,
+            "qwen2.5:1.5b": 0.41,
+            "qwen2.5:3b": 0.026667
+          }
+        },
+        {
+          "target": 0.42,
+          "accuracy": 0.523333,
+          "accuracy_ci": [
+            0.483348,
+            0.563022
+          ],
+          "cost_per_1k": 483712.1,
+          "line_accuracy": 0.481977,
+          "gain": 0.041356,
+          "hull_accuracy": 0.511275,
+          "hull_gain": 0.012058,
+          "share": {
+            "qwen2.5:0.5b": 0.511667,
+            "qwen2.5:1.5b": 0.456667,
+            "qwen2.5:3b": 0.031667
+          }
+        },
+        {
+          "target": 0.43,
+          "accuracy": 0.535,
+          "accuracy_ci": [
+            0.494994,
+            0.57456
+          ],
+          "cost_per_1k": 512545.5,
+          "line_accuracy": 0.489477,
+          "gain": 0.045523,
+          "hull_accuracy": 0.52242,
+          "hull_gain": 0.01258,
+          "share": {
+            "qwen2.5:0.5b": 0.456667,
+            "qwen2.5:1.5b": 0.508333,
+            "qwen2.5:3b": 0.035
+          }
+        },
+        {
+          "target": 0.44,
+          "accuracy": 0.541667,
+          "accuracy_ci": [
+            0.501659,
+            0.581144
+          ],
+          "cost_per_1k": 534733.033333,
+          "line_accuracy": 0.495249,
+          "gain": 0.046418,
+          "hull_accuracy": 0.530996,
+          "hull_gain": 0.010671,
+          "share": {
+            "qwen2.5:0.5b": 0.411667,
+            "qwen2.5:1.5b": 0.551667,
+            "qwen2.5:3b": 0.036667
+          }
+        },
+        {
+          "target": 0.45,
+          "accuracy": 0.546667,
+          "accuracy_ci": [
+            0.506663,
+            0.586077
+          ],
+          "cost_per_1k": 552000.233333,
+          "line_accuracy": 0.499741,
+          "gain": 0.046926,
+          "hull_accuracy": 0.53767,
+          "hull_gain": 0.008997,
+          "share": {
+            "qwen2.5:0.5b": 0.368333,
+            "qwen2.5:1.5b": 0.591667,
+            "qwen2.5:3b": 0.04
+          }
+        },
+        {
+          "target": 0.46,
+          "accuracy": 0.55,
+          "accuracy_ci": [
+            0.51,
+            0.589363
+          ],
+          "cost_per_1k": 572208.033333,
+          "line_accuracy": 0.504998,
+          "gain": 0.045002,
+          "hull_accuracy": 0.54548,
+          "hull_gain": 0.00452,
+          "share": {
+            "qwen2.5:0.5b": 0.333333,
+            "qwen2.5:1.5b": 0.618333,
+            "qwen2.5:3b": 0.048333
+          }
+        },
+        {
+          "target": 0.47,
+          "accuracy": 0.55,
+          "accuracy_ci": [
+            0.51,
+            0.589363
+          ],
+          "cost_per_1k": 599341.366667,
+          "line_accuracy": 0.512057,
+          "gain": 0.037943,
+          "hull_accuracy": 0.555968,
+          "hull_gain": -0.005968,
+          "share": {
+            "qwen2.5:0.5b": 0.306667,
+            "qwen2.5:1.5b": 0.626667,
+            "qwen2.5:3b": 0.066667
+          }
+        },
+        {
+          "target": 0.48,
+          "accuracy": 0.556667,
+          "accuracy_ci": [
+            0.516681,
+            0.595931
+          ],
+          "cost_per_1k": 627666.466667,
+          "line_accuracy": 0.519425,
+          "gain": 0.037242,
+          "hull_accuracy": 0.566916,
+          "hull_gain": -0.010249,
+          "share": {
+            "qwen2.5:0.5b": 0.276667,
+            "qwen2.5:1.5b": 0.64,
+            "qwen2.5:3b": 0.083333
+          }
+        },
+        {
+          "target": 0.49,
+          "accuracy": 0.556667,
+          "accuracy_ci": [
+            0.516681,
+            0.595931
+          ],
+          "cost_per_1k": 646336.766667,
+          "line_accuracy": 0.524282,
+          "gain": 0.032385,
+          "hull_accuracy": 0.57145,
+          "hull_gain": -0.014783,
+          "share": {
+            "qwen2.5:0.5b": 0.241667,
+            "qwen2.5:1.5b": 0.668333,
+            "qwen2.5:3b": 0.09
+          }
+        },
+        {
+          "target": 0.5,
+          "accuracy": 0.568333,
+          "accuracy_ci": [
+            0.52839,
+            0.607407
+          ],
+          "cost_per_1k": 694284.7,
+          "line_accuracy": 0.536755,
+          "gain": 0.031578,
+          "hull_accuracy": 0.581409,
+          "hull_gain": -0.013076,
+          "share": {
+            "qwen2.5:0.5b": 0.206667,
+            "qwen2.5:1.5b": 0.678333,
+            "qwen2.5:3b": 0.115
+          }
+        },
+        {
+          "target": 0.51,
+          "accuracy": 0.585,
+          "accuracy_ci": [
+            0.545156,
+            0.623763
+          ],
+          "cost_per_1k": 735657.566667,
+          "line_accuracy": 0.547518,
+          "gain": 0.037482,
+          "hull_accuracy": 0.590003,
+          "hull_gain": -0.005003,
+          "share": {
+            "qwen2.5:0.5b": 0.181667,
+            "qwen2.5:1.5b": 0.67,
+            "qwen2.5:3b": 0.148333
+          }
+        },
+        {
+          "target": 0.52,
+          "accuracy": 0.595,
+          "accuracy_ci": [
+            0.555237,
+            0.633554
+          ],
+          "cost_per_1k": 784107.366667,
+          "line_accuracy": 0.560122,
+          "gain": 0.034878,
+          "hull_accuracy": 0.600067,
+          "hull_gain": -0.005067,
+          "share": {
+            "qwen2.5:0.5b": 0.155,
+            "qwen2.5:1.5b": 0.655,
+            "qwen2.5:3b": 0.19
+          }
+        },
+        {
+          "target": 0.53,
+          "accuracy": 0.596667,
+          "accuracy_ci": [
+            0.556919,
+            0.635184
+          ],
+          "cost_per_1k": 846042.1,
+          "line_accuracy": 0.576234,
+          "gain": 0.020433,
+          "hull_accuracy": 0.612932,
+          "hull_gain": -0.016265,
+          "share": {
+            "qwen2.5:0.5b": 0.128333,
+            "qwen2.5:1.5b": 0.635,
+            "qwen2.5:3b": 0.236667
+          }
+        },
+        {
+          "target": 0.54,
+          "accuracy": 0.608333,
+          "accuracy_ci": [
+            0.568705,
+            0.646583
+          ],
+          "cost_per_1k": 921064.233333,
+          "line_accuracy": 0.59575,
+          "gain": 0.012583,
+          "hull_accuracy": 0.628515,
+          "hull_gain": -0.020182,
+          "share": {
+            "qwen2.5:0.5b": 0.105,
+            "qwen2.5:1.5b": 0.606667,
+            "qwen2.5:3b": 0.288333
+          }
+        },
+        {
+          "target": 0.55,
+          "accuracy": 0.618333,
+          "accuracy_ci": [
+            0.578826,
+            0.656335
+          ],
+          "cost_per_1k": 1018114.066667,
+          "line_accuracy": 0.620997,
+          "gain": -0.002664,
+          "hull_accuracy": 0.648674,
+          "hull_gain": -0.030341,
+          "share": {
+            "qwen2.5:0.5b": 0.09,
+            "qwen2.5:1.5b": 0.535,
+            "qwen2.5:3b": 0.375
+          }
+        },
+        {
+          "target": 0.56,
+          "accuracy": 0.635,
+          "accuracy_ci": [
+            0.595733,
+            0.67255
+          ],
+          "cost_per_1k": 1112231.9,
+          "line_accuracy": 0.645481,
+          "gain": -0.010481,
+          "hull_accuracy": 0.668224,
+          "hull_gain": -0.033224,
+          "share": {
+            "qwen2.5:0.5b": 0.073333,
+            "qwen2.5:1.5b": 0.476667,
+            "qwen2.5:3b": 0.45
+          }
+        },
+        {
+          "target": 0.57,
+          "accuracy": 0.665,
+          "accuracy_ci": [
+            0.62629,
+            0.701611
+          ],
+          "cost_per_1k": 1215083.833333,
+          "line_accuracy": 0.672237,
+          "gain": -0.007237,
+          "hull_accuracy": 0.689588,
+          "hull_gain": -0.024588,
+          "share": {
+            "qwen2.5:0.5b": 0.065,
+            "qwen2.5:1.5b": 0.386667,
+            "qwen2.5:3b": 0.548333
+          }
+        },
+        {
+          "target": 0.58,
+          "accuracy": 0.678333,
+          "accuracy_ci": [
+            0.639924,
+            0.714473
+          ],
+          "cost_per_1k": 1262608.633333,
+          "line_accuracy": 0.684601,
+          "gain": -0.006268,
+          "hull_accuracy": 0.69946,
+          "hull_gain": -0.021127,
+          "share": {
+            "qwen2.5:0.5b": 0.051667,
+            "qwen2.5:1.5b": 0.336667,
+            "qwen2.5:3b": 0.611667
+          }
+        },
+        {
+          "target": 0.59,
+          "accuracy": 0.69,
+          "accuracy_ci": [
+            0.651883,
+            0.7257
+          ],
+          "cost_per_1k": 1310548.6,
+          "line_accuracy": 0.697072,
+          "gain": -0.007072,
+          "hull_accuracy": 0.709418,
+          "hull_gain": -0.019418,
+          "share": {
+            "qwen2.5:0.5b": 0.036667,
+            "qwen2.5:1.5b": 0.291667,
+            "qwen2.5:3b": 0.671667
+          }
+        },
+        {
+          "target": 0.6,
+          "accuracy": 0.696667,
+          "accuracy_ci": [
+            0.658729,
+            0.732103
+          ],
+          "cost_per_1k": 1352976.433333,
+          "line_accuracy": 0.708109,
+          "gain": -0.011442,
+          "hull_accuracy": 0.718231,
+          "hull_gain": -0.021564,
+          "share": {
+            "qwen2.5:0.5b": 0.031667,
+            "qwen2.5:1.5b": 0.241667,
+            "qwen2.5:3b": 0.726667
+          }
+        },
+        {
+          "target": 0.61,
+          "accuracy": 0.703333,
+          "accuracy_ci": [
+            0.665583,
+            0.738496
+          ],
+          "cost_per_1k": 1376725.2,
+          "line_accuracy": 0.714287,
+          "gain": -0.010954,
+          "hull_accuracy": 0.723164,
+          "hull_gain": -0.019831,
+          "share": {
+            "qwen2.5:0.5b": 0.023333,
+            "qwen2.5:1.5b": 0.216667,
+            "qwen2.5:3b": 0.76
+          }
+        },
+        {
+          "target": 0.62,
+          "accuracy": 0.706667,
+          "accuracy_ci": [
+            0.669014,
+            0.74169
+          ],
+          "cost_per_1k": 1398815.266667,
+          "line_accuracy": 0.720034,
+          "gain": -0.013367,
+          "hull_accuracy": 0.727752,
+          "hull_gain": -0.021085,
+          "share": {
+            "qwen2.5:0.5b": 0.016667,
+            "qwen2.5:1.5b": 0.195,
+            "qwen2.5:3b": 0.788333
+          }
+        },
+        {
+          "target": 0.63,
+          "accuracy": 0.711667,
+          "accuracy_ci": [
+            0.674165,
+            0.746476
+          ],
+          "cost_per_1k": 1418508.533333,
+          "line_accuracy": 0.725157,
+          "gain": -0.01349,
+          "hull_accuracy": 0.731843,
+          "hull_gain": -0.020176,
+          "share": {
+            "qwen2.5:0.5b": 0.013333,
+            "qwen2.5:1.5b": 0.173333,
+            "qwen2.5:3b": 0.813333
+          }
+        },
+        {
+          "target": 0.64,
+          "accuracy": 0.721667,
+          "accuracy_ci": [
+            0.684482,
+            0.756031
+          ],
+          "cost_per_1k": 1436090,
+          "line_accuracy": 0.729731,
+          "gain": -0.008064,
+          "hull_accuracy": 0.735495,
+          "hull_gain": -0.013828,
+          "share": {
+            "qwen2.5:0.5b": 0.01,
+            "qwen2.5:1.5b": 0.156667,
+            "qwen2.5:3b": 0.833333
+          }
+        },
+        {
+          "target": 0.65,
+          "accuracy": 0.726667,
+          "accuracy_ci": [
+            0.689649,
+            0.760801
+          ],
+          "cost_per_1k": 1457776.766667,
+          "line_accuracy": 0.735372,
+          "gain": -0.008705,
+          "hull_accuracy": 0.74,
+          "hull_gain": -0.013333,
+          "share": {
+            "qwen2.5:0.5b": 0.006667,
+            "qwen2.5:1.5b": 0.128333,
+            "qwen2.5:3b": 0.865
+          }
+        },
+        {
+          "target": 0.66,
+          "accuracy": 0.736667,
+          "accuracy_ci": [
+            0.699999,
+            0.770323
+          ],
+          "cost_per_1k": 1475428.5,
+          "line_accuracy": 0.739964,
+          "gain": -0.003297,
+          "hull_accuracy": 0.743666,
+          "hull_gain": -0.006999,
+          "share": {
+            "qwen2.5:0.5b": 0.001667,
+            "qwen2.5:1.5b": 0.115,
+            "qwen2.5:3b": 0.883333
+          }
+        },
+        {
+          "target": 0.67,
+          "accuracy": 0.74,
+          "accuracy_ci": [
+            0.703454,
+            0.773492
+          ],
+          "cost_per_1k": 1489996.266667,
+          "line_accuracy": 0.743754,
+          "gain": -0.003754,
+          "hull_accuracy": 0.746692,
+          "hull_gain": -0.006692,
+          "share": {
+            "qwen2.5:1.5b": 0.1,
+            "qwen2.5:3b": 0.9
+          }
+        },
+        {
+          "target": 0.68,
+          "accuracy": 0.746667,
+          "accuracy_ci": [
+            0.710373,
+            0.779822
+          ],
+          "cost_per_1k": 1509295.2,
+          "line_accuracy": 0.748774,
+          "gain": -0.002107,
+          "hull_accuracy": 0.750701,
+          "hull_gain": -0.004034,
+          "share": {
+            "qwen2.5:1.5b": 0.078333,
+            "qwen2.5:3b": 0.921667
+          }
+        },
+        {
+          "target": 0.69,
+          "accuracy": 0.748333,
+          "accuracy_ci": [
+            0.712104,
+            0.781403
+          ],
+          "cost_per_1k": 1515354.766667,
+          "line_accuracy": 0.750351,
+          "gain": -0.002018,
+          "hull_accuracy": 0.751959,
+          "hull_gain": -0.003626,
+          "share": {
+            "qwen2.5:1.5b": 0.068333,
+            "qwen2.5:3b": 0.931667
+          }
+        },
+        {
+          "target": 0.7,
+          "accuracy": 0.748333,
+          "accuracy_ci": [
+            0.712104,
+            0.781403
+          ],
+          "cost_per_1k": 1519282.5,
+          "line_accuracy": 0.751372,
+          "gain": -0.003039,
+          "hull_accuracy": 0.752775,
+          "hull_gain": -0.004442,
+          "share": {
+            "qwen2.5:1.5b": 0.058333,
+            "qwen2.5:3b": 0.941667
+          }
+        },
+        {
+          "target": 0.71,
+          "accuracy": 0.751667,
+          "accuracy_ci": [
+            0.715568,
+            0.784563
+          ],
+          "cost_per_1k": 1522974.166667,
+          "line_accuracy": 0.752333,
+          "gain": -0.000666,
+          "hull_accuracy": 0.753542,
+          "hull_gain": -0.001875,
+          "share": {
+            "qwen2.5:1.5b": 0.048333,
+            "qwen2.5:3b": 0.951667
+          }
+        },
+        {
+          "target": 0.72,
+          "accuracy": 0.755,
+          "accuracy_ci": [
+            0.719036,
+            0.78772
+          ],
+          "cost_per_1k": 1527274,
+          "line_accuracy": 0.753451,
+          "gain": 0.001549,
+          "hull_accuracy": 0.754435,
+          "hull_gain": 0.000565,
+          "share": {
+            "qwen2.5:1.5b": 0.036667,
+            "qwen2.5:3b": 0.963333
+          }
+        },
+        {
+          "target": 0.73,
+          "accuracy": 0.753333,
+          "accuracy_ci": [
+            0.717302,
+            0.786142
+          ],
+          "cost_per_1k": 1527733.866667,
+          "line_accuracy": 0.753571,
+          "gain": -0.000238,
+          "hull_accuracy": 0.754531,
+          "hull_gain": -0.001198,
+          "share": {
+            "qwen2.5:1.5b": 0.035,
+            "qwen2.5:3b": 0.965
+          }
+        },
+        {
+          "target": 0.74,
+          "accuracy": 0.756667,
+          "accuracy_ci": [
+            0.72077,
+            0.789297
+          ],
+          "cost_per_1k": 1534569.933333,
+          "line_accuracy": 0.755349,
+          "gain": 0.001318,
+          "hull_accuracy": 0.755951,
+          "hull_gain": 0.000716,
+          "share": {
+            "qwen2.5:1.5b": 0.026667,
+            "qwen2.5:3b": 0.973333
+          }
+        },
+        {
+          "target": 0.75,
+          "accuracy": 0.756667,
+          "accuracy_ci": [
+            0.72077,
+            0.789297
+          ],
+          "cost_per_1k": 1536905.633333,
+          "line_accuracy": 0.755957,
+          "gain": 0.00071,
+          "hull_accuracy": 0.756436,
+          "hull_gain": 0.000231,
+          "share": {
+            "qwen2.5:1.5b": 0.02,
+            "qwen2.5:3b": 0.98
+          }
+        },
+        {
+          "target": 0.76,
+          "accuracy": 0.758333,
+          "accuracy_ci": [
+            0.722506,
+            0.790874
+          ],
+          "cost_per_1k": 1542671.333333,
+          "line_accuracy": 0.757457,
+          "gain": 0.000876,
+          "hull_accuracy": 0.757634,
+          "hull_gain": 0.000699,
+          "share": {
+            "qwen2.5:1.5b": 0.013333,
+            "qwen2.5:3b": 0.986667
+          }
+        },
+        {
+          "target": 0.77,
+          "accuracy": 0.758333,
+          "accuracy_ci": [
+            0.722506,
+            0.790874
+          ],
+          "cost_per_1k": 1543177.666667,
+          "line_accuracy": 0.757589,
+          "gain": 0.000744,
+          "hull_accuracy": 0.757739,
+          "hull_gain": 0.000594,
+          "share": {
+            "qwen2.5:1.5b": 0.011667,
+            "qwen2.5:3b": 0.988333
+          }
+        },
+        {
+          "target": 0.78,
+          "accuracy": 0.758333,
+          "accuracy_ci": [
+            0.722506,
+            0.790874
+          ],
+          "cost_per_1k": 1543632.366667,
+          "line_accuracy": 0.757707,
+          "gain": 0.000626,
+          "hull_accuracy": 0.757833,
+          "hull_gain": 0.0005,
+          "share": {
+            "qwen2.5:1.5b": 0.01,
+            "qwen2.5:3b": 0.99
+          }
+        },
+        {
+          "target": 0.79,
+          "accuracy": 0.756667,
+          "accuracy_ci": [
+            0.72077,
+            0.789297
+          ],
+          "cost_per_1k": 1544412.7,
+          "line_accuracy": 0.75791,
+          "gain": -0.001243,
+          "hull_accuracy": 0.757995,
+          "hull_gain": -0.001328,
+          "share": {
+            "qwen2.5:1.5b": 0.006667,
+            "qwen2.5:3b": 0.993333
+          }
+        },
+        {
+          "target": 0.8,
+          "accuracy": 0.758333,
+          "accuracy_ci": [
+            0.722506,
+            0.790874
+          ],
+          "cost_per_1k": 1545218.733333,
+          "line_accuracy": 0.75812,
+          "gain": 0.000213,
+          "hull_accuracy": 0.758163,
+          "hull_gain": 0.00017,
+          "share": {
+            "qwen2.5:1.5b": 0.003333,
+            "qwen2.5:3b": 0.996667
+          }
+        },
+        {
+          "target": 0.81,
+          "accuracy": 0.758333,
+          "accuracy_ci": [
+            0.722506,
+            0.790874
+          ],
+          "cost_per_1k": 1545616.6,
+          "line_accuracy": 0.758223,
+          "gain": 0.00011,
+          "hull_accuracy": 0.758245,
+          "hull_gain": 0.000088,
+          "share": {
+            "qwen2.5:1.5b": 0.001667,
+            "qwen2.5:3b": 0.998333
+          }
+        },
+        {
+          "target": 0.83,
+          "accuracy": 0.758333,
+          "accuracy_ci": [
+            0.722506,
+            0.790874
+          ],
+          "cost_per_1k": 1546040.3,
+          "line_accuracy": 0.758333,
+          "gain": -0,
+          "hull_accuracy": 0.758333,
+          "hull_gain": -0,
+          "share": {
+            "qwen2.5:3b": 1
+          }
+        }
+      ],
+      "auc_gain": 0.01128,
+      "auc_hull_gain": -0.012697,
+      "auc_gain_ci": [
+        -0.010239,
+        0.032965
+      ],
+      "auc_hull_gain_ci": [
+        -0.027287,
+        0.00111
+      ],
+      "brier": {
+        "qwen2.5:0.5b": 0.23755,
+        "qwen2.5:1.5b": 0.240884,
+        "qwen2.5:3b": 0.178143
+      },
+      "auroc": {
+        "qwen2.5:0.5b": 0.600734,
+        "qwen2.5:1.5b": 0.566481,
+        "qwen2.5:3b": 0.61875
+      }
+    },
+    {
+      "name": "router-cheap",
+      "description": "the nine cheap text features alone",
+      "knob": "target",
+      "frontier": [
+        {
+          "target": 0,
+          "accuracy": 0.421667,
+          "accuracy_ci": [
+            0.382774,
+            0.461556
+          ],
+          "cost_per_1k": 251877.966667,
+          "line_accuracy": 0.421667,
+          "gain": 0,
+          "hull_accuracy": 0.421667,
+          "hull_gain": 0,
+          "share": {
+            "qwen2.5:0.5b": 1
+          }
+        },
+        {
+          "target": 0.06,
+          "accuracy": 0.421667,
+          "accuracy_ci": [
+            0.382774,
+            0.461556
+          ],
+          "cost_per_1k": 254769.2,
+          "line_accuracy": 0.422419,
+          "gain": -0.000752,
+          "hull_accuracy": 0.422784,
+          "hull_gain": -0.001117,
+          "share": {
+            "qwen2.5:0.5b": 0.996667,
+            "qwen2.5:1.5b": 0.003333
+          }
+        },
+        {
+          "target": 0.07,
+          "accuracy": 0.421667,
+          "accuracy_ci": [
+            0.382774,
+            0.461556
+          ],
+          "cost_per_1k": 256391.8,
+          "line_accuracy": 0.422841,
+          "gain": -0.001174,
+          "hull_accuracy": 0.423411,
+          "hull_gain": -0.001744,
+          "share": {
+            "qwen2.5:0.5b": 0.993333,
+            "qwen2.5:1.5b": 0.006667
+          }
+        },
+        {
+          "target": 0.08,
+          "accuracy": 0.421667,
+          "accuracy_ci": [
+            0.382774,
+            0.461556
+          ],
+          "cost_per_1k": 257298.3,
+          "line_accuracy": 0.423077,
+          "gain": -0.00141,
+          "hull_accuracy": 0.423762,
+          "hull_gain": -0.002095,
+          "share": {
+            "qwen2.5:0.5b": 0.991667,
+            "qwen2.5:1.5b": 0.008333
+          }
+        },
+        {
+          "target": 0.09,
+          "accuracy": 0.423333,
+          "accuracy_ci": [
+            0.38441,
+            0.463233
+          ],
+          "cost_per_1k": 261933.5,
+          "line_accuracy": 0.424283,
+          "gain": -0.00095,
+          "hull_accuracy": 0.425553,
+          "hull_gain": -0.00222,
+          "share": {
+            "qwen2.5:0.5b": 0.991667,
+            "qwen2.5:1.5b": 0.003333,
+            "qwen2.5:3b": 0.005
+          }
+        },
+        {
+          "target": 0.1,
+          "accuracy": 0.423333,
+          "accuracy_ci": [
+            0.38441,
+            0.463233
+          ],
+          "cost_per_1k": 262511.7,
+          "line_accuracy": 0.424433,
+          "gain": -0.0011,
+          "hull_accuracy": 0.425777,
+          "hull_gain": -0.002444,
+          "share": {
+            "qwen2.5:0.5b": 0.99,
+            "qwen2.5:1.5b": 0.005,
+            "qwen2.5:3b": 0.005
+          }
+        },
+        {
+          "target": 0.12,
+          "accuracy": 0.425,
+          "accuracy_ci": [
+            0.386045,
+            0.464909
+          ],
+          "cost_per_1k": 265820.4,
+          "line_accuracy": 0.425294,
+          "gain": -0.000294,
+          "hull_accuracy": 0.427056,
+          "hull_gain": -0.002056,
+          "share": {
+            "qwen2.5:0.5b": 0.986667,
+            "qwen2.5:1.5b": 0.006667,
+            "qwen2.5:3b": 0.006667
+          }
+        },
+        {
+          "target": 0.13,
+          "accuracy": 0.425,
+          "accuracy_ci": [
+            0.386045,
+            0.464909
+          ],
+          "cost_per_1k": 269607.9,
+          "line_accuracy": 0.426279,
+          "gain": -0.001279,
+          "hull_accuracy": 0.42852,
+          "hull_gain": -0.00352,
+          "share": {
+            "qwen2.5:0.5b": 0.985,
+            "qwen2.5:1.5b": 0.006667,
+            "qwen2.5:3b": 0.008333
+          }
+        },
+        {
+          "target": 0.14,
+          "accuracy": 0.425,
+          "accuracy_ci": [
+            0.386045,
+            0.464909
+          ],
+          "cost_per_1k": 272704.933333,
+          "line_accuracy": 0.427085,
+          "gain": -0.002085,
+          "hull_accuracy": 0.429717,
+          "hull_gain": -0.004717,
+          "share": {
+            "qwen2.5:0.5b": 0.98,
+            "qwen2.5:1.5b": 0.011667,
+            "qwen2.5:3b": 0.008333
+          }
+        },
+        {
+          "target": 0.15,
+          "accuracy": 0.425,
+          "accuracy_ci": [
+            0.386045,
+            0.464909
+          ],
+          "cost_per_1k": 276701.466667,
+          "line_accuracy": 0.428124,
+          "gain": -0.003124,
+          "hull_accuracy": 0.431261,
+          "hull_gain": -0.006261,
+          "share": {
+            "qwen2.5:0.5b": 0.975,
+            "qwen2.5:1.5b": 0.016667,
+            "qwen2.5:3b": 0.008333
+          }
+        },
+        {
+          "target": 0.16,
+          "accuracy": 0.426667,
+          "accuracy_ci": [
+            0.387682,
+            0.466585
+          ],
+          "cost_per_1k": 280437.666667,
+          "line_accuracy": 0.429096,
+          "gain": -0.002429,
+          "hull_accuracy": 0.432706,
+          "hull_gain": -0.006039,
+          "share": {
+            "qwen2.5:0.5b": 0.97,
+            "qwen2.5:1.5b": 0.018333,
+            "qwen2.5:3b": 0.011667
+          }
+        },
+        {
+          "target": 0.18,
+          "accuracy": 0.425,
+          "accuracy_ci": [
+            0.386045,
+            0.464909
+          ],
+          "cost_per_1k": 282947.4,
+          "line_accuracy": 0.429749,
+          "gain": -0.004749,
+          "hull_accuracy": 0.433676,
+          "hull_gain": -0.008676,
+          "share": {
+            "qwen2.5:0.5b": 0.965,
+            "qwen2.5:1.5b": 0.023333,
+            "qwen2.5:3b": 0.011667
+          }
+        },
+        {
+          "target": 0.19,
+          "accuracy": 0.428333,
+          "accuracy_ci": [
+            0.389318,
+            0.46826
+          ],
+          "cost_per_1k": 286740.466667,
+          "line_accuracy": 0.430736,
+          "gain": -0.002403,
+          "hull_accuracy": 0.435142,
+          "hull_gain": -0.006809,
+          "share": {
+            "qwen2.5:0.5b": 0.958333,
+            "qwen2.5:1.5b": 0.03,
+            "qwen2.5:3b": 0.011667
+          }
+        },
+        {
+          "target": 0.2,
+          "accuracy": 0.43,
+          "accuracy_ci": [
+            0.390955,
+            0.469935
+          ],
+          "cost_per_1k": 289154.233333,
+          "line_accuracy": 0.431364,
+          "gain": -0.001364,
+          "hull_accuracy": 0.436075,
+          "hull_gain": -0.006075,
+          "share": {
+            "qwen2.5:0.5b": 0.955,
+            "qwen2.5:1.5b": 0.031667,
+            "qwen2.5:3b": 0.013333
+          }
+        },
+        {
+          "target": 0.21,
+          "accuracy": 0.426667,
+          "accuracy_ci": [
+            0.387682,
+            0.466585
+          ],
+          "cost_per_1k": 294981.633333,
+          "line_accuracy": 0.43288,
+          "gain": -0.006213,
+          "hull_accuracy": 0.438327,
+          "hull_gain": -0.01166,
+          "share": {
+            "qwen2.5:0.5b": 0.946667,
+            "qwen2.5:1.5b": 0.038333,
+            "qwen2.5:3b": 0.015
+          }
+        },
+        {
+          "target": 0.22,
+          "accuracy": 0.426667,
+          "accuracy_ci": [
+            0.387682,
+            0.466585
+          ],
+          "cost_per_1k": 299843.133333,
+          "line_accuracy": 0.434144,
+          "gain": -0.007477,
+          "hull_accuracy": 0.440206,
+          "hull_gain": -0.013539,
+          "share": {
+            "qwen2.5:0.5b": 0.936667,
+            "qwen2.5:1.5b": 0.048333,
+            "qwen2.5:3b": 0.015
+          }
+        },
+        {
+          "target": 0.23,
+          "accuracy": 0.43,
+          "accuracy_ci": [
+            0.390955,
+            0.469935
+          ],
+          "cost_per_1k": 306833.866667,
+          "line_accuracy": 0.435963,
+          "gain": -0.005963,
+          "hull_accuracy": 0.442908,
+          "hull_gain": -0.012908,
+          "share": {
+            "qwen2.5:0.5b": 0.925,
+            "qwen2.5:1.5b": 0.055,
+            "qwen2.5:3b": 0.02
+          }
+        },
+        {
+          "target": 0.24,
+          "accuracy": 0.431667,
+          "accuracy_ci": [
+            0.392593,
+            0.47161
+          ],
+          "cost_per_1k": 316871.1,
+          "line_accuracy": 0.438574,
+          "gain": -0.006907,
+          "hull_accuracy": 0.446788,
+          "hull_gain": -0.015121,
+          "share": {
+            "qwen2.5:0.5b": 0.916667,
+            "qwen2.5:1.5b": 0.06,
+            "qwen2.5:3b": 0.023333
+          }
+        },
+        {
+          "target": 0.25,
+          "accuracy": 0.435,
+          "accuracy_ci": [
+            0.39587,
+            0.474957
+          ],
+          "cost_per_1k": 321915.766667,
+          "line_accuracy": 0.439886,
+          "gain": -0.004886,
+          "hull_accuracy": 0.448738,
+          "hull_gain": -0.013738,
+          "share": {
+            "qwen2.5:0.5b": 0.908333,
+            "qwen2.5:1.5b": 0.068333,
+            "qwen2.5:3b": 0.023333
+          }
+        },
+        {
+          "target": 0.26,
+          "accuracy": 0.433333,
+          "accuracy_ci": [
+            0.394231,
+            0.473284
+          ],
+          "cost_per_1k": 332468.966667,
+          "line_accuracy": 0.442632,
+          "gain": -0.009299,
+          "hull_accuracy": 0.452817,
+          "hull_gain": -0.019484,
+          "share": {
+            "qwen2.5:0.5b": 0.901667,
+            "qwen2.5:1.5b": 0.065,
+            "qwen2.5:3b": 0.033333
+          }
+        },
+        {
+          "target": 0.27,
+          "accuracy": 0.433333,
+          "accuracy_ci": [
+            0.394231,
+            0.473284
+          ],
+          "cost_per_1k": 337424.266667,
+          "line_accuracy": 0.443921,
+          "gain": -0.010588,
+          "hull_accuracy": 0.454732,
+          "hull_gain": -0.021399,
+          "share": {
+            "qwen2.5:0.5b": 0.891667,
+            "qwen2.5:1.5b": 0.073333,
+            "qwen2.5:3b": 0.035
+          }
+        },
+        {
+          "target": 0.28,
+          "accuracy": 0.431667,
+          "accuracy_ci": [
+            0.392593,
+            0.47161
+          ],
+          "cost_per_1k": 349809.366667,
+          "line_accuracy": 0.447143,
+          "gain": -0.015476,
+          "hull_accuracy": 0.459519,
+          "hull_gain": -0.027852,
+          "share": {
+            "qwen2.5:0.5b": 0.881667,
+            "qwen2.5:1.5b": 0.075,
+            "qwen2.5:3b": 0.043333
+          }
+        },
+        {
+          "target": 0.29,
+          "accuracy": 0.436667,
+          "accuracy_ci": [
+            0.397509,
+            0.476631
+          ],
+          "cost_per_1k": 362808.9,
+          "line_accuracy": 0.450525,
+          "gain": -0.013858,
+          "hull_accuracy": 0.464544,
+          "hull_gain": -0.027877,
+          "share": {
+            "qwen2.5:0.5b": 0.875,
+            "qwen2.5:1.5b": 0.075,
+            "qwen2.5:3b": 0.05
+          }
+        },
+        {
+          "target": 0.3,
+          "accuracy": 0.445,
+          "accuracy_ci": [
+            0.40571,
+            0.48499
+          ],
+          "cost_per_1k": 374272.566667,
+          "line_accuracy": 0.453507,
+          "gain": -0.008507,
+          "hull_accuracy": 0.468974,
+          "hull_gain": -0.023974,
+          "share": {
+            "qwen2.5:0.5b": 0.861667,
+            "qwen2.5:1.5b": 0.083333,
+            "qwen2.5:3b": 0.055
+          }
+        },
+        {
+          "target": 0.31,
+          "accuracy": 0.445,
+          "accuracy_ci": [
+            0.40571,
+            0.48499
+          ],
+          "cost_per_1k": 387408.933333,
+          "line_accuracy": 0.456924,
+          "gain": -0.011924,
+          "hull_accuracy": 0.474052,
+          "hull_gain": -0.029052,
+          "share": {
+            "qwen2.5:0.5b": 0.846667,
+            "qwen2.5:1.5b": 0.095,
+            "qwen2.5:3b": 0.058333
+          }
+        },
+        {
+          "target": 0.32,
+          "accuracy": 0.45,
+          "accuracy_ci": [
+            0.410637,
+            0.49
+          ],
+          "cost_per_1k": 399415.1,
+          "line_accuracy": 0.460047,
+          "gain": -0.010047,
+          "hull_accuracy": 0.478693,
+          "hull_gain": -0.028693,
+          "share": {
+            "qwen2.5:0.5b": 0.828333,
+            "qwen2.5:1.5b": 0.106667,
+            "qwen2.5:3b": 0.065
+          }
+        },
+        {
+          "target": 0.33,
+          "accuracy": 0.455,
+          "accuracy_ci": [
+            0.415567,
+            0.495006
+          ],
+          "cost_per_1k": 423137.166667,
+          "line_accuracy": 0.466218,
+          "gain": -0.011218,
+          "hull_accuracy": 0.487862,
+          "hull_gain": -0.032862,
+          "share": {
+            "qwen2.5:0.5b": 0.806667,
+            "qwen2.5:1.5b": 0.118333,
+            "qwen2.5:3b": 0.075
+          }
+        },
+        {
+          "target": 0.34,
+          "accuracy": 0.455,
+          "accuracy_ci": [
+            0.415567,
+            0.495006
+          ],
+          "cost_per_1k": 430730.133333,
+          "line_accuracy": 0.468194,
+          "gain": -0.013194,
+          "hull_accuracy": 0.490796,
+          "hull_gain": -0.035796,
+          "share": {
+            "qwen2.5:0.5b": 0.793333,
+            "qwen2.5:1.5b": 0.128333,
+            "qwen2.5:3b": 0.078333
+          }
+        },
+        {
+          "target": 0.35,
+          "accuracy": 0.461667,
+          "accuracy_ci": [
+            0.422147,
+            0.501674
+          ],
+          "cost_per_1k": 448631.066667,
+          "line_accuracy": 0.472851,
+          "gain": -0.011184,
+          "hull_accuracy": 0.497715,
+          "hull_gain": -0.036048,
+          "share": {
+            "qwen2.5:0.5b": 0.781667,
+            "qwen2.5:1.5b": 0.128333,
+            "qwen2.5:3b": 0.09
+          }
+        },
+        {
+          "target": 0.36,
+          "accuracy": 0.466667,
+          "accuracy_ci": [
+            0.427087,
+            0.506671
+          ],
+          "cost_per_1k": 471239.666667,
+          "line_accuracy": 0.478732,
+          "gain": -0.012065,
+          "hull_accuracy": 0.506454,
+          "hull_gain": -0.039787,
+          "share": {
+            "qwen2.5:0.5b": 0.756667,
+            "qwen2.5:1.5b": 0.143333,
+            "qwen2.5:3b": 0.1
+          }
+        },
+        {
+          "target": 0.37,
+          "accuracy": 0.478333,
+          "accuracy_ci": [
+            0.438628,
+            0.518314
+          ],
+          "cost_per_1k": 490873.466667,
+          "line_accuracy": 0.48384,
+          "gain": -0.005507,
+          "hull_accuracy": 0.514043,
+          "hull_gain": -0.03571,
+          "share": {
+            "qwen2.5:0.5b": 0.72,
+            "qwen2.5:1.5b": 0.176667,
+            "qwen2.5:3b": 0.103333
+          }
+        },
+        {
+          "target": 0.38,
+          "accuracy": 0.485,
+          "accuracy_ci": [
+            0.445233,
+            0.524958
+          ],
+          "cost_per_1k": 523636.166667,
+          "line_accuracy": 0.492363,
+          "gain": -0.007363,
+          "hull_accuracy": 0.526706,
+          "hull_gain": -0.041706,
+          "share": {
+            "qwen2.5:0.5b": 0.698333,
+            "qwen2.5:1.5b": 0.18,
+            "qwen2.5:3b": 0.121667
+          }
+        },
+        {
+          "target": 0.39,
+          "accuracy": 0.491667,
+          "accuracy_ci": [
+            0.451845,
+            0.531594
+          ],
+          "cost_per_1k": 543602.4,
+          "line_accuracy": 0.497557,
+          "gain": -0.00589,
+          "hull_accuracy": 0.534424,
+          "hull_gain": -0.042757,
+          "share": {
+            "qwen2.5:0.5b": 0.665,
+            "qwen2.5:1.5b": 0.206667,
+            "qwen2.5:3b": 0.128333
+          }
+        },
+        {
+          "target": 0.4,
+          "accuracy": 0.495,
+          "accuracy_ci": [
+            0.455154,
+            0.53491
+          ],
+          "cost_per_1k": 561446.133333,
+          "line_accuracy": 0.502199,
+          "gain": -0.007199,
+          "hull_accuracy": 0.541321,
+          "hull_gain": -0.046321,
+          "share": {
+            "qwen2.5:0.5b": 0.636667,
+            "qwen2.5:1.5b": 0.228333,
+            "qwen2.5:3b": 0.135
+          }
+        },
+        {
+          "target": 0.41,
+          "accuracy": 0.508333,
+          "accuracy_ci": [
+            0.468406,
+            0.548155
+          ],
+          "cost_per_1k": 588550.066667,
+          "line_accuracy": 0.509249,
+          "gain": -0.000916,
+          "hull_accuracy": 0.551797,
+          "hull_gain": -0.043464,
+          "share": {
+            "qwen2.5:0.5b": 0.61,
+            "qwen2.5:1.5b": 0.243333,
+            "qwen2.5:3b": 0.146667
+          }
+        },
+        {
+          "target": 0.42,
+          "accuracy": 0.518333,
+          "accuracy_ci": [
+            0.478363,
+            0.55807
+          ],
+          "cost_per_1k": 609176.866667,
+          "line_accuracy": 0.514615,
+          "gain": 0.003718,
+          "hull_accuracy": 0.559769,
+          "hull_gain": -0.041436,
+          "share": {
+            "qwen2.5:0.5b": 0.575,
+            "qwen2.5:1.5b": 0.27,
+            "qwen2.5:3b": 0.155
+          }
+        },
+        {
+          "target": 0.43,
+          "accuracy": 0.528333,
+          "accuracy_ci": [
+            0.488337,
+            0.56797
+          ],
+          "cost_per_1k": 633306.266667,
+          "line_accuracy": 0.520892,
+          "gain": 0.007441,
+          "hull_accuracy": 0.568743,
+          "hull_gain": -0.04041,
+          "share": {
+            "qwen2.5:0.5b": 0.536667,
+            "qwen2.5:1.5b": 0.298333,
+            "qwen2.5:3b": 0.165
+          }
+        },
+        {
+          "target": 0.44,
+          "accuracy": 0.541667,
+          "accuracy_ci": [
+            0.501659,
+            0.581144
+          ],
+          "cost_per_1k": 668191.133333,
+          "line_accuracy": 0.529967,
+          "gain": 0.0117,
+          "hull_accuracy": 0.575989,
+          "hull_gain": -0.034322,
+          "share": {
+            "qwen2.5:0.5b": 0.503333,
+            "qwen2.5:1.5b": 0.318333,
+            "qwen2.5:3b": 0.178333
+          }
+        },
+        {
+          "target": 0.45,
+          "accuracy": 0.548333,
+          "accuracy_ci": [
+            0.508331,
+            0.58772
+          ],
+          "cost_per_1k": 693900.066667,
+          "line_accuracy": 0.536655,
+          "gain": 0.011678,
+          "hull_accuracy": 0.58133,
+          "hull_gain": -0.032997,
+          "share": {
+            "qwen2.5:0.5b": 0.456667,
+            "qwen2.5:1.5b": 0.358333,
+            "qwen2.5:3b": 0.185
+          }
+        },
+        {
+          "target": 0.46,
+          "accuracy": 0.551667,
+          "accuracy_ci": [
+            0.51167,
+            0.591006
+          ],
+          "cost_per_1k": 722774.733333,
+          "line_accuracy": 0.544167,
+          "gain": 0.0075,
+          "hull_accuracy": 0.587327,
+          "hull_gain": -0.03566,
+          "share": {
+            "qwen2.5:0.5b": 0.423333,
+            "qwen2.5:1.5b": 0.376667,
+            "qwen2.5:3b": 0.2
+          }
+        },
+        {
+          "target": 0.47,
+          "accuracy": 0.565,
+          "accuracy_ci": [
+            0.525043,
+            0.60413
+          ],
+          "cost_per_1k": 767148.066667,
+          "line_accuracy": 0.55571,
+          "gain": 0.00929,
+          "hull_accuracy": 0.596544,
+          "hull_gain": -0.031544,
+          "share": {
+            "qwen2.5:0.5b": 0.391667,
+            "qwen2.5:1.5b": 0.388333,
+            "qwen2.5:3b": 0.22
+          }
+        },
+        {
+          "target": 0.48,
+          "accuracy": 0.571667,
+          "accuracy_ci": [
+            0.53174,
+            0.610682
+          ],
+          "cost_per_1k": 810594.133333,
+          "line_accuracy": 0.567013,
+          "gain": 0.004654,
+          "hull_accuracy": 0.605569,
+          "hull_gain": -0.033902,
+          "share": {
+            "qwen2.5:0.5b": 0.353333,
+            "qwen2.5:1.5b": 0.405,
+            "qwen2.5:3b": 0.241667
+          }
+        },
+        {
+          "target": 0.49,
+          "accuracy": 0.581667,
+          "accuracy_ci": [
+            0.541799,
+            0.620495
+          ],
+          "cost_per_1k": 840495.233333,
+          "line_accuracy": 0.574791,
+          "gain": 0.006876,
+          "hull_accuracy": 0.61178,
+          "hull_gain": -0.030113,
+          "share": {
+            "qwen2.5:0.5b": 0.321667,
+            "qwen2.5:1.5b": 0.423333,
+            "qwen2.5:3b": 0.255
+          }
+        },
+        {
+          "target": 0.5,
+          "accuracy": 0.603333,
+          "accuracy_ci": [
+            0.563651,
+            0.641701
+          ],
+          "cost_per_1k": 894290.666667,
+          "line_accuracy": 0.588786,
+          "gain": 0.014547,
+          "hull_accuracy": 0.622954,
+          "hull_gain": -0.019621,
+          "share": {
+            "qwen2.5:0.5b": 0.275,
+            "qwen2.5:1.5b": 0.443333,
+            "qwen2.5:3b": 0.281667
+          }
+        },
+        {
+          "target": 0.51,
+          "accuracy": 0.615,
+          "accuracy_ci": [
+            0.575451,
+            0.653086
+          ],
+          "cost_per_1k": 928090.066667,
+          "line_accuracy": 0.597578,
+          "gain": 0.017422,
+          "hull_accuracy": 0.629975,
+          "hull_gain": -0.014975,
+          "share": {
+            "qwen2.5:0.5b": 0.231667,
+            "qwen2.5:1.5b": 0.468333,
+            "qwen2.5:3b": 0.3
+          }
+        },
+        {
+          "target": 0.52,
+          "accuracy": 0.628333,
+          "accuracy_ci": [
+            0.588964,
+            0.66607
+          ],
+          "cost_per_1k": 964365.366667,
+          "line_accuracy": 0.607015,
+          "gain": 0.021318,
+          "hull_accuracy": 0.63751,
+          "hull_gain": -0.009177,
+          "share": {
+            "qwen2.5:0.5b": 0.201667,
+            "qwen2.5:1.5b": 0.478333,
+            "qwen2.5:3b": 0.32
+          }
+        },
+        {
+          "target": 0.53,
+          "accuracy": 0.635,
+          "accuracy_ci": [
+            0.595733,
+            0.67255
+          ],
+          "cost_per_1k": 993053,
+          "line_accuracy": 0.614478,
+          "gain": 0.020522,
+          "hull_accuracy": 0.643469,
+          "hull_gain": -0.008469,
+          "share": {
+            "qwen2.5:0.5b": 0.168333,
+            "qwen2.5:1.5b": 0.49,
+            "qwen2.5:3b": 0.341667
+          }
+        },
+        {
+          "target": 0.54,
+          "accuracy": 0.641667,
+          "accuracy_ci": [
+            0.602509,
+            0.679022
+          ],
+          "cost_per_1k": 1022961.2,
+          "line_accuracy": 0.622258,
+          "gain": 0.019409,
+          "hull_accuracy": 0.649681,
+          "hull_gain": -0.008014,
+          "share": {
+            "qwen2.5:0.5b": 0.13,
+            "qwen2.5:1.5b": 0.506667,
+            "qwen2.5:3b": 0.363333
+          }
+        },
+        {
+          "target": 0.55,
+          "accuracy": 0.648333,
+          "accuracy_ci": [
+            0.609293,
+            0.685486
+          ],
+          "cost_per_1k": 1050338.466667,
+          "line_accuracy": 0.62938,
+          "gain": 0.018953,
+          "hull_accuracy": 0.655368,
+          "hull_gain": -0.007035,
+          "share": {
+            "qwen2.5:0.5b": 0.111667,
+            "qwen2.5:1.5b": 0.505,
+            "qwen2.5:3b": 0.383333
+          }
+        },
+        {
+          "target": 0.56,
+          "accuracy": 0.653333,
+          "accuracy_ci": [
+            0.614387,
+            0.690329
+          ],
+          "cost_per_1k": 1080119.633333,
+          "line_accuracy": 0.637128,
+          "gain": 0.016205,
+          "hull_accuracy": 0.661554,
+          "hull_gain": -0.008221,
+          "share": {
+            "qwen2.5:0.5b": 0.1,
+            "qwen2.5:1.5b": 0.491667,
+            "qwen2.5:3b": 0.408333
+          }
+        },
+        {
+          "target": 0.57,
+          "accuracy": 0.663333,
+          "accuracy_ci": [
+            0.624588,
+            0.700001
+          ],
+          "cost_per_1k": 1112441.933333,
+          "line_accuracy": 0.645536,
+          "gain": 0.017797,
+          "hull_accuracy": 0.668268,
+          "hull_gain": -0.004935,
+          "share": {
+            "qwen2.5:0.5b": 0.086667,
+            "qwen2.5:1.5b": 0.481667,
+            "qwen2.5:3b": 0.431667
+          }
+        },
+        {
+          "target": 0.58,
+          "accuracy": 0.675,
+          "accuracy_ci": [
+            0.636512,
+            0.711261
+          ],
+          "cost_per_1k": 1144555.8,
+          "line_accuracy": 0.65389,
+          "gain": 0.02111,
+          "hull_accuracy": 0.674938,
+          "hull_gain": 0.000062,
+          "share": {
+            "qwen2.5:0.5b": 0.063333,
+            "qwen2.5:1.5b": 0.471667,
+            "qwen2.5:3b": 0.465
+          }
+        },
+        {
+          "target": 0.59,
+          "accuracy": 0.673333,
+          "accuracy_ci": [
+            0.634807,
+            0.709654
+          ],
+          "cost_per_1k": 1176871.466667,
+          "line_accuracy": 0.662297,
+          "gain": 0.011036,
+          "hull_accuracy": 0.681651,
+          "hull_gain": -0.008318,
+          "share": {
+            "qwen2.5:0.5b": 0.043333,
+            "qwen2.5:1.5b": 0.468333,
+            "qwen2.5:3b": 0.488333
+          }
+        },
+        {
+          "target": 0.6,
+          "accuracy": 0.671667,
+          "accuracy_ci": [
+            0.633103,
+            0.708046
+          ],
+          "cost_per_1k": 1192073.566667,
+          "line_accuracy": 0.666252,
+          "gain": 0.005415,
+          "hull_accuracy": 0.684809,
+          "hull_gain": -0.013142,
+          "share": {
+            "qwen2.5:0.5b": 0.033333,
+            "qwen2.5:1.5b": 0.46,
+            "qwen2.5:3b": 0.506667
+          }
+        },
+        {
+          "target": 0.61,
+          "accuracy": 0.69,
+          "accuracy_ci": [
+            0.651883,
+            0.7257
+          ],
+          "cost_per_1k": 1223932.066667,
+          "line_accuracy": 0.674539,
+          "gain": 0.015461,
+          "hull_accuracy": 0.691426,
+          "hull_gain": -0.001426,
+          "share": {
+            "qwen2.5:0.5b": 0.025,
+            "qwen2.5:1.5b": 0.435,
+            "qwen2.5:3b": 0.54
+          }
+        },
+        {
+          "target": 0.62,
+          "accuracy": 0.696667,
+          "accuracy_ci": [
+            0.658729,
+            0.732103
+          ],
+          "cost_per_1k": 1246746.833333,
+          "line_accuracy": 0.680474,
+          "gain": 0.016193,
+          "hull_accuracy": 0.696165,
+          "hull_gain": 0.000502,
+          "share": {
+            "qwen2.5:0.5b": 0.015,
+            "qwen2.5:1.5b": 0.416667,
+            "qwen2.5:3b": 0.568333
+          }
+        },
+        {
+          "target": 0.63,
+          "accuracy": 0.701667,
+          "accuracy_ci": [
+            0.663869,
+            0.736899
+          ],
+          "cost_per_1k": 1259758.033333,
+          "line_accuracy": 0.683859,
+          "gain": 0.017808,
+          "hull_accuracy": 0.698868,
+          "hull_gain": 0.002799,
+          "share": {
+            "qwen2.5:0.5b": 0.013333,
+            "qwen2.5:1.5b": 0.4,
+            "qwen2.5:3b": 0.586667
+          }
+        },
+        {
+          "target": 0.64,
+          "accuracy": 0.71,
+          "accuracy_ci": [
+            0.672447,
+            0.744881
+          ],
+          "cost_per_1k": 1297044.2,
+          "line_accuracy": 0.693559,
+          "gain": 0.016441,
+          "hull_accuracy": 0.706613,
+          "hull_gain": 0.003387,
+          "share": {
+            "qwen2.5:0.5b": 0.006667,
+            "qwen2.5:1.5b": 0.361667,
+            "qwen2.5:3b": 0.631667
+          }
+        },
+        {
+          "target": 0.65,
+          "accuracy": 0.708333,
+          "accuracy_ci": [
+            0.67073,
+            0.743286
+          ],
+          "cost_per_1k": 1320295.9,
+          "line_accuracy": 0.699608,
+          "gain": 0.008725,
+          "hull_accuracy": 0.711442,
+          "hull_gain": -0.003109,
+          "share": {
+            "qwen2.5:0.5b": 0.005,
+            "qwen2.5:1.5b": 0.333333,
+            "qwen2.5:3b": 0.661667
+          }
+        },
+        {
+          "target": 0.66,
+          "accuracy": 0.711667,
+          "accuracy_ci": [
+            0.674165,
+            0.746476
+          ],
+          "cost_per_1k": 1340381.1,
+          "line_accuracy": 0.704833,
+          "gain": 0.006834,
+          "hull_accuracy": 0.715614,
+          "hull_gain": -0.003947,
+          "share": {
+            "qwen2.5:0.5b": 0.003333,
+            "qwen2.5:1.5b": 0.308333,
+            "qwen2.5:3b": 0.688333
+          }
+        },
+        {
+          "target": 0.67,
+          "accuracy": 0.72,
+          "accuracy_ci": [
+            0.682761,
+            0.75444
+          ],
+          "cost_per_1k": 1370987.7,
+          "line_accuracy": 0.712795,
+          "gain": 0.007205,
+          "hull_accuracy": 0.721972,
+          "hull_gain": -0.001972,
+          "share": {
+            "qwen2.5:0.5b": 0.003333,
+            "qwen2.5:1.5b": 0.273333,
+            "qwen2.5:3b": 0.723333
+          }
+        },
+        {
+          "target": 0.68,
+          "accuracy": 0.718333,
+          "accuracy_ci": [
+            0.68104,
+            0.752848
+          ],
+          "cost_per_1k": 1393572.233333,
+          "line_accuracy": 0.71867,
+          "gain": -0.000337,
+          "hull_accuracy": 0.726663,
+          "hull_gain": -0.00833,
+          "share": {
+            "qwen2.5:0.5b": 0.001667,
+            "qwen2.5:1.5b": 0.233333,
+            "qwen2.5:3b": 0.765
+          }
+        },
+        {
+          "target": 0.69,
+          "accuracy": 0.72,
+          "accuracy_ci": [
+            0.682761,
+            0.75444
+          ],
+          "cost_per_1k": 1413493.433333,
+          "line_accuracy": 0.723852,
+          "gain": -0.003852,
+          "hull_accuracy": 0.730801,
+          "hull_gain": -0.010801,
+          "share": {
+            "qwen2.5:1.5b": 0.208333,
+            "qwen2.5:3b": 0.791667
+          }
+        },
+        {
+          "target": 0.7,
+          "accuracy": 0.721667,
+          "accuracy_ci": [
+            0.684482,
+            0.756031
+          ],
+          "cost_per_1k": 1435518.8,
+          "line_accuracy": 0.729582,
+          "gain": -0.007915,
+          "hull_accuracy": 0.735376,
+          "hull_gain": -0.013709,
+          "share": {
+            "qwen2.5:1.5b": 0.186667,
+            "qwen2.5:3b": 0.813333
+          }
+        },
+        {
+          "target": 0.71,
+          "accuracy": 0.728333,
+          "accuracy_ci": [
+            0.691372,
+            0.762389
+          ],
+          "cost_per_1k": 1452417.9,
+          "line_accuracy": 0.733978,
+          "gain": -0.005645,
+          "hull_accuracy": 0.738886,
+          "hull_gain": -0.010553,
+          "share": {
+            "qwen2.5:1.5b": 0.163333,
+            "qwen2.5:3b": 0.836667
+          }
+        },
+        {
+          "target": 0.72,
+          "accuracy": 0.73,
+          "accuracy_ci": [
+            0.693096,
+            0.763977
+          ],
+          "cost_per_1k": 1465117.133333,
+          "line_accuracy": 0.737282,
+          "gain": -0.007282,
+          "hull_accuracy": 0.741524,
+          "hull_gain": -0.011524,
+          "share": {
+            "qwen2.5:1.5b": 0.138333,
+            "qwen2.5:3b": 0.861667
+          }
+        },
+        {
+          "target": 0.73,
+          "accuracy": 0.733333,
+          "accuracy_ci": [
+            0.696546,
+            0.767151
+          ],
+          "cost_per_1k": 1489273.333333,
+          "line_accuracy": 0.743566,
+          "gain": -0.010233,
+          "hull_accuracy": 0.746542,
+          "hull_gain": -0.013209,
+          "share": {
+            "qwen2.5:1.5b": 0.113333,
+            "qwen2.5:3b": 0.886667
+          }
+        },
+        {
+          "target": 0.74,
+          "accuracy": 0.74,
+          "accuracy_ci": [
+            0.703454,
+            0.773492
+          ],
+          "cost_per_1k": 1501325.6,
+          "line_accuracy": 0.746701,
+          "gain": -0.006701,
+          "hull_accuracy": 0.749045,
+          "hull_gain": -0.009045,
+          "share": {
+            "qwen2.5:1.5b": 0.076667,
+            "qwen2.5:3b": 0.923333
+          }
+        },
+        {
+          "target": 0.75,
+          "accuracy": 0.743333,
+          "accuracy_ci": [
+            0.706912,
+            0.776658
+          ],
+          "cost_per_1k": 1511938.033333,
+          "line_accuracy": 0.749462,
+          "gain": -0.006129,
+          "hull_accuracy": 0.75125,
+          "hull_gain": -0.007917,
+          "share": {
+            "qwen2.5:1.5b": 0.055,
+            "qwen2.5:3b": 0.945
+          }
+        },
+        {
+          "target": 0.76,
+          "accuracy": 0.745,
+          "accuracy_ci": [
+            0.708642,
+            0.778241
+          ],
+          "cost_per_1k": 1519440.166667,
+          "line_accuracy": 0.751414,
+          "gain": -0.006414,
+          "hull_accuracy": 0.752808,
+          "hull_gain": -0.007808,
+          "share": {
+            "qwen2.5:1.5b": 0.041667,
+            "qwen2.5:3b": 0.958333
+          }
+        },
+        {
+          "target": 0.77,
+          "accuracy": 0.748333,
+          "accuracy_ci": [
+            0.712104,
+            0.781403
+          ],
+          "cost_per_1k": 1525783.3,
+          "line_accuracy": 0.753064,
+          "gain": -0.004731,
+          "hull_accuracy": 0.754126,
+          "hull_gain": -0.005793,
+          "share": {
+            "qwen2.5:1.5b": 0.03,
+            "qwen2.5:3b": 0.97
+          }
+        },
+        {
+          "target": 0.78,
+          "accuracy": 0.751667,
+          "accuracy_ci": [
+            0.715568,
+            0.784563
+          ],
+          "cost_per_1k": 1531086.6,
+          "line_accuracy": 0.754443,
+          "gain": -0.002776,
+          "hull_accuracy": 0.755227,
+          "hull_gain": -0.00356,
+          "share": {
+            "qwen2.5:1.5b": 0.02,
+            "qwen2.5:3b": 0.98
+          }
+        },
+        {
+          "target": 0.79,
+          "accuracy": 0.751667,
+          "accuracy_ci": [
+            0.715568,
+            0.784563
+          ],
+          "cost_per_1k": 1531763.633333,
+          "line_accuracy": 0.754619,
+          "gain": -0.002952,
+          "hull_accuracy": 0.755368,
+          "hull_gain": -0.003701,
+          "share": {
+            "qwen2.5:1.5b": 0.016667,
+            "qwen2.5:3b": 0.983333
+          }
+        },
+        {
+          "target": 0.8,
+          "accuracy": 0.753333,
+          "accuracy_ci": [
+            0.717302,
+            0.786142
+          ],
+          "cost_per_1k": 1539164.4,
+          "line_accuracy": 0.756545,
+          "gain": -0.003212,
+          "hull_accuracy": 0.756905,
+          "hull_gain": -0.003572,
+          "share": {
+            "qwen2.5:1.5b": 0.008333,
+            "qwen2.5:3b": 0.991667
+          }
+        },
+        {
+          "target": 0.81,
+          "accuracy": 0.755,
+          "accuracy_ci": [
+            0.719036,
+            0.78772
+          ],
+          "cost_per_1k": 1541518.233333,
+          "line_accuracy": 0.757157,
+          "gain": -0.002157,
+          "hull_accuracy": 0.757394,
+          "hull_gain": -0.002394,
+          "share": {
+            "qwen2.5:1.5b": 0.006667,
+            "qwen2.5:3b": 0.993333
+          }
+        },
+        {
+          "target": 0.83,
+          "accuracy": 0.756667,
+          "accuracy_ci": [
+            0.72077,
+            0.789297
+          ],
+          "cost_per_1k": 1541900.566667,
+          "line_accuracy": 0.757256,
+          "gain": -0.000589,
+          "hull_accuracy": 0.757473,
+          "hull_gain": -0.000806,
+          "share": {
+            "qwen2.5:1.5b": 0.005,
+            "qwen2.5:3b": 0.995
+          }
+        },
+        {
+          "target": 0.84,
+          "accuracy": 0.758333,
+          "accuracy_ci": [
+            0.722506,
+            0.790874
+          ],
+          "cost_per_1k": 1544027,
+          "line_accuracy": 0.75781,
+          "gain": 0.000523,
+          "hull_accuracy": 0.757915,
+          "hull_gain": 0.000418,
+          "share": {
+            "qwen2.5:1.5b": 0.003333,
+            "qwen2.5:3b": 0.996667
+          }
+        },
+        {
+          "target": 0.85,
+          "accuracy": 0.758333,
+          "accuracy_ci": [
+            0.722506,
+            0.790874
+          ],
+          "cost_per_1k": 1545357.9,
+          "line_accuracy": 0.758156,
+          "gain": 0.000177,
+          "hull_accuracy": 0.758192,
+          "hull_gain": 0.000141,
+          "share": {
+            "qwen2.5:1.5b": 0.001667,
+            "qwen2.5:3b": 0.998333
+          }
+        },
+        {
+          "target": 0.93,
+          "accuracy": 0.758333,
+          "accuracy_ci": [
+            0.722506,
+            0.790874
+          ],
+          "cost_per_1k": 1546040.3,
+          "line_accuracy": 0.758333,
+          "gain": -0,
+          "hull_accuracy": 0.758333,
+          "hull_gain": -0,
+          "share": {
+            "qwen2.5:3b": 1
+          }
+        }
+      ],
+      "auc_gain": 0.005034,
+      "auc_hull_gain": -0.018943,
+      "auc_gain_ci": [
+        -0.012435,
+        0.022079
+      ],
+      "auc_hull_gain_ci": [
+        -0.036146,
+        -0.002391
+      ],
+      "brier": {
+        "qwen2.5:0.5b": 0.231976,
+        "qwen2.5:1.5b": 0.2317,
+        "qwen2.5:3b": 0.174773
+      },
+      "auroc": {
+        "qwen2.5:0.5b": 0.643545,
+        "qwen2.5:1.5b": 0.650987,
+        "qwen2.5:3b": 0.682812
+      }
+    },
+    {
+      "name": "router-cost",
+      "description": "router-cheap's predictions; each question goes to the candidate with the highest P(correct) − weight × its predicted cost there; eval only",
+      "knob": "cost weight",
+      "frontier": [
+        {
+          "target": 0,
+          "accuracy": 0.755,
+          "accuracy_ci": [
+            0.719036,
+            0.78772
+          ],
+          "cost_per_1k": 1530212.633333,
+          "line_accuracy": 0.754216,
+          "gain": 0.000784,
+          "hull_accuracy": 0.755046,
+          "hull_gain": -0.000046,
+          "share": {
+            "qwen2.5:0.5b": 0.001667,
+            "qwen2.5:1.5b": 0.038333,
+            "qwen2.5:3b": 0.96
+          }
+        },
+        {
+          "target": 0.003548,
+          "accuracy": 0.753333,
+          "accuracy_ci": [
+            0.717302,
+            0.786142
+          ],
+          "cost_per_1k": 1529726.966667,
+          "line_accuracy": 0.75409,
+          "gain": -0.000757,
+          "hull_accuracy": 0.754945,
+          "hull_gain": -0.001612,
+          "share": {
+            "qwen2.5:0.5b": 0.001667,
+            "qwen2.5:1.5b": 0.04,
+            "qwen2.5:3b": 0.958333
+          }
+        },
+        {
+          "target": 0.014125,
+          "accuracy": 0.753333,
+          "accuracy_ci": [
+            0.717302,
+            0.786142
+          ],
+          "cost_per_1k": 1529251.633333,
+          "line_accuracy": 0.753966,
+          "gain": -0.000633,
+          "hull_accuracy": 0.754846,
+          "hull_gain": -0.001513,
+          "share": {
+            "qwen2.5:0.5b": 0.001667,
+            "qwen2.5:1.5b": 0.041667,
+            "qwen2.5:3b": 0.956667
+          }
+        },
+        {
+          "target": 0.015849,
+          "accuracy": 0.753333,
+          "accuracy_ci": [
+            0.717302,
+            0.786142
+          ],
+          "cost_per_1k": 1526864.6,
+          "line_accuracy": 0.753345,
+          "gain": -0.000012,
+          "hull_accuracy": 0.75435,
+          "hull_gain": -0.001017,
+          "share": {
+            "qwen2.5:0.5b": 0.001667,
+            "qwen2.5:1.5b": 0.043333,
+            "qwen2.5:3b": 0.955
+          }
+        },
+        {
+          "target": 0.025119,
+          "accuracy": 0.753333,
+          "accuracy_ci": [
+            0.717302,
+            0.786142
+          ],
+          "cost_per_1k": 1525975.866667,
+          "line_accuracy": 0.753114,
+          "gain": 0.000219,
+          "hull_accuracy": 0.754166,
+          "hull_gain": -0.000833,
+          "share": {
+            "qwen2.5:0.5b": 0.001667,
+            "qwen2.5:1.5b": 0.046667,
+            "qwen2.5:3b": 0.951667
+          }
+        },
+        {
+          "target": 0.035481,
+          "accuracy": 0.753333,
+          "accuracy_ci": [
+            0.717302,
+            0.786142
+          ],
+          "cost_per_1k": 1524025.866667,
+          "line_accuracy": 0.752606,
+          "gain": 0.000727,
+          "hull_accuracy": 0.753761,
+          "hull_gain": -0.000428,
+          "share": {
+            "qwen2.5:0.5b": 0.003333,
+            "qwen2.5:1.5b": 0.046667,
+            "qwen2.5:3b": 0.95
+          }
+        },
+        {
+          "target": 0.056234,
+          "accuracy": 0.751667,
+          "accuracy_ci": [
+            0.715568,
+            0.784563
+          ],
+          "cost_per_1k": 1519918.433333,
+          "line_accuracy": 0.751538,
+          "gain": 0.000129,
+          "hull_accuracy": 0.752907,
+          "hull_gain": -0.00124,
+          "share": {
+            "qwen2.5:0.5b": 0.003333,
+            "qwen2.5:1.5b": 0.051667,
+            "qwen2.5:3b": 0.945
+          }
+        },
+        {
+          "target": 0.063096,
+          "accuracy": 0.748333,
+          "accuracy_ci": [
+            0.712104,
+            0.781403
+          ],
+          "cost_per_1k": 1517243.866667,
+          "line_accuracy": 0.750842,
+          "gain": -0.002509,
+          "hull_accuracy": 0.752352,
+          "hull_gain": -0.004019,
+          "share": {
+            "qwen2.5:0.5b": 0.003333,
+            "qwen2.5:1.5b": 0.055,
+            "qwen2.5:3b": 0.941667
+          }
+        },
+        {
+          "target": 0.070795,
+          "accuracy": 0.746667,
+          "accuracy_ci": [
+            0.710373,
+            0.779822
+          ],
+          "cost_per_1k": 1513559.133333,
+          "line_accuracy": 0.749884,
+          "gain": -0.003217,
+          "hull_accuracy": 0.751586,
+          "hull_gain": -0.004919,
+          "share": {
+            "qwen2.5:0.5b": 0.003333,
+            "qwen2.5:1.5b": 0.058333,
+            "qwen2.5:3b": 0.938333
+          }
+        },
+        {
+          "target": 0.079433,
+          "accuracy": 0.746667,
+          "accuracy_ci": [
+            0.710373,
+            0.779822
+          ],
+          "cost_per_1k": 1508827.233333,
+          "line_accuracy": 0.748653,
+          "gain": -0.001986,
+          "hull_accuracy": 0.750604,
+          "hull_gain": -0.003937,
+          "share": {
+            "qwen2.5:0.5b": 0.005,
+            "qwen2.5:1.5b": 0.061667,
+            "qwen2.5:3b": 0.933333
+          }
+        },
+        {
+          "target": 0.089125,
+          "accuracy": 0.746667,
+          "accuracy_ci": [
+            0.710373,
+            0.779822
+          ],
+          "cost_per_1k": 1508227.433333,
+          "line_accuracy": 0.748497,
+          "gain": -0.00183,
+          "hull_accuracy": 0.750479,
+          "hull_gain": -0.003812,
+          "share": {
+            "qwen2.5:0.5b": 0.005,
+            "qwen2.5:1.5b": 0.063333,
+            "qwen2.5:3b": 0.931667
+          }
+        },
+        {
+          "target": 0.1,
+          "accuracy": 0.745,
+          "accuracy_ci": [
+            0.708642,
+            0.778241
+          ],
+          "cost_per_1k": 1503665.2,
+          "line_accuracy": 0.74731,
+          "gain": -0.00231,
+          "hull_accuracy": 0.749531,
+          "hull_gain": -0.004531,
+          "share": {
+            "qwen2.5:0.5b": 0.005,
+            "qwen2.5:1.5b": 0.07,
+            "qwen2.5:3b": 0.925
+          }
+        },
+        {
+          "target": 0.112202,
+          "accuracy": 0.746667,
+          "accuracy_ci": [
+            0.710373,
+            0.779822
+          ],
+          "cost_per_1k": 1496933.9,
+          "line_accuracy": 0.745559,
+          "gain": 0.001108,
+          "hull_accuracy": 0.748133,
+          "hull_gain": -0.001466,
+          "share": {
+            "qwen2.5:0.5b": 0.005,
+            "qwen2.5:1.5b": 0.078333,
+            "qwen2.5:3b": 0.916667
+          }
+        },
+        {
+          "target": 0.125893,
+          "accuracy": 0.746667,
+          "accuracy_ci": [
+            0.710373,
+            0.779822
+          ],
+          "cost_per_1k": 1494996.1,
+          "line_accuracy": 0.745055,
+          "gain": 0.001612,
+          "hull_accuracy": 0.747731,
+          "hull_gain": -0.001064,
+          "share": {
+            "qwen2.5:0.5b": 0.005,
+            "qwen2.5:1.5b": 0.083333,
+            "qwen2.5:3b": 0.911667
+          }
+        },
+        {
+          "target": 0.141254,
+          "accuracy": 0.746667,
+          "accuracy_ci": [
+            0.710373,
+            0.779822
+          ],
+          "cost_per_1k": 1483710.8,
+          "line_accuracy": 0.742119,
+          "gain": 0.004548,
+          "hull_accuracy": 0.745386,
+          "hull_gain": 0.001281,
+          "share": {
+            "qwen2.5:0.5b": 0.005,
+            "qwen2.5:1.5b": 0.096667,
+            "qwen2.5:3b": 0.898333
+          }
+        },
+        {
+          "target": 0.158489,
+          "accuracy": 0.745,
+          "accuracy_ci": [
+            0.708642,
+            0.778241
+          ],
+          "cost_per_1k": 1471070.666667,
+          "line_accuracy": 0.738831,
+          "gain": 0.006169,
+          "hull_accuracy": 0.742761,
+          "hull_gain": 0.002239,
+          "share": {
+            "qwen2.5:0.5b": 0.008333,
+            "qwen2.5:1.5b": 0.108333,
+            "qwen2.5:3b": 0.883333
+          }
+        },
+        {
+          "target": 0.177828,
+          "accuracy": 0.741667,
+          "accuracy_ci": [
+            0.705183,
+            0.775076
+          ],
+          "cost_per_1k": 1426343.433333,
+          "line_accuracy": 0.727195,
+          "gain": 0.014472,
+          "hull_accuracy": 0.73347,
+          "hull_gain": 0.008197,
+          "share": {
+            "qwen2.5:0.5b": 0.011667,
+            "qwen2.5:1.5b": 0.14,
+            "qwen2.5:3b": 0.848333
+          }
+        },
+        {
+          "target": 0.199526,
+          "accuracy": 0.738333,
+          "accuracy_ci": [
+            0.701726,
+            0.771908
+          ],
+          "cost_per_1k": 1390139.066667,
+          "line_accuracy": 0.717777,
+          "gain": 0.020556,
+          "hull_accuracy": 0.72595,
+          "hull_gain": 0.012383,
+          "share": {
+            "qwen2.5:0.5b": 0.016667,
+            "qwen2.5:1.5b": 0.16,
+            "qwen2.5:3b": 0.823333
+          }
+        },
+        {
+          "target": 0.223872,
+          "accuracy": 0.713333,
+          "accuracy_ci": [
+            0.675883,
+            0.74807
+          ],
+          "cost_per_1k": 1318743.266667,
+          "line_accuracy": 0.699204,
+          "gain": 0.014129,
+          "hull_accuracy": 0.71112,
+          "hull_gain": 0.002213,
+          "share": {
+            "qwen2.5:0.5b": 0.023333,
+            "qwen2.5:1.5b": 0.215,
+            "qwen2.5:3b": 0.761667
+          }
+        },
+        {
+          "target": 0.251189,
+          "accuracy": 0.705,
+          "accuracy_ci": [
+            0.667298,
+            0.740093
+          ],
+          "cost_per_1k": 1218698.166667,
+          "line_accuracy": 0.673178,
+          "gain": 0.031822,
+          "hull_accuracy": 0.690339,
+          "hull_gain": 0.014661,
+          "share": {
+            "qwen2.5:0.5b": 0.036667,
+            "qwen2.5:1.5b": 0.27,
+            "qwen2.5:3b": 0.693333
+          }
+        },
+        {
+          "target": 0.281838,
+          "accuracy": 0.666667,
+          "accuracy_ci": [
+            0.627992,
+            0.703221
+          ],
+          "cost_per_1k": 1033241,
+          "line_accuracy": 0.624932,
+          "gain": 0.041735,
+          "hull_accuracy": 0.651816,
+          "hull_gain": 0.014851,
+          "share": {
+            "qwen2.5:0.5b": 0.071667,
+            "qwen2.5:1.5b": 0.366667,
+            "qwen2.5:3b": 0.561667
+          }
+        },
+        {
+          "target": 0.316228,
+          "accuracy": 0.631667,
+          "accuracy_ci": [
+            0.592347,
+            0.669311
+          ],
+          "cost_per_1k": 857695.333333,
+          "line_accuracy": 0.579266,
+          "gain": 0.052401,
+          "hull_accuracy": 0.615353,
+          "hull_gain": 0.016314,
+          "share": {
+            "qwen2.5:0.5b": 0.12,
+            "qwen2.5:1.5b": 0.426667,
+            "qwen2.5:3b": 0.453333
+          }
+        },
+        {
+          "target": 0.354813,
+          "accuracy": 0.59,
+          "accuracy_ci": [
+            0.550195,
+            0.62866
+          ],
+          "cost_per_1k": 658186.733333,
+          "line_accuracy": 0.527365,
+          "gain": 0.062635,
+          "hull_accuracy": 0.573911,
+          "hull_gain": 0.016089,
+          "share": {
+            "qwen2.5:0.5b": 0.176667,
+            "qwen2.5:1.5b": 0.491667,
+            "qwen2.5:3b": 0.331667
+          }
+        },
+        {
+          "target": 0.398107,
+          "accuracy": 0.57,
+          "accuracy_ci": [
+            0.530065,
+            0.609045
+          ],
+          "cost_per_1k": 597144.733333,
+          "line_accuracy": 0.511485,
+          "gain": 0.058515,
+          "hull_accuracy": 0.555119,
+          "hull_gain": 0.014881,
+          "share": {
+            "qwen2.5:0.5b": 0.226667,
+            "qwen2.5:1.5b": 0.485,
+            "qwen2.5:3b": 0.288333
+          }
+        },
+        {
+          "target": 0.446684,
+          "accuracy": 0.553333,
+          "accuracy_ci": [
+            0.51334,
+            0.592648
+          ],
+          "cost_per_1k": 558089.166667,
+          "line_accuracy": 0.501325,
+          "gain": 0.052008,
+          "hull_accuracy": 0.540023,
+          "hull_gain": 0.01331,
+          "share": {
+            "qwen2.5:0.5b": 0.276667,
+            "qwen2.5:1.5b": 0.453333,
+            "qwen2.5:3b": 0.27
+          }
+        },
+        {
+          "target": 0.501187,
+          "accuracy": 0.53,
+          "accuracy_ci": [
+            0.49,
+            0.569618
+          ],
+          "cost_per_1k": 509727.766667,
+          "line_accuracy": 0.488744,
+          "gain": 0.041256,
+          "hull_accuracy": 0.521331,
+          "hull_gain": 0.008669,
+          "share": {
+            "qwen2.5:0.5b": 0.358333,
+            "qwen2.5:1.5b": 0.396667,
+            "qwen2.5:3b": 0.245
+          }
+        },
+        {
+          "target": 0.562341,
+          "accuracy": 0.52,
+          "accuracy_ci": [
+            0.480024,
+            0.559721
+          ],
+          "cost_per_1k": 471207.933333,
+          "line_accuracy": 0.478724,
+          "gain": 0.041276,
+          "hull_accuracy": 0.506442,
+          "hull_gain": 0.013558,
+          "share": {
+            "qwen2.5:0.5b": 0.431667,
+            "qwen2.5:1.5b": 0.355,
+            "qwen2.5:3b": 0.213333
+          }
+        },
+        {
+          "target": 0.630957,
+          "accuracy": 0.505,
+          "accuracy_ci": [
+            0.46509,
+            0.544846
+          ],
+          "cost_per_1k": 440146.066667,
+          "line_accuracy": 0.470643,
+          "gain": 0.034357,
+          "hull_accuracy": 0.494436,
+          "hull_gain": 0.010564,
+          "share": {
+            "qwen2.5:0.5b": 0.493333,
+            "qwen2.5:1.5b": 0.313333,
+            "qwen2.5:3b": 0.193333
+          }
+        },
+        {
+          "target": 0.707946,
+          "accuracy": 0.498333,
+          "accuracy_ci": [
+            0.458464,
+            0.538224
+          ],
+          "cost_per_1k": 391325.766667,
+          "line_accuracy": 0.457943,
+          "gain": 0.04039,
+          "hull_accuracy": 0.475566,
+          "hull_gain": 0.022767,
+          "share": {
+            "qwen2.5:0.5b": 0.591667,
+            "qwen2.5:1.5b": 0.241667,
+            "qwen2.5:3b": 0.166667
+          }
+        },
+        {
+          "target": 0.794328,
+          "accuracy": 0.501667,
+          "accuracy_ci": [
+            0.461776,
+            0.541536
+          ],
+          "cost_per_1k": 367421.9,
+          "line_accuracy": 0.451725,
+          "gain": 0.049942,
+          "hull_accuracy": 0.466327,
+          "hull_gain": 0.03534,
+          "share": {
+            "qwen2.5:0.5b": 0.641667,
+            "qwen2.5:1.5b": 0.211667,
+            "qwen2.5:3b": 0.146667
+          }
+        },
+        {
+          "target": 0.891251,
+          "accuracy": 0.49,
+          "accuracy_ci": [
+            0.450191,
+            0.529936
+          ],
+          "cost_per_1k": 348868.5,
+          "line_accuracy": 0.446898,
+          "gain": 0.043102,
+          "hull_accuracy": 0.459155,
+          "hull_gain": 0.030845,
+          "share": {
+            "qwen2.5:0.5b": 0.686667,
+            "qwen2.5:1.5b": 0.173333,
+            "qwen2.5:3b": 0.14
+          }
+        },
+        {
+          "target": 1,
+          "accuracy": 0.483333,
+          "accuracy_ci": [
+            0.443581,
+            0.523297
+          ],
+          "cost_per_1k": 327871.533333,
+          "line_accuracy": 0.441436,
+          "gain": 0.041897,
+          "hull_accuracy": 0.45104,
+          "hull_gain": 0.032293,
+          "share": {
+            "qwen2.5:0.5b": 0.741667,
+            "qwen2.5:1.5b": 0.138333,
+            "qwen2.5:3b": 0.12
+          }
+        },
+        {
+          "target": 1.122018,
+          "accuracy": 0.476667,
+          "accuracy_ci": [
+            0.436978,
+            0.516652
+          ],
+          "cost_per_1k": 314734.6,
+          "line_accuracy": 0.438018,
+          "gain": 0.038649,
+          "hull_accuracy": 0.445962,
+          "hull_gain": 0.030705,
+          "share": {
+            "qwen2.5:0.5b": 0.785,
+            "qwen2.5:1.5b": 0.108333,
+            "qwen2.5:3b": 0.106667
+          }
+        },
+        {
+          "target": 1.258925,
+          "accuracy": 0.465,
+          "accuracy_ci": [
+            0.42544,
+            0.505006
+          ],
+          "cost_per_1k": 300979.833333,
+          "line_accuracy": 0.43444,
+          "gain": 0.03056,
+          "hull_accuracy": 0.440645,
+          "hull_gain": 0.024355,
+          "share": {
+            "qwen2.5:0.5b": 0.823333,
+            "qwen2.5:1.5b": 0.093333,
+            "qwen2.5:3b": 0.083333
+          }
+        },
+        {
+          "target": 1.412538,
+          "accuracy": 0.46,
+          "accuracy_ci": [
+            0.420501,
+            0.500008
+          ],
+          "cost_per_1k": 294269.7,
+          "line_accuracy": 0.432695,
+          "gain": 0.027305,
+          "hull_accuracy": 0.438052,
+          "hull_gain": 0.021948,
+          "share": {
+            "qwen2.5:0.5b": 0.843333,
+            "qwen2.5:1.5b": 0.085,
+            "qwen2.5:3b": 0.071667
+          }
+        },
+        {
+          "target": 1.584893,
+          "accuracy": 0.45,
+          "accuracy_ci": [
+            0.410637,
+            0.49
+          ],
+          "cost_per_1k": 287165.633333,
+          "line_accuracy": 0.430846,
+          "gain": 0.019154,
+          "hull_accuracy": 0.435306,
+          "hull_gain": 0.014694,
+          "share": {
+            "qwen2.5:0.5b": 0.871667,
+            "qwen2.5:1.5b": 0.063333,
+            "qwen2.5:3b": 0.065
+          }
+        },
+        {
+          "target": 1.778279,
+          "accuracy": 0.445,
+          "accuracy_ci": [
+            0.40571,
+            0.48499
+          ],
+          "cost_per_1k": 281509.466667,
+          "line_accuracy": 0.429375,
+          "gain": 0.015625,
+          "hull_accuracy": 0.43312,
+          "hull_gain": 0.01188,
+          "share": {
+            "qwen2.5:0.5b": 0.895,
+            "qwen2.5:1.5b": 0.046667,
+            "qwen2.5:3b": 0.058333
+          }
+        },
+        {
+          "target": 1.995262,
+          "accuracy": 0.44,
+          "accuracy_ci": [
+            0.400788,
+            0.479975
+          ],
+          "cost_per_1k": 277802.433333,
+          "line_accuracy": 0.428411,
+          "gain": 0.011589,
+          "hull_accuracy": 0.431687,
+          "hull_gain": 0.008313,
+          "share": {
+            "qwen2.5:0.5b": 0.91,
+            "qwen2.5:1.5b": 0.036667,
+            "qwen2.5:3b": 0.053333
+          }
+        },
+        {
+          "target": 2.238721,
+          "accuracy": 0.438333,
+          "accuracy_ci": [
+            0.399148,
+            0.478303
+          ],
+          "cost_per_1k": 272676.5,
+          "line_accuracy": 0.427077,
+          "gain": 0.011256,
+          "hull_accuracy": 0.429706,
+          "hull_gain": 0.008627,
+          "share": {
+            "qwen2.5:0.5b": 0.931667,
+            "qwen2.5:1.5b": 0.021667,
+            "qwen2.5:3b": 0.046667
+          }
+        },
+        {
+          "target": 2.511886,
+          "accuracy": 0.436667,
+          "accuracy_ci": [
+            0.397509,
+            0.476631
+          ],
+          "cost_per_1k": 269674.5,
+          "line_accuracy": 0.426296,
+          "gain": 0.010371,
+          "hull_accuracy": 0.428545,
+          "hull_gain": 0.008122,
+          "share": {
+            "qwen2.5:0.5b": 0.943333,
+            "qwen2.5:1.5b": 0.015,
+            "qwen2.5:3b": 0.041667
+          }
+        },
+        {
+          "target": 2.818383,
+          "accuracy": 0.436667,
+          "accuracy_ci": [
+            0.397509,
+            0.476631
+          ],
+          "cost_per_1k": 266680.966667,
+          "line_accuracy": 0.425518,
+          "gain": 0.011149,
+          "hull_accuracy": 0.427388,
+          "hull_gain": 0.009279,
+          "share": {
+            "qwen2.5:0.5b": 0.955,
+            "qwen2.5:1.5b": 0.008333,
+            "qwen2.5:3b": 0.036667
+          }
+        },
+        {
+          "target": 3.162278,
+          "accuracy": 0.438333,
+          "accuracy_ci": [
+            0.399148,
+            0.478303
+          ],
+          "cost_per_1k": 266418.466667,
+          "line_accuracy": 0.425449,
+          "gain": 0.012884,
+          "hull_accuracy": 0.427287,
+          "hull_gain": 0.011046,
+          "share": {
+            "qwen2.5:0.5b": 0.956667,
+            "qwen2.5:1.5b": 0.006667,
+            "qwen2.5:3b": 0.036667
+          }
+        },
+        {
+          "target": 3.548134,
+          "accuracy": 0.436667,
+          "accuracy_ci": [
+            0.397509,
+            0.476631
+          ],
+          "cost_per_1k": 264758.4,
+          "line_accuracy": 0.425017,
+          "gain": 0.01165,
+          "hull_accuracy": 0.426645,
+          "hull_gain": 0.010022,
+          "share": {
+            "qwen2.5:0.5b": 0.96,
+            "qwen2.5:1.5b": 0.008333,
+            "qwen2.5:3b": 0.031667
+          }
+        },
+        {
+          "target": 3.981072,
+          "accuracy": 0.435,
+          "accuracy_ci": [
+            0.39587,
+            0.474957
+          ],
+          "cost_per_1k": 264045.1,
+          "line_accuracy": 0.424832,
+          "gain": 0.010168,
+          "hull_accuracy": 0.426369,
+          "hull_gain": 0.008631,
+          "share": {
+            "qwen2.5:0.5b": 0.961667,
+            "qwen2.5:1.5b": 0.008333,
+            "qwen2.5:3b": 0.03
+          }
+        },
+        {
+          "target": 4.466836,
+          "accuracy": 0.435,
+          "accuracy_ci": [
+            0.39587,
+            0.474957
+          ],
+          "cost_per_1k": 262326.733333,
+          "line_accuracy": 0.424385,
+          "gain": 0.010615,
+          "hull_accuracy": 0.425705,
+          "hull_gain": 0.009295,
+          "share": {
+            "qwen2.5:0.5b": 0.968333,
+            "qwen2.5:1.5b": 0.005,
+            "qwen2.5:3b": 0.026667
+          }
+        },
+        {
+          "target": 5.011872,
+          "accuracy": 0.433333,
+          "accuracy_ci": [
+            0.394231,
+            0.473284
+          ],
+          "cost_per_1k": 261478.7,
+          "line_accuracy": 0.424164,
+          "gain": 0.009169,
+          "hull_accuracy": 0.425378,
+          "hull_gain": 0.007955,
+          "share": {
+            "qwen2.5:0.5b": 0.971667,
+            "qwen2.5:1.5b": 0.003333,
+            "qwen2.5:3b": 0.025
+          }
+        },
+        {
+          "target": 5.623413,
+          "accuracy": 0.431667,
+          "accuracy_ci": [
+            0.392593,
+            0.47161
+          ],
+          "cost_per_1k": 260292.5,
+          "line_accuracy": 0.423856,
+          "gain": 0.007811,
+          "hull_accuracy": 0.424919,
+          "hull_gain": 0.006748,
+          "share": {
+            "qwen2.5:0.5b": 0.975,
+            "qwen2.5:1.5b": 0.003333,
+            "qwen2.5:3b": 0.021667
+          }
+        },
+        {
+          "target": 6.309573,
+          "accuracy": 0.431667,
+          "accuracy_ci": [
+            0.392593,
+            0.47161
+          ],
+          "cost_per_1k": 259716.733333,
+          "line_accuracy": 0.423706,
+          "gain": 0.007961,
+          "hull_accuracy": 0.424696,
+          "hull_gain": 0.006971,
+          "share": {
+            "qwen2.5:0.5b": 0.976667,
+            "qwen2.5:1.5b": 0.003333,
+            "qwen2.5:3b": 0.02
+          }
+        },
+        {
+          "target": 7.079458,
+          "accuracy": 0.43,
+          "accuracy_ci": [
+            0.390955,
+            0.469935
+          ],
+          "cost_per_1k": 259140.966667,
+          "line_accuracy": 0.423556,
+          "gain": 0.006444,
+          "hull_accuracy": 0.424474,
+          "hull_gain": 0.005526,
+          "share": {
+            "qwen2.5:0.5b": 0.978333,
+            "qwen2.5:1.5b": 0.003333,
+            "qwen2.5:3b": 0.018333
+          }
+        },
+        {
+          "target": 7.943282,
+          "accuracy": 0.428333,
+          "accuracy_ci": [
+            0.389318,
+            0.46826
+          ],
+          "cost_per_1k": 258540.833333,
+          "line_accuracy": 0.4234,
+          "gain": 0.004933,
+          "hull_accuracy": 0.424242,
+          "hull_gain": 0.004091,
+          "share": {
+            "qwen2.5:0.5b": 0.98,
+            "qwen2.5:1.5b": 0.003333,
+            "qwen2.5:3b": 0.016667
+          }
+        },
+        {
+          "target": 8.912509,
+          "accuracy": 0.426667,
+          "accuracy_ci": [
+            0.387682,
+            0.466585
+          ],
+          "cost_per_1k": 257620.7,
+          "line_accuracy": 0.423161,
+          "gain": 0.003506,
+          "hull_accuracy": 0.423886,
+          "hull_gain": 0.002781,
+          "share": {
+            "qwen2.5:0.5b": 0.983333,
+            "qwen2.5:1.5b": 0.001667,
+            "qwen2.5:3b": 0.015
+          }
+        },
+        {
+          "target": 10,
+          "accuracy": 0.426667,
+          "accuracy_ci": [
+            0.387682,
+            0.466585
+          ],
+          "cost_per_1k": 257065.533333,
+          "line_accuracy": 0.423016,
+          "gain": 0.003651,
+          "hull_accuracy": 0.423672,
+          "hull_gain": 0.002995,
+          "share": {
+            "qwen2.5:0.5b": 0.985,
+            "qwen2.5:1.5b": 0.001667,
+            "qwen2.5:3b": 0.013333
+          }
+        },
+        {
+          "target": 14.125375,
+          "accuracy": 0.425,
+          "accuracy_ci": [
+            0.386045,
+            0.464909
+          ],
+          "cost_per_1k": 255129.733333,
+          "line_accuracy": 0.422513,
+          "gain": 0.002487,
+          "hull_accuracy": 0.422924,
+          "hull_gain": 0.002076,
+          "share": {
+            "qwen2.5:0.5b": 0.99,
+            "qwen2.5:1.5b": 0.001667,
+            "qwen2.5:3b": 0.008333
+          }
+        },
+        {
+          "target": 15.848932,
+          "accuracy": 0.425,
+          "accuracy_ci": [
+            0.386045,
+            0.464909
+          ],
+          "cost_per_1k": 254566.4,
+          "line_accuracy": 0.422366,
+          "gain": 0.002634,
+          "hull_accuracy": 0.422706,
+          "hull_gain": 0.002294,
+          "share": {
+            "qwen2.5:0.5b": 0.991667,
+            "qwen2.5:1.5b": 0.001667,
+            "qwen2.5:3b": 0.006667
+          }
+        },
+        {
+          "target": 19.952623,
+          "accuracy": 0.425,
+          "accuracy_ci": [
+            0.386045,
+            0.464909
+          ],
+          "cost_per_1k": 254335.4,
+          "line_accuracy": 0.422306,
+          "gain": 0.002694,
+          "hull_accuracy": 0.422617,
+          "hull_gain": 0.002383,
+          "share": {
+            "qwen2.5:0.5b": 0.993333,
+            "qwen2.5:3b": 0.006667
+          }
+        },
+        {
+          "target": 100,
+          "accuracy": 0.425,
+          "accuracy_ci": [
+            0.386045,
+            0.464909
+          ],
+          "cost_per_1k": 253740.666667,
+          "line_accuracy": 0.422151,
+          "gain": 0.002849,
+          "hull_accuracy": 0.422387,
+          "hull_gain": 0.002613,
+          "share": {
+            "qwen2.5:0.5b": 0.995,
+            "qwen2.5:3b": 0.005
+          }
+        }
+      ],
+      "auc_gain": 0.037485,
+      "auc_hull_gain": 0.013507,
+      "auc_gain_ci": [
+        0.01518,
+        0.06097
+      ],
+      "auc_hull_gain_ci": [
+        -0.004734,
+        0.031507
+      ],
+      "brier": {},
+      "auroc": {}
+    }
+  ],
+  "operating_point": {
+    "variant": "router",
+    "target": 0.64,
+    "accuracy": 0.721667,
+    "accuracy_ci": [
+      0.684482,
+      0.756031
+    ],
+    "cost_per_1k": 1436090,
+    "line_accuracy": 0.729731,
+    "gain": -0.008064,
+    "hull_accuracy": 0.735495,
+    "hull_gain": -0.013828,
+    "share": {
+      "qwen2.5:0.5b": 0.01,
+      "qwen2.5:1.5b": 0.156667,
+      "qwen2.5:3b": 0.833333
+    },
+    "pct_best_accuracy": 95.164921,
+    "pct_best_cost": 92.888264,
+    "gain_ci": [
+      -0.017805,
+      0.010126
+    ],
+    "hull_gain_ci": [
+      -0.021673,
+      0.000894
+    ],
+    "share_by_dataset": {
+      "gsm8k": {
+        "qwen2.5:0.5b": 0.003333,
+        "qwen2.5:1.5b": 0.113333,
+        "qwen2.5:3b": 0.883333
+      },
+      "mmlu": {
+        "qwen2.5:0.5b": 0.016667,
+        "qwen2.5:1.5b": 0.2,
+        "qwen2.5:3b": 0.783333
+      }
+    },
+    "met": true
+  }
+}
