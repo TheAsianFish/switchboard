@@ -56,8 +56,10 @@ eval-cache: ## Q3: semantic cache threshold sweep (Ollama with all-minilm and no
 eval-cache-data: ## rebuild the Q3 pair sets in eval/cache/data (Ollama with qwen2.5:3b, about 2.5 h on a laptop CPU; resumes)
 	go run ./cmd/switchboard eval cache-data
 
+ROUTER_MODELS := qwen2.5:0.5b,qwen2.5:1.5b,qwen2.5:3b
+
 eval-router: ## Q5: 5-fold cross-validated router frontier against the random-mix line, from the committed recordings ($$0, offline)
-	go run ./cmd/switchboard eval router run --models "$(or $(MODELS),qwen2.5:0.5b,qwen2.5:1.5b,qwen2.5:3b)"
+	go run ./cmd/switchboard eval router run --models "$(or $(MODELS),$(ROUTER_MODELS))"
 	go run ./cmd/switchboard eval results
 
 eval-router-embed: ## Q5: re-embed the eval set's prompts (Ollama with nomic-embed-text)
