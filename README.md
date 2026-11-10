@@ -10,9 +10,10 @@ latency tail, an exact and a semantic cache with a measured false-hit rate, a
 and model, OpenTelemetry traces, Prometheus metrics and a small admin page.
 Every feature ships with the benchmark or eval that says what it is worth.
 
-**Status: M5 of 7.** The streaming spine (M1), shared state (M2), the
-response cache (M3), resilience and observability (M4) and the evaluated
-router (M5) work: both front
+**Status: M6 of 7.** The streaming spine (M1), shared state (M2), the
+response cache (M3), resilience and observability (M4), the evaluated
+router (M5) and the admin page, chaos run and overhead breakdown (M6) work:
+both front
 ends, with text and tool calls, in and out of every backend; the Anthropic,
 OpenAI-compatible and fake providers; per-key request and token rate limits
 and dollar budgets shared by every replica through Redis, with a degrade
@@ -22,8 +23,12 @@ threshold comes from `make eval-cache`; retries, hedged requests with a
 per-tenant hedge budget and a circuit breaker per provider; OpenTelemetry
 traces with a span per stage, and Prometheus metrics; and `model: "auto"`,
 served from router weights trained and cross-validated by
-`make eval-router`. The admin page, the chaos run and the release follow
+`make eval-router`; an admin page that shows the whole fleet from any
+replica; a chaos run that kills a replica and Redis under load; and the
+overhead of every feature, measured one at a time. The release follows
 (see [PLAN.md](PLAN.md)).
+
+![The admin page during the chaos run: replica 2 was killed 21 s earlier and shows as down, the budgeted key has spent its budget, and recent requests stream in from the two live replicas.](docs/admin.png)
 Every measured number lives in [RESULTS.md](RESULTS.md), which is rendered
 from the raw files under `eval/results/`.
 
@@ -124,6 +129,18 @@ insufficient_quota` or Anthropic's `402 billing_error`. Per-key requests,
 tokens and dollars are on `/metrics`, served on a separate loopback
 listener (`admin_listen`, default `127.0.0.1:9090`).
 
+The same listener serves the admin page at http://127.0.0.1:9090/: every
+replica in the fleet with its rate, errors, latency, cache hit rate,
+degraded components and breaker states; every key with its limits and its
+budget as the shared ledger sees it; cache and router activity; and the
+last requests, each linked to its trace when `admin.trace_url` is set.
+Each replica publishes a report to Redis every 2 s, so any replica's page
+shows all of them, and one that stops reporting is marked stale, then
+down. The page is built from `web/` (React and TypeScript) and embedded in
+the binary; its data is `GET /api/overview`. Like `/metrics`, it is never
+on the public port, and it answers only requests addressed to a loopback
+name or an IP address.
+
 Docker: `make docker` builds a distroless image. `make dev` runs one replica
 with Redis, Ollama and the fake provider in compose, and `make fleet` runs
 three replicas behind nginx sharing one Redis. Both also run Jaeger (UI on
@@ -147,7 +164,7 @@ flowchart LR
     FA[api/anthropic<br/>/v1/messages]
     P[pipeline<br/>auth · route · router · limits · budget<br/>cache · provider · settle · log]
     H[hedge<br/>retries · hedging · breaker]
-    M[admin listener<br/>/metrics · /providers]
+    M[admin listener<br/>page · /api/overview · /metrics]
     FO --> P
     FA --> P
     P --> M
@@ -157,6 +174,7 @@ flowchart LR
   LB --> FO
   LB --> FA
   P <-->|Lua: fixed window or GCRA,<br/>reserve / settle,<br/>exact keys, vector index| R[(Redis 8)]
+  M <-->|fleet reports every 2 s| R
   P -->|/api/embed<br/>last user turn<br/>cache and router| E[Ollama embeddings]
   P -->|OTLP spans| J[Jaeger]
   P --> H
@@ -244,6 +262,27 @@ small contexts measured FLAT and HNSW are equally fast, FLAT is exact and
 builds in a second, and its unfiltered worst case at 100,000 entries
 (about 5–9 ms) is still below the embedding call, so the index is FLAT.
 
+**The hard part in M6: knowing what the gateway costs and what a failure
+costs, from measurements rather than claims.** Two harnesses answer it.
+`make bench` puts the gateway in front of the fake provider with features
+added one at a time (limits, budget, exact cache, tracing, semantic cache,
+router), each in a fresh process against direct runs that bracket the
+group, with a bootstrap interval on every step and the direct runs' own
+drift beside it. The breakdown found a real inefficiency: on an `auto`
+request the router and the semantic cache each embedded the same prompt,
+two calls to Ollama for one request. A per-request memo now shares the
+vector, and the re-run shows the router adding nothing measurable on top
+of the cache. `make chaos` runs three replicas behind nginx under three
+load streams (a cached workload, a rate-limited key, a budgeted key),
+kills a replica and then Redis, restarts both, and reports every phase
+from the per-request logs and the fake provider's ledger, with recovery
+times under a rule fixed before the run. Two findings came from it.
+nginx's strict round robin aliased with fixed-rate load and piled one
+key's requests onto one replica, so the chaos fleet picks replicas at
+random. And a Redis restart without persistence resets every budget, so
+a key can spend its budget a second time; the outage itself stays within
+the grace bound. RESULTS.md (Q1 and Q6) has the tables.
+
 **The hard part in M4: cutting the latency tail without paying for it
 twice.** A slow upstream request is usually not slow because of the prompt
 but because of where it landed, so asking again often comes back fast.
@@ -326,6 +365,10 @@ How the M1 streaming path is checked:
 | Compute (2 × parameters × tokens) as the cost of a local model | Free models still differ in what they cost to run, per token and in how much they write. | Latency: measured on a shared CPU, it moves with load. Dollars: zero for every local model. |
 | A key's model list caps what `auto` may choose | Operators use model lists to cap spend; `auto` must not be a way around them. | `auto` as its own permission reaching every candidate. |
 | An embedder failure sends `auto` to the most accurate candidate | A router must not turn an embedding outage into an API outage. | Failing the request: worse than no router. The cheapest candidate: silently worse answers. |
+| Admin fleet view published to Redis every 2 s, read back by any replica | Operators open one page and see every replica, including one that has stopped; nothing is added to the request path but an in-memory append. | Querying each replica directly: the page would need every replica's address and could not show one that is gone. Writing every request to Redis: a round trip per request for a page polled every 2 s. |
+| Admin page built into the binary, its build committed | `go install` gives a working page with no Node; `make ui-check` fails CI if the committed build no longer matches `web/`. | Building in the Dockerfile only: `go install` users get no page. Serving from disk: one more thing to deploy. |
+| Host-header check on the admin page and API | A loopback listener is still readable by any web page whose DNS name rebinds to 127.0.0.1. | Trusting loopback alone. |
+| One embedding per request, shared by the router and the semantic cache | Q1 showed two identical embedding calls on every `auto` request with the cache on. | Two calls: twice the load on the embedder, which on a CPU is the gateway's bottleneck. |
 | Open-loop load generator | Requests leave on schedule whether or not earlier ones finished, so a slow target cannot hide its queueing (coordinated omission). | Closed-loop workers: under-report the tail. |
 
 ## Development
@@ -338,9 +381,10 @@ test in compose (about 12 minutes), `make eval-cache` the semantic cache
 sweep and the FLAT against HNSW check, `make bench-hedge` the hedging
 benchmark, `make eval-router` the router's cross-validation from the
 committed recordings (`make eval-router-label` re-labels through the
-gateway), `make test-integration` the Lua
-scripts and the vector index against a real Redis 8, and `make results`
-re-renders RESULTS.md.
+gateway), `make chaos` the replica and Redis kill run, `make test-integration` the Lua
+scripts and the vector index against a real Redis 8, `make ui-check` the
+admin page's typecheck, lint, tests and build (`make ui` rebuilds it), and
+`make results` re-renders RESULTS.md.
 
 ## Roadmap
 
@@ -352,8 +396,11 @@ per attempt, so a provider that accepts connections and never answers opens
 the breaker instead of waiting on client disconnects · accept tool-call
 arguments that are not JSON in OpenAI-format history (a cut-off call echoed
 back is refused today) · the router's Claude candidates (needs a key) and
-a router evaluated on harder, mixed prompts ·
-M6 admin page, chaos run and the per-feature overhead breakdown · M7 release.
+a router evaluated on harder, mixed prompts · budgets that survive a Redis
+restart (AOF, or settling spend to a durable ledger; Q6 shows a restart
+resets them) · an embedding service sized for the fleet, since a CPU
+embedder caps the semantic cache and the router at its own rate (Q1
+measures it) · M7 release.
 
 ## Licence
 
