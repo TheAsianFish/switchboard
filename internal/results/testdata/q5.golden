@@ -79,7 +79,11 @@ candidate whose predicted probability of a correct answer is at least the
 target, and to the most accurate candidate when none clears it; sweeping
 the target traces the frontier. The random-mix line sends a fraction p of
 requests to `qwen2.5:3b` and the rest to `qwen2.5:0.5b`, for every p; a
-router that does not sit above it buys nothing a coin could not. The
+router that does not sit above it buys nothing a coin could not. With
+more than two candidates a middle one can sit above that line by itself,
+so the frontier is also compared with the candidates' hull: the best
+random mix of any two of them (added after the first run, when the middle
+candidate turned out to sit above the line). The
 operating point the gateway ships is fixed by rule before looking at the
 gain: the lowest target whose held-out accuracy is at least 95% of
 `qwen2.5:3b`'s. Its gain over the line has a bootstrap 95% interval from
@@ -89,7 +93,7 @@ resample. Accuracy intervals are Wilson 95%.
 ![Held-out router frontier against the random-mix line](eval/results/q5-router/frontier.svg)
 
 **Operating point.** `router` at target 0.70: 63.2% (59.2–66.9) accuracy at
-1,421,700 GFLOPs per 1,000 requests, 95.7% of `qwen2.5:3b`'s accuracy at 82.2% of its cost; gain over the line +3.7 points (95% CI +0.8 to +6.2). Routing share (`qwen2.5:0.5b` / `qwen2.5:1.5b` / `qwen2.5:3b`) per dataset: GSM8K 7% / 10% / 83%; MMLU 10% / 30% / 60%.
+1,421,700 GFLOPs per 1,000 requests, 95.7% of `qwen2.5:3b`'s accuracy at 82.2% of its cost; gain over the line +3.7 points (95% CI +0.8 to +6.2), over the candidates' hull +2.7 points (-0.2 to +5.2). Routing share (`qwen2.5:0.5b` / `qwen2.5:1.5b` / `qwen2.5:3b`) per dataset: GSM8K 7% / 10% / 83%; MMLU 10% / 30% / 60%.
 
 **Candidates.** Each model alone on every question.
 
@@ -117,23 +121,29 @@ learned.
 | knows the dataset: GSM8K to `qwen2.5:0.5b`, MMLU to `qwen2.5:3b` | 42.5% (38.6–46.5) | 997,500 | 64.4% | 57.6% |
 
 **Frontier of `router`** (embedding plus cheap features), held out. Line accuracy is
-the random mix at the same cost; gain is the difference in accuracy points.
-Mean gain over the line across the frontier's cost range: +5.4 points.
+the random mix at the same cost and hull accuracy the best random mix of
+any two candidates; gains are differences in accuracy points. Mean gain
+across the line's cost range: +5.4 points over the line (95% CI +3.4 to +7.4),
++4.4 over the hull (+2.4 to +6.4); the intervals resample questions with
+the routing decisions held fixed.
 
-| Target | Accuracy (95% CI) | GFLOPs per 1,000 requests | Line accuracy | Gain (points) | Share (`qwen2.5:0.5b` / `qwen2.5:1.5b` / `qwen2.5:3b`) |
-|-------:|------------------:|------:|--------------:|--------------:|------|
-| 0.30 | 41.3% (37.5–45.3) | 512,300 | 38.1% | +3.2 | 60% / 30% / 10% |
-| 0.50 | 55.8% (51.8–59.8) | 978,100 | 44.8% | +11.0 | 25% / 42% / 33% |
-| 0.70 (operating point) | 63.2% (59.2–66.9) | 1,421,700 | 59.5% | +3.7 | 8% / 20% / 72% |
+| Target | Accuracy (95% CI) | GFLOPs per 1,000 requests | Line accuracy | Gain over line | Hull accuracy | Gain over hull | Share (`qwen2.5:0.5b` / `qwen2.5:1.5b` / `qwen2.5:3b`) |
+|------:|------------------:|------:|--------------:|---------------:|--------------:|---------------:|------|
+| 0.30 | 41.3% (37.5–45.3) | 512,300 | 38.1% | +3.2 | 39.1% | +2.2 | 60% / 30% / 10% |
+| 0.50 | 55.8% (51.8–59.8) | 978,100 | 44.8% | +11.0 | 45.8% | +10.0 | 25% / 42% / 33% |
+| 0.70 (operating point) | 63.2% (59.2–66.9) | 1,421,700 | 59.5% | +3.7 | 60.5% | +2.7 | 8% / 20% / 72% |
 
 **Frontier of `router-cheap`** (cheap features only), held out. Line accuracy is
-the random mix at the same cost; gain is the difference in accuracy points.
-Mean gain over the line across the frontier's cost range: +0.2 points.
+the random mix at the same cost and hull accuracy the best random mix of
+any two candidates; gains are differences in accuracy points. Mean gain
+across the line's cost range: +0.2 points over the line (95% CI -1.8 to +2.2),
+-0.8 over the hull (-2.8 to +1.2); the intervals resample questions with
+the routing decisions held fixed.
 
-| Target | Accuracy (95% CI) | GFLOPs per 1,000 requests | Line accuracy | Gain (points) | Share (`qwen2.5:0.5b` / `qwen2.5:1.5b` / `qwen2.5:3b`) |
-|-------:|------------------:|------:|--------------:|--------------:|------|
-| 0.30 | 39.5% (35.7–43.5) | 640,000 | 40.7% | -1.2 | 50% / 30% / 20% |
-| 0.60 | 56.2% (52.2–60.1) | 1,302,000 | 54.5% | +1.7 | 17% / 30% / 53% |
+| Target | Accuracy (95% CI) | GFLOPs per 1,000 requests | Line accuracy | Gain over line | Hull accuracy | Gain over hull | Share (`qwen2.5:0.5b` / `qwen2.5:1.5b` / `qwen2.5:3b`) |
+|------:|------------------:|------:|--------------:|---------------:|--------------:|---------------:|------|
+| 0.30 | 39.5% (35.7–43.5) | 640,000 | 40.7% | -1.2 | 41.7% | -2.2 | 50% / 30% / 20% |
+| 0.60 | 56.2% (52.2–60.1) | 1,302,000 | 54.5% | +1.7 | 55.5% | +0.7 | 17% / 30% / 53% |
 
 **Correctness models.** How well each candidate's held-out probability of a
 correct answer separates right from wrong answers (AUROC, 0.5 is chance)
@@ -154,6 +164,38 @@ L2 strength the inner cross-validation chose (the mode over folds).
 - Commit: `abc1234`, run 2026-11-10.
 - Command: `switchboard eval router run`.
 - Cost: $0.00 (local models only).
+
+
+**What it says.**
+
+- **The served router beats the line, and
+  sits above the candidates' hull.** Across the line's cost
+  range `router` averages +5.4 points over the line (+3.4 to +7.4) and +4.4
+  over the hull (+2.4 to +6.4). The hull is not the line here: `qwen2.5:1.5b` (+9.8 points)
+  sits above the line on its own, so a router can gain over the line just
+  by sending traffic to it, and only the gain over the hull is routing.
+- **Correctness is hard to predict from the prompt.** Held-out AUROC of
+  the correctness models is 0.59 to 0.73 (0.5 is chance). Adding the 768-dimension
+  embedding to the nine cheap features moves the frontier from -0.8 to
+  +4.4 points over the hull, but the
+  correctness models table shows it ranks right from wrong answers worse
+  than the cheap features alone: a few hundred training prompts are too
+  few for that many dimensions, even with the L2 strength the inner
+  cross-validation picked. Meanwhile the oracle reaches 76.2% accuracy at 40.5% of `qwen2.5:3b`'s cost:
+  the candidates do differ question by question; the features cannot see
+  where.
+- **The serving rule ignores that cost varies by question.** It orders the
+  candidates by their mean cost, but a multiple-choice reply is a few
+  tokens while a worked solution is hundreds. The dataset rule GSM8K to `qwen2.5:3b`, MMLU to `qwen2.5:1.5b`
+  is +2.8 points above the hull: the larger of its two models answers
+  only the multiple-choice questions, where its replies are short. `router-cost` keeps `router-cheap`'s predictions and adds a
+  per-question cost estimate (a ridge regression on the same cheap
+  features, out of fold), sending each question to the candidate with the
+  highest P(correct) − weight × cost. It averages  points over the line
+  () and  over the hull (). It was designed after the first run
+  showed the problem, so it is a diagnosis to confirm on fresh questions,
+  not a result; the gateway still serves the threshold rule.
+
 
 **Limitations.**
 

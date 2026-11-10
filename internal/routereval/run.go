@@ -136,8 +136,9 @@ func runMain(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	op := s.OperatingPoint
 	_, _ = fmt.Fprintf(stdout, "%d questions, %d candidates, cost in %s, %s\n", s.Questions, len(s.Candidates), s.CostUnit, time.Since(start).Round(time.Second))
-	_, _ = fmt.Fprintf(stdout, "operating point: target %.2f, accuracy %.1f%% at %.1f%% of %s's cost (%.1f%% of its accuracy), gain over the line %+.1f points (95%% CI %+.1f to %+.1f)\n",
-		op.Target, 100*op.Accuracy, op.PctBestCost, s.Best, op.PctBestAccuracy, 100*op.Gain, 100*op.GainCI[0], 100*op.GainCI[1])
+	_, _ = fmt.Fprintf(stdout, "operating point: target %.2f, accuracy %.1f%% at %.1f%% of %s's cost (%.1f%% of its accuracy), gain over the line %+.1f points (95%% CI %+.1f to %+.1f), over the hull %+.1f (%+.1f to %+.1f)\n",
+		op.Target, 100*op.Accuracy, op.PctBestCost, s.Best, op.PctBestAccuracy, 100*op.Gain, 100*op.GainCI[0], 100*op.GainCI[1],
+		100*op.HullGain, 100*op.HullGainCI[0], 100*op.HullGainCI[1])
 	_, _ = fmt.Fprintf(stdout, "wrote %s\n", *out)
 	return nil
 }
@@ -248,6 +249,14 @@ func Run(t *Table, unit string, opt Options, log io.Writer) (*Summary, *router.W
 	}
 	s.Cheapest, s.Best = t.Models[cheap], t.Models[best]
 	line := t.lineFor(cheap, best, nil)
+	hull := t.hullFor(nil)
+	for _, c := range hull.Cost {
+		for _, cr := range s.Candidates {
+			if cr.CostPer1K == round6(c) {
+				s.Hull = append(s.Hull, cr.Model)
+			}
+		}
+	}
 
 	oracle := make([]int, n)
 	for q := range n {
@@ -283,17 +292,21 @@ func Run(t *Table, unit string, opt Options, log io.Writer) (*Summary, *router.W
 		if vi == 0 {
 			shipped = p
 		}
-		out := Variant{Name: v.Name, Description: v.Description, Brier: map[string]float64{}, AUROC: map[string]float64{}}
+		out := Variant{Name: v.Name, Description: v.Description, Knob: "target", Brier: map[string]float64{}, AUROC: map[string]float64{}}
 		var prev []int
+		var policies [][]int
 		for _, tg := range targets {
 			choice := p.Route(tg)
 			if slices.Equal(choice, prev) {
 				continue // the same policy as the previous target
 			}
 			prev = choice
-			out.Frontier = append(out.Frontier, t.frontierPoint(tg, choice, line))
+			policies = append(policies, choice)
+			out.Frontier = append(out.Frontier, t.frontierPoint(tg, choice, line, hull))
 		}
-		out.AUCGain = AUCGain(out.Frontier, line)
+		out.AUCGain = round6(AUCGain(out.Frontier, line, line))
+		out.AUCHullGain = round6(AUCGain(out.Frontier, line, hull))
+		out.AUCGainCI, out.AUCHullGainCI = t.bootAUC(policies, cheap, best, opt)
 		s.L2[v.Name] = map[string]float64{}
 		for m, name := range t.Models {
 			probs := make([]float64, n)
@@ -320,13 +333,23 @@ func Run(t *Table, unit string, opt Options, log io.Writer) (*Summary, *router.W
 			s.L2[v.Name][name] = mode(col)
 		}
 		s.Variants = append(s.Variants, out)
+		if v.Name == "router-cheap" {
+			cv, err := costVariant(t, p, line, hull, cheap, best, opt)
+			if err != nil {
+				return nil, nil, err
+			}
+			s.Variants = append(s.Variants, cv)
+		}
 		if log != nil {
-			_, _ = fmt.Fprintf(log, "%s: %d frontier points, mean gain over the line %+.2f points, %s\n",
-				v.Name, len(out.Frontier), 100*out.AUCGain, time.Since(start).Round(time.Second))
+			for _, o := range s.Variants[vi:] {
+				_, _ = fmt.Fprintf(log, "%s: %d frontier points, mean gain over the line %+.2f points (%+.2f to %+.2f), over the hull %+.2f (%+.2f to %+.2f), %s\n",
+					o.Name, len(o.Frontier), 100*o.AUCGain, 100*o.AUCGainCI[0], 100*o.AUCGainCI[1],
+					100*o.AUCHullGain, 100*o.AUCHullGainCI[0], 100*o.AUCHullGainCI[1], time.Since(start).Round(time.Second))
+			}
 		}
 	}
 
-	s.OperatingPoint = t.operatingPoint(shipped, targets, cheap, best, line, opt)
+	s.OperatingPoint = t.operatingPoint(shipped, targets, cheap, best, line, hull, opt)
 	s.OperatingPoint.Variant = Variants[0].Name
 
 	w, err := trainShipped(t, best, s.OperatingPoint.Target, unit, opt.Seed)
@@ -334,6 +357,75 @@ func Run(t *Table, unit string, opt Options, log io.Writer) (*Summary, *router.W
 		return nil, nil, err
 	}
 	return s, w, nil
+}
+
+// costVariant routes router-cheap's held-out predictions by the
+// cost-aware rule, sweeping its weight. It is a diagnosis, not a served
+// rule: does the threshold rule lose because it orders candidates by mean
+// cost when cost varies by question?
+func costVariant(t *Table, p *Prediction, line Line, hull Hull, cheap, best int, opt Options) (Variant, error) {
+	costHat, err := PredictCosts(t, opt.Folds, opt.Seed)
+	if err != nil {
+		return Variant{}, fmt.Errorf("router-cost: %w", err)
+	}
+	// The weight is per unit of the dearest candidate's mean predicted
+	// cost, so the grid means the same whatever the cost unit.
+	var scale float64
+	for m := range t.Models {
+		var sum float64
+		for q := range costHat {
+			sum += costHat[q][m]
+		}
+		scale = math.Max(scale, sum/float64(len(costHat)))
+	}
+	out := Variant{Name: "router-cost", Knob: "cost weight",
+		Description: "router-cheap's predictions; each question goes to the candidate with the highest P(correct) − weight × its predicted cost there; eval only",
+		Brier:       map[string]float64{}, AUROC: map[string]float64{}}
+	var prev []int
+	var policies [][]int
+	for _, w := range CostWeights() {
+		choice := p.RouteUtility(costHat, w, scale)
+		if slices.Equal(choice, prev) {
+			continue
+		}
+		prev = choice
+		policies = append(policies, choice)
+		out.Frontier = append(out.Frontier, t.frontierPoint(w, choice, line, hull))
+	}
+	out.AUCGain = round6(AUCGain(out.Frontier, line, line))
+	out.AUCHullGain = round6(AUCGain(out.Frontier, line, hull))
+	out.AUCGainCI, out.AUCHullGainCI = t.bootAUC(policies, cheap, best, opt)
+	return out, nil
+}
+
+// bootAUC is the bootstrap interval of a frontier's mean gain over the
+// line and over the hull: each resample re-scores every policy on the
+// frontier, and rebuilds the line and the hull, on the same questions.
+func (t *Table) bootAUC(policies [][]int, cheap, best int, opt Options) (line, hull [2]float64) {
+	n := len(t.Questions)
+	rng := rand.New(rand.NewPCG(opt.Seed, 0xa0c))
+	lg := make([]float64, opt.Bootstrap)
+	hg := make([]float64, opt.Bootstrap)
+	sample := make([]int, n)
+	pts := make([]FrontierPoint, len(policies))
+	for b := range opt.Bootstrap {
+		for k := range sample {
+			sample[k] = rng.IntN(n)
+		}
+		for i, pol := range policies {
+			acc, c := t.Evaluate(pol, sample)
+			pts[i] = FrontierPoint{Point: Point{Accuracy: acc, CostPer1K: c}}
+		}
+		l := t.lineFor(cheap, best, sample)
+		lg[b] = AUCGain(pts, l, l)
+		hg[b] = AUCGain(pts, l, t.hullFor(sample))
+	}
+	sort.Float64s(lg)
+	sort.Float64s(hg)
+	ci := func(v []float64) [2]float64 {
+		return [2]float64{round6(quantile(v, 0.025)), round6(quantile(v, 0.975))}
+	}
+	return ci(lg), ci(hg)
 }
 
 func targetGrid() []float64 {
@@ -351,7 +443,7 @@ func (t *Table) point(choice []int) Point {
 	return Point{Accuracy: round6(acc), AccuracyCI: roundPair(Wilson(k, len(choice))), CostPer1K: round6(c)}
 }
 
-func (t *Table) frontierPoint(target float64, choice []int, line Line) FrontierPoint {
+func (t *Table) frontierPoint(target float64, choice []int, line Line, hull Hull) FrontierPoint {
 	pt := t.point(choice)
 	share := map[string]float64{}
 	for _, m := range choice {
@@ -360,8 +452,11 @@ func (t *Table) frontierPoint(target float64, choice []int, line Line) FrontierP
 	for k := range share {
 		share[k] = round6(share[k] / float64(len(choice)))
 	}
-	la := line.At(pt.CostPer1K)
-	return FrontierPoint{Target: target, Point: pt, LineAccuracy: round6(la), Gain: round6(pt.Accuracy - la), Share: share}
+	la, ha := line.At(pt.CostPer1K), hull.At(pt.CostPer1K)
+	return FrontierPoint{
+		Target: target, Point: pt, LineAccuracy: round6(la), Gain: round6(pt.Accuracy - la),
+		HullAccuracy: round6(ha), HullGain: round6(pt.Accuracy - ha), Share: share,
+	}
 }
 
 // operatingPoint applies the rule fixed before the run (the lowest target
@@ -369,7 +464,7 @@ func (t *Table) frontierPoint(target float64, choice []int, line Line) FrontierP
 // and bootstraps the gain over the line. Each resample re-applies the
 // rule, so the interval includes the uncertainty of choosing the target
 // on the same questions it is scored on.
-func (t *Table) operatingPoint(p *Prediction, targets []float64, cheap, best int, line Line, opt Options) OperatingPoint {
+func (t *Table) operatingPoint(p *Prediction, targets []float64, cheap, best int, line Line, hull Hull, opt Options) OperatingPoint {
 	n := len(t.Questions)
 	choices := make([][]int, len(targets))
 	for i, tg := range targets {
@@ -390,7 +485,7 @@ func (t *Table) operatingPoint(p *Prediction, targets []float64, cheap, best int
 		return top, false
 	}
 	i, met := pick(nil, line)
-	op := OperatingPoint{FrontierPoint: t.frontierPoint(targets[i], choices[i], line), Met: met}
+	op := OperatingPoint{FrontierPoint: t.frontierPoint(targets[i], choices[i], line, hull), Met: met}
 	bestPt := t.point(constant(n, best))
 	op.PctBestAccuracy = round6(100 * op.Accuracy / bestPt.Accuracy)
 	op.PctBestCost = round6(100 * op.CostPer1K / bestPt.CostPer1K)
@@ -412,6 +507,7 @@ func (t *Table) operatingPoint(p *Prediction, targets []float64, cheap, best int
 
 	rng := rand.New(rand.NewPCG(opt.Seed, 0xb007))
 	gains := make([]float64, opt.Bootstrap)
+	hullGains := make([]float64, opt.Bootstrap)
 	sample := make([]int, n)
 	for b := range opt.Bootstrap {
 		for k := range sample {
@@ -421,9 +517,12 @@ func (t *Table) operatingPoint(p *Prediction, targets []float64, cheap, best int
 		j, _ := pick(sample, l)
 		acc, c := t.Evaluate(choices[j], sample)
 		gains[b] = acc - l.At(c)
+		hullGains[b] = acc - t.hullFor(sample).At(c)
 	}
 	sort.Float64s(gains)
+	sort.Float64s(hullGains)
 	op.GainCI = [2]float64{round6(quantile(gains, 0.025)), round6(quantile(gains, 0.975))}
+	op.HullGainCI = [2]float64{round6(quantile(hullGains, 0.025)), round6(quantile(hullGains, 0.975))}
 	return op
 }
 

@@ -45,6 +45,7 @@ func PlotFrontier(s Summary) []byte {
 	p.header(&b)
 	p.axes(&b)
 	p.line(&b)
+	p.hull(&b)
 	p.datasetRules(&b)
 	p.variants(&b)
 	p.candidates(&b)
@@ -333,6 +334,37 @@ func (p *frontierPlot) line(b *bytes.Buffer) {
 		strings.Join(pts, " "), svgMuted, svgEsc(p.s.Cheapest), svgEsc(p.s.Best))
 }
 
+// hull is the candidates' upper hull, drawn only when a middle candidate
+// lifts it above the line.
+func (p *frontierPlot) hull(b *bytes.Buffer) {
+	if len(p.s.Hull) < 3 {
+		return
+	}
+	byModel := map[string]Point{}
+	for _, c := range p.s.Candidates {
+		byModel[c.Model] = c.Point
+	}
+	n := 1
+	if p.log {
+		n = 64
+	}
+	var pts []string
+	for i := 1; i < len(p.s.Hull); i++ {
+		a, z := byModel[p.s.Hull[i-1]], byModel[p.s.Hull[i]]
+		for k := 0; k <= n; k++ {
+			if k == 0 && i > 1 {
+				continue
+			}
+			t := float64(k) / float64(n)
+			c := a.CostPer1K + t*(z.CostPer1K-a.CostPer1K)
+			acc := a.Accuracy + t*(z.Accuracy-a.Accuracy)
+			pts = append(pts, svgNum(p.px(c))+","+svgNum(p.py(acc)))
+		}
+	}
+	fmt.Fprintf(b, `<polyline class="hull" points="%s" fill="none" stroke="%s" stroke-width="1.5" stroke-dasharray="2 3" stroke-linecap="round"><title>best random mix of two candidates</title></polyline>`+"\n",
+		strings.Join(pts, " "), svgInk2)
+}
+
 func (p *frontierPlot) datasetRules(b *bytes.Buffer) {
 	for _, r := range p.s.DatasetRules {
 		x, y := p.xy(r.Point)
@@ -442,13 +474,13 @@ func (p *frontierPlot) operating(b *bytes.Buffer) {
 	fmt.Fprintf(b, `<circle class="operating" cx="%s" cy="%s" r="9" fill="none" stroke="%s" stroke-width="2"><title>operating point (%s, target %s): %s at %s</title></circle>`+"\n",
 		svgNum(x), svgNum(y), col, svgEsc(op.Variant), strconv.FormatFloat(op.Target, 'f', 2, 64), svgPct(op.Accuracy), svgEsc(p.costText(op.CostPer1K)))
 	text := "operating point, target " + strconv.FormatFloat(op.Target, 'f', 2, 64)
-	// Above and to the left: the region over a rising frontier is empty
-	// unless a point beats the operating point at lower cost.
+	// Below and to the left: candidate labels sit above their points, and
+	// near the dear end the operating point is close to the best one.
 	anchor, dx := "end", -12.0
 	if x < float64(svgPadL)+200 {
 		anchor, dx = "start", 12
 	}
-	fmt.Fprintf(b, `<text x="%s" y="%s" font-size="11" font-weight="600" fill="%s" text-anchor="%s">%s</text>`+"\n", svgNum(x+dx), svgNum(y-12), svgInk, anchor, svgEsc(text))
+	fmt.Fprintf(b, `<text x="%s" y="%s" font-size="11" font-weight="600" fill="%s" text-anchor="%s">%s</text>`+"\n", svgNum(x+dx), svgNum(y+20), svgInk, anchor, svgEsc(text))
 }
 
 // legendEntry is one key in the legend band.
@@ -463,6 +495,9 @@ func (p *frontierPlot) legendEntries() []legendEntry {
 	}
 	if p.cheapest != nil && p.best != nil {
 		es = append(es, legendEntry{"line", svgMuted, "random mix of " + p.s.Cheapest + " and " + p.s.Best})
+	}
+	if len(p.s.Hull) >= 3 {
+		es = append(es, legendEntry{"hull", svgInk2, "best mix of two candidates"})
 	}
 	es = append(es, legendEntry{"candidate", svgInk, "candidate model"}, legendEntry{"oracle", svgInk2, "oracle"})
 	if len(p.s.DatasetRules) > 0 {
@@ -513,6 +548,8 @@ func (p *frontierPlot) legend(b *bytes.Buffer) {
 			fmt.Fprintf(b, `<line x1="%s" y1="%s" x2="%s" y2="%s" stroke="%s" stroke-width="2"/><circle cx="%s" cy="%s" r="3.5" fill="%s"/>`+"\n", svgNum(kx-10), svgNum(cy), svgNum(kx+10), svgNum(cy), e.colour, svgNum(kx), svgNum(cy), e.colour)
 		case "line":
 			fmt.Fprintf(b, `<line x1="%s" y1="%s" x2="%s" y2="%s" stroke="%s" stroke-width="2" stroke-dasharray="6 4"/>`+"\n", svgNum(kx-10), svgNum(cy), svgNum(kx+10), svgNum(cy), e.colour)
+		case "hull":
+			fmt.Fprintf(b, `<line x1="%s" y1="%s" x2="%s" y2="%s" stroke="%s" stroke-width="1.5" stroke-dasharray="2 3"/>`+"\n", svgNum(kx-10), svgNum(cy), svgNum(kx+10), svgNum(cy), e.colour)
 		case "candidate":
 			fmt.Fprintf(b, `<circle cx="%s" cy="%s" r="4.5" fill="%s"/>`+"\n", svgNum(kx), svgNum(cy), e.colour)
 		case "oracle":

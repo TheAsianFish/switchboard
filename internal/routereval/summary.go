@@ -57,21 +57,35 @@ type FrontierPoint struct {
 	LineAccuracy float64 `json:"line_accuracy"`
 	// Gain is Accuracy − LineAccuracy.
 	Gain float64 `json:"gain"`
+	// HullAccuracy is the candidates' hull at this point's cost: the best
+	// random mix of any two candidates. HullGain is Accuracy minus it.
+	HullAccuracy float64 `json:"hull_accuracy"`
+	HullGain     float64 `json:"hull_gain"`
 	// Share is the fraction of requests sent to each candidate.
 	Share map[string]float64 `json:"share"`
 }
 
 // Variant is one router configuration's held-out frontier.
 type Variant struct {
-	// Name is "router" (embedding plus cheap features) or "router-cheap"
-	// (cheap features only).
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Frontier    []FrontierPoint `json:"frontier"`
+	// Name is "router" (embedding plus cheap features), "router-cheap"
+	// (cheap features only) or "router-cost" (router-cheap's predictions
+	// routed by a per-question cost estimate; eval only, not served).
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Knob names what FrontierPoint.Target holds: "target" (the quality
+	// target) or "cost weight" (the cost-aware rule's weight).
+	Knob     string          `json:"knob"`
+	Frontier []FrontierPoint `json:"frontier"`
 	// AUCGain is the mean gain over the line across the line's cost
 	// range, as a fraction like Gain; positive means above the line on
 	// average.
 	AUCGain float64 `json:"auc_gain"`
+	// AUCHullGain is the same mean gain over the candidates' hull.
+	AUCHullGain float64 `json:"auc_hull_gain"`
+	// AUCGainCI and AUCHullGainCI are bootstrap 95% intervals of the two
+	// means, resampling questions with the routing decisions held fixed.
+	AUCGainCI     [2]float64 `json:"auc_gain_ci"`
+	AUCHullGainCI [2]float64 `json:"auc_hull_gain_ci"`
 	// MeanBrier is the mean Brier score of the per-candidate correctness
 	// predictions on held-out folds, per candidate.
 	Brier map[string]float64 `json:"brier"`
@@ -93,6 +107,8 @@ type OperatingPoint struct {
 	// GainCI is a bootstrap 95% interval of Gain, resampling questions
 	// and re-applying the selection rule in every resample.
 	GainCI [2]float64 `json:"gain_ci"`
+	// HullGainCI is the same interval for HullGain.
+	HullGainCI [2]float64 `json:"hull_gain_ci"`
 	// ShareByDataset is the routing share per dataset.
 	ShareByDataset map[string]map[string]float64 `json:"share_by_dataset"`
 	// Met is false when no target reached the rule's accuracy; the
@@ -130,6 +146,9 @@ type Summary struct {
 	// Cheapest and Best name the line's two ends.
 	Cheapest string `json:"cheapest"`
 	Best     string `json:"best"`
+	// Hull names the candidates on the hull, cheapest first. A candidate
+	// between the ends that is on it sits above the line by itself.
+	Hull []string `json:"hull"`
 	// Oracle sends each question to the cheapest candidate that got it
 	// right (the cheapest candidate when none did).
 	Oracle         Point          `json:"oracle"`

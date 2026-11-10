@@ -56,9 +56,9 @@ func TestRenderQ5(t *testing.T) {
 		"| `router` at target 0.70 (operating point, held out) | 63.2% (59.2–66.9) | 1,421,700 | 95.7% | 82.2% |",
 		"| knows the dataset: GSM8K to `qwen2.5:3b`, MMLU to `qwen2.5:1.5b` | 63.3% (59.4–67.1) |",
 		"**Frontier of `router`** (embedding plus cheap features), held out.",
-		"Mean gain over the line across the frontier's cost range: +5.4 points.",
-		"| 0.70 (operating point) | 63.2% (59.2–66.9) | 1,421,700 | 59.5% | +3.7 | 8% / 20% / 72% |",
-		"| 0.30 | 39.5% (35.7–43.5) | 640,000 | 40.7% | -1.2 | 50% / 30% / 20% |",
+		"across the line's cost range: +5.4 points over the line (95% CI +3.4 to +7.4),\n+4.4 over the hull (+2.4 to +6.4)",
+		"| 0.70 (operating point) | 63.2% (59.2–66.9) | 1,421,700 | 59.5% | +3.7 | 60.5% | +2.7 | 8% / 20% / 72% |",
+		"| 0.30 | 39.5% (35.7–43.5) | 640,000 | 40.7% | -1.2 | 41.7% | -2.2 | 50% / 30% / 20% |",
 		"| `router-cheap` | `qwen2.5:3b` | 0.612 | 0.219 | 0.3 |",
 		"(Ollama 0.40.15 on the same machine)",
 		"- Labels: 2026-11-09 to 2026-11-10, 7 h 26 min of summed request time.",
@@ -244,7 +244,7 @@ func TestRenderQ5Variants(t *testing.T) {
 			t.Errorf("render lacks %q", want)
 		}
 	}
-	for _, unwanted := range []string{"local models only", "Q5 with the Claude candidates", "GSM8K to `a`", "GSM8K to `qwen2.5:3b`, MMLU to `qwen2.5:0.5b`"} {
+	for _, unwanted := range []string{"local models only", "Q5 with the Claude candidates", "knows the dataset: GSM8K to `a`", "GSM8K to `qwen2.5:3b`, MMLU to `qwen2.5:0.5b`"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("render has %q", unwanted)
 		}

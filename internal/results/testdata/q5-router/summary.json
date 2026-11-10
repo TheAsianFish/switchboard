@@ -1,64 +1,328 @@
 {
   "cost_unit": "gflops",
   "questions": 600,
-  "by_dataset": {"gsm8k": 300, "mmlu": 300},
+  "by_dataset": {
+    "gsm8k": 300,
+    "mmlu": 300
+  },
   "folds": 5,
   "seed": 1,
   "bootstrap": 1000,
   "accuracy_rule": 0.95,
   "l2": {
-    "router": {"qwen2.5:0.5b": 10, "qwen2.5:1.5b": 3, "qwen2.5:3b": 3},
-    "router-cheap": {"qwen2.5:0.5b": 1, "qwen2.5:1.5b": 1, "qwen2.5:3b": 0.3}
+    "router": {
+      "qwen2.5:0.5b": 10,
+      "qwen2.5:1.5b": 3,
+      "qwen2.5:3b": 3
+    },
+    "router-cheap": {
+      "qwen2.5:0.5b": 1,
+      "qwen2.5:1.5b": 1,
+      "qwen2.5:3b": 0.3
+    }
   },
   "candidates": [
-    {"model": "qwen2.5:0.5b", "accuracy": 0.32, "accuracy_ci": [0.2840, 0.3583], "cost_per_1k": 264600,
-     "by_dataset": {"gsm8k": 0.2433, "mmlu": 0.3967}, "latency_p50_ms": 1840, "latency_p95_ms": 4210,
-     "mean_input_tokens": 152.4, "mean_output_tokens": 117.6, "truncated": 4, "nanodollars": 0},
-    {"model": "qwen2.5:1.5b", "accuracy": 0.55, "accuracy_ci": [0.5100, 0.5894], "cost_per_1k": 831600,
-     "by_dataset": {"gsm8k": 0.5467, "mmlu": 0.5533}, "latency_p50_ms": 4630, "latency_p95_ms": 10950,
-     "mean_input_tokens": 152.4, "mean_output_tokens": 121.0, "truncated": 1, "nanodollars": 0},
-    {"model": "qwen2.5:3b", "accuracy": 0.66, "accuracy_ci": [0.6213, 0.6967], "cost_per_1k": 1730400,
-     "by_dataset": {"gsm8k": 0.7133, "mmlu": 0.6067}, "latency_p50_ms": 8920, "latency_p95_ms": 19480,
-     "mean_input_tokens": 152.4, "mean_output_tokens": 127.6, "truncated": 0, "nanodollars": 0}
+    {
+      "model": "qwen2.5:0.5b",
+      "accuracy": 0.32,
+      "accuracy_ci": [
+        0.284,
+        0.3583
+      ],
+      "cost_per_1k": 264600,
+      "by_dataset": {
+        "gsm8k": 0.2433,
+        "mmlu": 0.3967
+      },
+      "latency_p50_ms": 1840,
+      "latency_p95_ms": 4210,
+      "mean_input_tokens": 152.4,
+      "mean_output_tokens": 117.6,
+      "truncated": 4,
+      "nanodollars": 0
+    },
+    {
+      "model": "qwen2.5:1.5b",
+      "accuracy": 0.55,
+      "accuracy_ci": [
+        0.51,
+        0.5894
+      ],
+      "cost_per_1k": 831600,
+      "by_dataset": {
+        "gsm8k": 0.5467,
+        "mmlu": 0.5533
+      },
+      "latency_p50_ms": 4630,
+      "latency_p95_ms": 10950,
+      "mean_input_tokens": 152.4,
+      "mean_output_tokens": 121.0,
+      "truncated": 1,
+      "nanodollars": 0
+    },
+    {
+      "model": "qwen2.5:3b",
+      "accuracy": 0.66,
+      "accuracy_ci": [
+        0.6213,
+        0.6967
+      ],
+      "cost_per_1k": 1730400,
+      "by_dataset": {
+        "gsm8k": 0.7133,
+        "mmlu": 0.6067
+      },
+      "latency_p50_ms": 8920,
+      "latency_p95_ms": 19480,
+      "mean_input_tokens": 152.4,
+      "mean_output_tokens": 127.6,
+      "truncated": 0,
+      "nanodollars": 0
+    }
   ],
   "cheapest": "qwen2.5:0.5b",
   "best": "qwen2.5:3b",
-  "oracle": {"accuracy": 0.7617, "accuracy_ci": [0.7258, 0.7941], "cost_per_1k": 701200},
+  "oracle": {
+    "accuracy": 0.7617,
+    "accuracy_ci": [
+      0.7258,
+      0.7941
+    ],
+    "cost_per_1k": 701200
+  },
   "dataset_rules": [
-    {"gsm8k": "qwen2.5:3b", "mmlu": "qwen2.5:1.5b", "accuracy": 0.6333, "accuracy_ci": [0.5940, 0.6709], "cost_per_1k": 1281000},
-    {"gsm8k": "qwen2.5:1.5b", "mmlu": "qwen2.5:3b", "accuracy": 0.5767, "accuracy_ci": [0.5368, 0.6155], "cost_per_1k": 1281000},
-    {"gsm8k": "qwen2.5:3b", "mmlu": "qwen2.5:0.5b", "accuracy": 0.555, "accuracy_ci": [0.5150, 0.5943], "cost_per_1k": 997500},
-    {"gsm8k": "qwen2.5:0.5b", "mmlu": "qwen2.5:3b", "accuracy": 0.425, "accuracy_ci": [0.3859, 0.4651], "cost_per_1k": 997500}
+    {
+      "gsm8k": "qwen2.5:3b",
+      "mmlu": "qwen2.5:1.5b",
+      "accuracy": 0.6333,
+      "accuracy_ci": [
+        0.594,
+        0.6709
+      ],
+      "cost_per_1k": 1281000
+    },
+    {
+      "gsm8k": "qwen2.5:1.5b",
+      "mmlu": "qwen2.5:3b",
+      "accuracy": 0.5767,
+      "accuracy_ci": [
+        0.5368,
+        0.6155
+      ],
+      "cost_per_1k": 1281000
+    },
+    {
+      "gsm8k": "qwen2.5:3b",
+      "mmlu": "qwen2.5:0.5b",
+      "accuracy": 0.555,
+      "accuracy_ci": [
+        0.515,
+        0.5943
+      ],
+      "cost_per_1k": 997500
+    },
+    {
+      "gsm8k": "qwen2.5:0.5b",
+      "mmlu": "qwen2.5:3b",
+      "accuracy": 0.425,
+      "accuracy_ci": [
+        0.3859,
+        0.4651
+      ],
+      "cost_per_1k": 997500
+    }
   ],
   "variants": [
-    {"name": "router", "description": "embedding plus cheap features",
-     "frontier": [
-       {"target": 0.3, "accuracy": 0.4133, "accuracy_ci": [0.3746, 0.4531], "cost_per_1k": 512300, "line_accuracy": 0.3809, "gain": 0.0324,
-        "share": {"qwen2.5:0.5b": 0.6, "qwen2.5:1.5b": 0.3, "qwen2.5:3b": 0.1}},
-       {"target": 0.5, "accuracy": 0.5583, "accuracy_ci": [0.5183, 0.5976], "cost_per_1k": 978100, "line_accuracy": 0.4483, "gain": 0.11,
-        "share": {"qwen2.5:0.5b": 0.25, "qwen2.5:1.5b": 0.4167, "qwen2.5:3b": 0.3333}},
-       {"target": 0.7, "accuracy": 0.6317, "accuracy_ci": [0.5923, 0.6693], "cost_per_1k": 1421700, "line_accuracy": 0.5951, "gain": 0.0366,
-        "share": {"qwen2.5:0.5b": 0.0833, "qwen2.5:1.5b": 0.2, "qwen2.5:3b": 0.7167}}
-     ],
-     "auc_gain": 0.0541,
-     "brier": {"qwen2.5:0.5b": 0.1821, "qwen2.5:1.5b": 0.2114, "qwen2.5:3b": 0.2003},
-     "auroc": {"qwen2.5:0.5b": 0.7342, "qwen2.5:1.5b": 0.6915, "qwen2.5:3b": 0.6688}},
-    {"name": "router-cheap", "description": "cheap features only",
-     "frontier": [
-       {"target": 0.3, "accuracy": 0.395, "accuracy_ci": [0.3567, 0.4346], "cost_per_1k": 640000, "line_accuracy": 0.4065, "gain": -0.0115,
-        "share": {"qwen2.5:0.5b": 0.5, "qwen2.5:1.5b": 0.3, "qwen2.5:3b": 0.2}},
-       {"target": 0.6, "accuracy": 0.5617, "accuracy_ci": [0.5216, 0.6009], "cost_per_1k": 1302000, "line_accuracy": 0.5452, "gain": 0.0165,
-        "share": {"qwen2.5:0.5b": 0.1667, "qwen2.5:1.5b": 0.3, "qwen2.5:3b": 0.5333}}
-     ],
-     "auc_gain": 0.0021,
-     "brier": {"qwen2.5:0.5b": 0.2012, "qwen2.5:1.5b": 0.2398, "qwen2.5:3b": 0.2187},
-     "auroc": {"qwen2.5:0.5b": 0.6611, "qwen2.5:1.5b": 0.5904, "qwen2.5:3b": 0.6122}}
+    {
+      "name": "router",
+      "description": "embedding plus cheap features",
+      "frontier": [
+        {
+          "target": 0.3,
+          "accuracy": 0.4133,
+          "accuracy_ci": [
+            0.3746,
+            0.4531
+          ],
+          "cost_per_1k": 512300,
+          "line_accuracy": 0.3809,
+          "gain": 0.0324,
+          "share": {
+            "qwen2.5:0.5b": 0.6,
+            "qwen2.5:1.5b": 0.3,
+            "qwen2.5:3b": 0.1
+          },
+          "hull_accuracy": 0.3909,
+          "hull_gain": 0.0224
+        },
+        {
+          "target": 0.5,
+          "accuracy": 0.5583,
+          "accuracy_ci": [
+            0.5183,
+            0.5976
+          ],
+          "cost_per_1k": 978100,
+          "line_accuracy": 0.4483,
+          "gain": 0.11,
+          "share": {
+            "qwen2.5:0.5b": 0.25,
+            "qwen2.5:1.5b": 0.4167,
+            "qwen2.5:3b": 0.3333
+          },
+          "hull_accuracy": 0.4583,
+          "hull_gain": 0.1
+        },
+        {
+          "target": 0.7,
+          "accuracy": 0.6317,
+          "accuracy_ci": [
+            0.5923,
+            0.6693
+          ],
+          "cost_per_1k": 1421700,
+          "line_accuracy": 0.5951,
+          "gain": 0.0366,
+          "share": {
+            "qwen2.5:0.5b": 0.0833,
+            "qwen2.5:1.5b": 0.2,
+            "qwen2.5:3b": 0.7167
+          },
+          "hull_accuracy": 0.6051,
+          "hull_gain": 0.0266
+        }
+      ],
+      "auc_gain": 0.0541,
+      "brier": {
+        "qwen2.5:0.5b": 0.1821,
+        "qwen2.5:1.5b": 0.2114,
+        "qwen2.5:3b": 0.2003
+      },
+      "auroc": {
+        "qwen2.5:0.5b": 0.7342,
+        "qwen2.5:1.5b": 0.6915,
+        "qwen2.5:3b": 0.6688
+      },
+      "auc_hull_gain": 0.0441,
+      "knob": "target",
+      "auc_gain_ci": [
+        0.0341,
+        0.0741
+      ],
+      "auc_hull_gain_ci": [
+        0.0241,
+        0.0641
+      ]
+    },
+    {
+      "name": "router-cheap",
+      "description": "cheap features only",
+      "frontier": [
+        {
+          "target": 0.3,
+          "accuracy": 0.395,
+          "accuracy_ci": [
+            0.3567,
+            0.4346
+          ],
+          "cost_per_1k": 640000,
+          "line_accuracy": 0.4065,
+          "gain": -0.0115,
+          "share": {
+            "qwen2.5:0.5b": 0.5,
+            "qwen2.5:1.5b": 0.3,
+            "qwen2.5:3b": 0.2
+          },
+          "hull_accuracy": 0.4165,
+          "hull_gain": -0.0215
+        },
+        {
+          "target": 0.6,
+          "accuracy": 0.5617,
+          "accuracy_ci": [
+            0.5216,
+            0.6009
+          ],
+          "cost_per_1k": 1302000,
+          "line_accuracy": 0.5452,
+          "gain": 0.0165,
+          "share": {
+            "qwen2.5:0.5b": 0.1667,
+            "qwen2.5:1.5b": 0.3,
+            "qwen2.5:3b": 0.5333
+          },
+          "hull_accuracy": 0.5552,
+          "hull_gain": 0.0065
+        }
+      ],
+      "auc_gain": 0.0021,
+      "brier": {
+        "qwen2.5:0.5b": 0.2012,
+        "qwen2.5:1.5b": 0.2398,
+        "qwen2.5:3b": 0.2187
+      },
+      "auroc": {
+        "qwen2.5:0.5b": 0.6611,
+        "qwen2.5:1.5b": 0.5904,
+        "qwen2.5:3b": 0.6122
+      },
+      "auc_hull_gain": -0.0079,
+      "knob": "target",
+      "auc_gain_ci": [
+        -0.0179,
+        0.0221
+      ],
+      "auc_hull_gain_ci": [
+        -0.0279,
+        0.0121
+      ]
+    }
   ],
   "operating_point": {
-    "variant": "router", "target": 0.7, "accuracy": 0.6317, "accuracy_ci": [0.5923, 0.6693], "cost_per_1k": 1421700,
-    "line_accuracy": 0.5951, "gain": 0.0366, "share": {"qwen2.5:0.5b": 0.0833, "qwen2.5:1.5b": 0.2, "qwen2.5:3b": 0.7167},
-    "pct_best_accuracy": 95.71, "pct_best_cost": 82.16, "gain_ci": [0.0083, 0.0617],
-    "share_by_dataset": {"mmlu": {"qwen2.5:0.5b": 0.1, "qwen2.5:1.5b": 0.3, "qwen2.5:3b": 0.6}, "gsm8k": {"qwen2.5:0.5b": 0.0667, "qwen2.5:1.5b": 0.1, "qwen2.5:3b": 0.8333}},
-    "met": true
-  }
+    "variant": "router",
+    "target": 0.7,
+    "accuracy": 0.6317,
+    "accuracy_ci": [
+      0.5923,
+      0.6693
+    ],
+    "cost_per_1k": 1421700,
+    "line_accuracy": 0.5951,
+    "gain": 0.0366,
+    "share": {
+      "qwen2.5:0.5b": 0.0833,
+      "qwen2.5:1.5b": 0.2,
+      "qwen2.5:3b": 0.7167
+    },
+    "pct_best_accuracy": 95.71,
+    "pct_best_cost": 82.16,
+    "gain_ci": [
+      0.0083,
+      0.0617
+    ],
+    "share_by_dataset": {
+      "mmlu": {
+        "qwen2.5:0.5b": 0.1,
+        "qwen2.5:1.5b": 0.3,
+        "qwen2.5:3b": 0.6
+      },
+      "gsm8k": {
+        "qwen2.5:0.5b": 0.0667,
+        "qwen2.5:1.5b": 0.1,
+        "qwen2.5:3b": 0.8333
+      }
+    },
+    "met": true,
+    "hull_accuracy": 0.6051,
+    "hull_gain": 0.0266,
+    "hull_gain_ci": [
+      -0.0017,
+      0.0517
+    ]
+  },
+  "hull": [
+    "qwen2.5:0.5b",
+    "qwen2.5:1.5b",
+    "qwen2.5:3b"
+  ]
 }

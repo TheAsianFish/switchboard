@@ -68,6 +68,30 @@ type Q5 struct {
 	// Estimate prices the Claude candidates' labels; nil when the
 	// summary has no local token counts to estimate from.
 	Estimate *Q5Estimate
+
+	// Findings are the derived values the findings paragraph quotes.
+	Findings Q5Findings
+}
+
+// Q5Findings are values derived from the summary for the findings prose.
+type Q5Findings struct {
+	// Variant is each variant by name.
+	Variant map[string]Q5Variant
+	// AUROC is the range of held-out AUROC over the served variants'
+	// candidates, "0.57 to 0.68".
+	AUROC string
+	// Middle lists candidates between the line's ends that sit above it
+	// on their own, "`m` (+4.7 points)".
+	Middle string
+	// TopRule is the dataset rule furthest above the hull, and
+	// TopRuleGain its gain over the hull in points; empty when none is
+	// above it.
+	TopRule, TopRuleGain string
+	// Oracle is "X% accuracy at Y% of `best`'s cost".
+	Oracle string
+	// Per variant name, whether its mean gain over the line and over the
+	// hull is above zero, and whether its interval excludes zero.
+	AboveLine, AboveHull, SureLine, SureHull, SureBelowHull map[string]bool
 }
 
 // Q5Candidate is one candidate model answering every question.
@@ -85,13 +109,20 @@ type Q5Baseline struct {
 
 // Q5Variant is one router configuration's held-out frontier.
 type Q5Variant struct {
-	Name, Description, AUCGain string
-	Rows                       []Q5FrontierRow
+	Name, Description, AUCGain, AUCHullGain string
+	// Knob is the column the frontier is swept over: "Target" or "Cost
+	// weight".
+	Knob string
+	// AUCGainCI and AUCHullGainCI are "lo to hi" in points.
+	AUCGainCI, AUCHullGainCI string
+	// Shown of Total frontier points are in Rows.
+	Shown, Total int
+	Rows         []Q5FrontierRow
 }
 
 // Q5FrontierRow is one quality target.
 type Q5FrontierRow struct {
-	Target, Accuracy, Cost, LineAccuracy, Gain, Share string
+	Target, Accuracy, Cost, LineAccuracy, Gain, HullAccuracy, HullGain, Share string
 	// Operating is true on the shipped operating point.
 	Operating bool
 }
@@ -249,16 +280,34 @@ func buildQ5(path string, s routereval.Summary, meta routereval.Meta) (*Q5, erro
 	}
 
 	for _, v := range s.Variants {
-		qv := Q5Variant{Name: v.Name, Description: v.Description, AUCGain: points(100 * v.AUCGain)}
-		for _, f := range v.Frontier {
+		qv := Q5Variant{Name: v.Name, Description: v.Description, AUCGain: points(100 * v.AUCGain), AUCHullGain: points(100 * v.AUCHullGain),
+			Knob:      "Target",
+			AUCGainCI: points(100*v.AUCGainCI[0]) + " to " + points(100*v.AUCGainCI[1]), AUCHullGainCI: points(100*v.AUCHullGainCI[0]) + " to " + points(100*v.AUCHullGainCI[1])}
+		if v.Knob == "cost weight" {
+			qv.Knob = "Cost weight"
+		}
+		knob := target
+		if v.Knob == "cost weight" {
+			knob = func(w float64) string { return strconv.FormatFloat(w, 'g', 3, 64) }
+		}
+		keep := q5KeepRows(v.Frontier, func(f routereval.FrontierPoint) bool {
+			return v.Name == op.Variant && f.Target == op.Target
+		})
+		qv.Shown, qv.Total = len(keep), len(v.Frontier)
+		for _, i := range keep {
+			f := v.Frontier[i]
 			qv.Rows = append(qv.Rows, Q5FrontierRow{
-				Target: target(f.Target), Accuracy: q5Acc(f.Point), Cost: c1k(f.CostPer1K),
+				Target: knob(f.Target), Accuracy: q5Acc(f.Point), Cost: c1k(f.CostPer1K),
 				LineAccuracy: pct1(f.LineAccuracy), Gain: points(100 * f.Gain),
+				HullAccuracy: pct1(f.HullAccuracy), HullGain: points(100 * f.HullGain),
 				Share:     q5Share(s.Candidates, f.Share),
 				Operating: v.Name == op.Variant && f.Target == op.Target,
 			})
 		}
 		q.Variants = append(q.Variants, qv)
+		if len(v.AUROC) == 0 && len(v.Brier) == 0 {
+			continue // shares another variant's predictions
+		}
 		for _, c := range s.Candidates {
 			cal := Q5Calibration{Variant: v.Name, Model: c.Model, AUROC: "—", Brier: "—", L2: "—"}
 			if a, ok := v.AUROC[c.Model]; ok {
@@ -277,14 +326,74 @@ func buildQ5(path string, s routereval.Summary, meta routereval.Meta) (*Q5, erro
 	if op.Variant != "" {
 		q.Operating = Q5Operating{
 			Variant: op.Variant, Target: target(op.Target), Accuracy: q5Acc(op.Point), Cost: c1k(op.CostPer1K), Met: op.Met,
-			Sentence: fmt.Sprintf("%s of `%s`'s accuracy at %s of its cost; gain over the line %s points (95%% CI %s to %s)",
+			Sentence: fmt.Sprintf("%s of `%s`'s accuracy at %s of its cost; gain over the line %s points (95%% CI %s to %s), over the candidates' hull %s points (%s to %s)",
 				pct1(op.PctBestAccuracy/100), s.Best, pct1(op.PctBestCost/100),
-				points(100*op.Gain), points(100*op.GainCI[0]), points(100*op.GainCI[1])),
+				points(100*op.Gain), points(100*op.GainCI[0]), points(100*op.GainCI[1]),
+				points(100*op.HullGain), points(100*op.HullGainCI[0]), points(100*op.HullGainCI[1])),
 			ShareByDataset: q5ShareByDataset(s.Candidates, op.ShareByDataset),
 		}
 	}
 	q.Estimate = q5Estimate(s, meta)
+	q.Findings = q5Findings(s, q.Variants)
 	return q, nil
+}
+
+func q5Findings(s routereval.Summary, variants []Q5Variant) Q5Findings {
+	f := Q5Findings{Variant: map[string]Q5Variant{}, AboveLine: map[string]bool{}, AboveHull: map[string]bool{},
+		SureLine: map[string]bool{}, SureHull: map[string]bool{}, SureBelowHull: map[string]bool{}}
+	for _, v := range variants {
+		f.Variant[v.Name] = v
+	}
+	for _, v := range s.Variants {
+		f.AboveLine[v.Name], f.AboveHull[v.Name] = v.AUCGain > 0, v.AUCHullGain > 0
+		f.SureLine[v.Name], f.SureHull[v.Name] = v.AUCGainCI[0] > 0, v.AUCHullGainCI[0] > 0
+		f.SureBelowHull[v.Name] = v.AUCHullGainCI[1] < 0
+	}
+	lo, hi := math.Inf(1), math.Inf(-1)
+	for _, v := range s.Variants {
+		if v.Knob == "cost weight" {
+			continue
+		}
+		for _, a := range v.AUROC {
+			lo, hi = math.Min(lo, a), math.Max(hi, a)
+		}
+	}
+	if lo <= hi {
+		f.AUROC = strconv.FormatFloat(lo, 'f', 2, 64) + " to " + strconv.FormatFloat(hi, 'f', 2, 64)
+	}
+	byModel := map[string]routereval.CandidateResult{}
+	var cost, acc []float64
+	for _, c := range s.Candidates {
+		byModel[c.Model] = c
+		cost, acc = append(cost, c.CostPer1K), append(acc, c.Accuracy)
+	}
+	ch, be := byModel[s.Cheapest], byModel[s.Best]
+	line := routereval.Line{CheapAcc: ch.Accuracy, CheapCost: ch.CostPer1K, BestAcc: be.Accuracy, BestCost: be.CostPer1K}
+	var mids []string
+	for _, c := range s.Candidates {
+		if c.Model == s.Cheapest || c.Model == s.Best {
+			continue
+		}
+		if g := c.Accuracy - line.At(c.CostPer1K); g > 0 {
+			mids = append(mids, fmt.Sprintf("`%s` (%s points)", c.Model, points(100*g)))
+		}
+	}
+	f.Middle = strings.Join(mids, ", ")
+	hull := routereval.NewHull(cost, acc)
+	top := 0.0
+	for _, r := range s.DatasetRules {
+		if g := r.Accuracy - hull.At(r.CostPer1K); g > top {
+			top = g
+			f.TopRule = fmt.Sprintf("GSM8K to `%s`, MMLU to `%s`", r.GSM8K, r.MMLU)
+		}
+	}
+	if f.TopRule != "" {
+		f.TopRuleGain = points(100 * top)
+	}
+	if be.CostPer1K > 0 {
+		f.Oracle = fmt.Sprintf("%s accuracy at %s of `%s`'s cost", pct1(s.Oracle.Accuracy), pct1(s.Oracle.CostPer1K/be.CostPer1K), s.Best)
+	}
+	return f
 }
 
 // q5Estimate prices the largest local candidate's tokens over the eval
@@ -441,6 +550,46 @@ func points(v float64) string {
 }
 
 func target(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) }
+
+// q5MaxRows bounds a frontier table; summary.json has every point.
+const q5MaxRows = 14
+
+// q5KeepRows picks the frontier rows a table shows: the ends, the
+// operating point, the points furthest above and below the hull, and
+// evenly spaced points between, in frontier order.
+func q5KeepRows(fr []routereval.FrontierPoint, operating func(routereval.FrontierPoint) bool) []int {
+	if len(fr) <= q5MaxRows {
+		out := make([]int, len(fr))
+		for i := range out {
+			out[i] = i
+		}
+		return out
+	}
+	keep := map[int]bool{0: true, len(fr) - 1: true}
+	hi, lo := 0, 0
+	for i, f := range fr {
+		if operating(f) {
+			keep[i] = true
+		}
+		if f.HullGain > fr[hi].HullGain {
+			hi = i
+		}
+		if f.HullGain < fr[lo].HullGain {
+			lo = i
+		}
+	}
+	keep[hi], keep[lo] = true, true
+	for k := 1; len(keep) < q5MaxRows && k < q5MaxRows; k++ {
+		keep[k*(len(fr)-1)/(q5MaxRows-1)] = true
+	}
+	out := make([]int, 0, len(keep))
+	for i := range fr {
+		if keep[i] {
+			out = append(out, i)
+		}
+	}
+	return out
+}
 
 func secs(ms float64) string { return strconv.FormatFloat(ms/1000, 'f', 2, 64) }
 

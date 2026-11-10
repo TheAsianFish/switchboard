@@ -2,6 +2,7 @@ package routereval
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -315,10 +316,76 @@ func (t *Table) lineFor(cheap, best int, sample []int) Line {
 	return Line{CheapAcc: ca, CheapCost: cc, BestAcc: ba, BestCost: bc}
 }
 
-// AUCGain is the mean of frontier minus line over the line's cost range,
+// Reference is an accuracy-against-cost curve a router is measured
+// against: the random-mix line, or the candidates' hull.
+type Reference interface {
+	At(cost float64) float64
+}
+
+// Hull is the upper hull of the candidates' points: for every cost, the
+// best accuracy a random mix of two candidates reaches. With two
+// candidates it is the line; with more, a candidate above the line
+// between the cheapest and the best lifts it, and a router that gains
+// over the line only by sending traffic to that candidate gains nothing
+// over the hull.
+type Hull struct {
+	Cost, Acc []float64
+}
+
+// NewHull builds the hull of points (cost, accuracy).
+func NewHull(cost, acc []float64) Hull {
+	idx := make([]int, len(cost))
+	for i := range idx {
+		idx[i] = i
+	}
+	slices.SortStableFunc(idx, func(a, b int) int {
+		if c := cmp.Compare(cost[a], cost[b]); c != 0 {
+			return c
+		}
+		return cmp.Compare(acc[b], acc[a])
+	})
+	var h Hull
+	for _, i := range idx {
+		x, y := cost[i], acc[i]
+		if n := len(h.Cost); n > 0 && (y <= h.Acc[n-1]) {
+			continue // dearer and no more accurate: never worth mixing in
+		}
+		// Drop vertices that fall on or under the chord to the new point.
+		for n := len(h.Cost); n >= 2; n = len(h.Cost) {
+			x1, y1, x2, y2 := h.Cost[n-2], h.Acc[n-2], h.Cost[n-1], h.Acc[n-1]
+			if (y2-y1)*(x-x1) > (y-y1)*(x2-x1) {
+				break
+			}
+			h.Cost, h.Acc = h.Cost[:n-1], h.Acc[:n-1]
+		}
+		h.Cost, h.Acc = append(h.Cost, x), append(h.Acc, y)
+	}
+	return h
+}
+
+// At is the hull's accuracy at a cost, held at its ends outside them.
+func (h Hull) At(cost float64) float64 {
+	n := len(h.Cost)
+	switch {
+	case n == 0:
+		return 0
+	case cost <= h.Cost[0]:
+		return h.Acc[0]
+	case cost >= h.Cost[n-1]:
+		return h.Acc[n-1]
+	}
+	for i := 1; i < n; i++ {
+		if cost <= h.Cost[i] {
+			return h.Acc[i-1] + (h.Acc[i]-h.Acc[i-1])*(cost-h.Cost[i-1])/(h.Cost[i]-h.Cost[i-1])
+		}
+	}
+	return h.Acc[n-1]
+}
+
+// AUCGain is the mean of frontier minus ref over the line's cost range,
 // with the frontier drawn through its points in cost order (the most
 // accurate point where several share a cost).
-func AUCGain(pts []FrontierPoint, l Line) float64 {
+func AUCGain(pts []FrontierPoint, l Line, ref Reference) float64 {
 	if len(pts) == 0 || l.BestCost <= l.CheapCost {
 		return 0
 	}
@@ -357,9 +424,20 @@ func AUCGain(pts []FrontierPoint, l Line) float64 {
 		if i == 0 || i == steps {
 			w = 0.5
 		}
-		sum += w * (f(x) - l.At(x))
+		sum += w * (f(x) - ref.At(x))
 	}
 	return sum / steps
+}
+
+// hullFor builds the candidates' hull on sample.
+func (t *Table) hullFor(sample []int) Hull {
+	n := len(t.Questions)
+	cost := make([]float64, len(t.Models))
+	acc := make([]float64, len(t.Models))
+	for m := range t.Models {
+		acc[m], cost[m] = t.Evaluate(constant(n, m), sample)
+	}
+	return NewHull(cost, acc)
 }
 
 // Wilson is the Wilson score 95% interval of k successes in n.
@@ -407,4 +485,145 @@ func AUROC(score []float64, label []bool) float64 {
 		return math.NaN()
 	}
 	return (rankSum - pos*(pos+1)/2) / (pos * neg)
+}
+
+// costRidge is the regularisation of the per-candidate cost regression,
+// on standardised cheap features.
+const costRidge = 1.0
+
+// PredictCosts estimates each candidate's cost on every question from its
+// cheap features, out of fold: a ridge regression per candidate, fitted on
+// the training folds. The serving rule orders candidates by their mean
+// cost; this asks whether knowing that a candidate is cheap on this
+// question (a multiple-choice reply is a few tokens, a worked solution
+// hundreds) would route better.
+func PredictCosts(t *Table, k int, seed uint64) ([][]float64, error) {
+	n, nm := len(t.Questions), len(t.Models)
+	all := make([]int, n)
+	for i := range all {
+		all[i] = i
+	}
+	fold := Folds(t.Questions, all, k, seed)
+	out := make([][]float64, n)
+	for f := range k {
+		var train []int
+		for i := range n {
+			if fold[i] != f {
+				train = append(train, i)
+			}
+		}
+		xs := make([][]float64, len(train))
+		for i, q := range train {
+			xs[i] = t.Cheap[q]
+		}
+		sc := router.FitScaler(xs)
+		for i := range xs {
+			xs[i] = sc.Apply(xs[i])
+		}
+		coef := make([][]float64, nm)
+		for m := range nm {
+			y := make([]float64, len(train))
+			for i, q := range train {
+				y[i] = t.Cost[q][m]
+			}
+			c, err := ridge(xs, y, costRidge)
+			if err != nil {
+				return nil, fmt.Errorf("fold %d, %s: %w", f, t.Models[m], err)
+			}
+			coef[m] = c
+		}
+		for q := range n {
+			if fold[q] != f {
+				continue
+			}
+			x := sc.Apply(t.Cheap[q])
+			out[q] = make([]float64, nm)
+			for m := range nm {
+				v := coef[m][0]
+				for j, xj := range x {
+					v += coef[m][j+1] * xj
+				}
+				out[q][m] = math.Max(v, 0)
+			}
+		}
+	}
+	return out, nil
+}
+
+// ridge solves min ‖y − b − Xw‖² + l2‖w‖² (intercept b unpenalised) by
+// the normal equations; X has a handful of columns.
+func ridge(xs [][]float64, y []float64, l2 float64) ([]float64, error) {
+	d := len(xs[0]) + 1
+	a := make([][]float64, d)
+	for i := range a {
+		a[i] = make([]float64, d+1)
+	}
+	for r, x := range xs {
+		row := append([]float64{1}, x...)
+		for i := range d {
+			for j := range d {
+				a[i][j] += row[i] * row[j]
+			}
+			a[i][d] += row[i] * y[r]
+		}
+	}
+	for i := 1; i < d; i++ {
+		a[i][i] += l2
+	}
+	// Gaussian elimination with partial pivoting.
+	for c := range d {
+		p := c
+		for r := c + 1; r < d; r++ {
+			if math.Abs(a[r][c]) > math.Abs(a[p][c]) {
+				p = r
+			}
+		}
+		if math.Abs(a[p][c]) < 1e-12 {
+			return nil, errors.New("ridge: singular system")
+		}
+		a[c], a[p] = a[p], a[c]
+		for r := range d {
+			if r == c {
+				continue
+			}
+			f := a[r][c] / a[c][c]
+			for j := c; j <= d; j++ {
+				a[r][j] -= f * a[c][j]
+			}
+		}
+	}
+	w := make([]float64, d)
+	for i := range d {
+		w[i] = a[i][d] / a[i][i]
+	}
+	return w, nil
+}
+
+// RouteUtility sends each question to the candidate with the highest
+// P(correct) − weight × predicted cost / scale, ties to the cheaper by
+// predicted cost. Weight 0 picks the likeliest to be right; a large weight
+// the cheapest on this question.
+func (p *Prediction) RouteUtility(costHat [][]float64, weight, scale float64) []int {
+	out := make([]int, len(p.Prob))
+	for q := range p.Prob {
+		best, bestU := -1, math.Inf(-1)
+		for m := range p.Prob[q] {
+			u := p.Prob[q][m] - weight*costHat[q][m]/scale
+			if u > bestU || (u == bestU && costHat[q][m] < costHat[q][best]) {
+				best, bestU = m, u
+			}
+		}
+		out[q] = best
+	}
+	return out
+}
+
+// CostWeights is the cost-weight grid swept for the cost-aware rule: 0,
+// then log-spaced from 10⁻³ to 10².
+func CostWeights() []float64 {
+	out := []float64{0}
+	for i := 0; i <= 100; i++ {
+		out = append(out, round6(math.Pow(10, -3+5*float64(i)/100)))
+	}
+	return out
 }

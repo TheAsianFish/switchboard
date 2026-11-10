@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"github.com/TheAsianFish/switchboard/internal/router"
@@ -59,9 +60,20 @@ func TestRunBeatsTheLineOnLearnableData(t *testing.T) {
 	if op.PctBestCost > 80 {
 		t.Errorf("operating point costs %.1f%% of the best candidate; routing the easy half should save more", op.PctBestCost)
 	}
+	if len(s.Variants) != 3 || s.Variants[2].Name != "router-cost" || s.Variants[2].Knob != "cost weight" {
+		t.Fatalf("variants %v: want router, router-cheap and the cost-aware diagnosis", s.Variants)
+	}
 	for _, v := range s.Variants {
 		if v.AUCGain <= 0 {
 			t.Errorf("%s: mean gain %v, want positive", v.Name, v.AUCGain)
+		}
+		if v.Knob == "cost weight" {
+			// Weight 0 sends each question to its likeliest candidate, a
+			// large weight to the cheapest.
+			if last := v.Frontier[len(v.Frontier)-1]; last.Share["small"] != 1 {
+				t.Errorf("%s: largest weight shares %v, want all small", v.Name, last.Share)
+			}
+			continue
 		}
 		if v.AUROC["small"] < 0.8 {
 			t.Errorf("%s: AUROC for small %v, want the length feature to separate it", v.Name, v.AUROC["small"])
@@ -138,14 +150,37 @@ func TestLineAndAUCGain(t *testing.T) {
 		}
 	}
 	onLine := []FrontierPoint{{Point: Point{Accuracy: 0.4, CostPer1K: 100}}, {Point: Point{Accuracy: 0.8, CostPer1K: 300}}}
-	if g := AUCGain(onLine, l); math.Abs(g) > 1e-9 {
+	if g := AUCGain(onLine, l, l); math.Abs(g) > 1e-9 {
 		t.Errorf("a frontier on the line gains %v, want 0", g)
 	}
 	// A frontier that reaches the best accuracy at the cheap end's cost
 	// is above the line by (0.8-0.4)/2 on average.
 	above := []FrontierPoint{{Point: Point{Accuracy: 0.8, CostPer1K: 100}}, {Point: Point{Accuracy: 0.8, CostPer1K: 300}}}
-	if g := AUCGain(above, l); math.Abs(g-0.2) > 1e-3 {
+	if g := AUCGain(above, l, l); math.Abs(g-0.2) > 1e-3 {
 		t.Errorf("gain %v, want 0.2", g)
+	}
+}
+
+func TestHull(t *testing.T) {
+	t.Parallel()
+	// A middle candidate above the line lifts the hull; one below it and
+	// one dearer but no better are left out.
+	h := NewHull([]float64{100, 200, 250, 300, 400}, []float64{0.4, 0.7, 0.5, 0.8, 0.75})
+	if !slices.Equal(h.Cost, []float64{100, 200, 300}) {
+		t.Fatalf("hull vertices at %v, want 100, 200, 300", h.Cost)
+	}
+	for _, tt := range []struct{ cost, want float64 }{{50, 0.4}, {150, 0.55}, {250, 0.75}, {500, 0.8}} {
+		if got := h.At(tt.cost); math.Abs(got-tt.want) > 1e-12 {
+			t.Errorf("At(%v) = %v, want %v", tt.cost, got, tt.want)
+		}
+	}
+	// On two candidates the hull is the line.
+	l := Line{CheapAcc: 0.4, CheapCost: 100, BestAcc: 0.8, BestCost: 300}
+	two := NewHull([]float64{300, 100}, []float64{0.8, 0.4})
+	for _, c := range []float64{100, 170, 300} {
+		if math.Abs(two.At(c)-l.At(c)) > 1e-12 {
+			t.Errorf("two-candidate hull at %v = %v, line %v", c, two.At(c), l.At(c))
+		}
 	}
 }
 

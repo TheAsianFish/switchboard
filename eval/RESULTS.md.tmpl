@@ -437,7 +437,11 @@ candidate whose predicted probability of a correct answer is at least the
 target, and to the most accurate candidate when none clears it; sweeping
 the target traces the frontier. The random-mix line sends a fraction p of
 requests to `{{.Best}}` and the rest to `{{.Cheapest}}`, for every p; a
-router that does not sit above it buys nothing a coin could not. The
+router that does not sit above it buys nothing a coin could not. With
+more than two candidates a middle one can sit above that line by itself,
+so the frontier is also compared with the candidates' hull: the best
+random mix of any two of them (added after the first run, when the middle
+candidate turned out to sit above the line). The
 operating point the gateway ships is fixed by rule before looking at the
 gain: the lowest target whose held-out accuracy is at least {{.AccuracyRule}} of
 `{{.Best}}`'s. Its gain over the line has a bootstrap 95% interval from
@@ -474,13 +478,18 @@ shown; `summary.json` has them all.{{end}}
 {{- end}}
 {{range .Variants}}
 **Frontier of `{{.Name}}`**{{if .Description}} ({{.Description}}){{end}}, held out. Line accuracy is
-the random mix at the same cost; gain is the difference in accuracy points.
-Mean gain over the line across the frontier's cost range: {{.AUCGain}} points.
+the random mix at the same cost and hull accuracy the best random mix of
+any two candidates; gains are differences in accuracy points. Mean gain
+across the line's cost range: {{.AUCGain}} points over the line (95% CI {{.AUCGainCI}}),
+{{.AUCHullGain}} over the hull ({{.AUCHullGainCI}}); the intervals resample questions with
+the routing decisions held fixed.{{if lt .Shown .Total}} {{.Shown}} of the {{.Total}} distinct policies are shown (the
+ends, the operating point, the largest gain and loss against the hull, and
+evenly spaced points); `summary.json` has them all.{{end}}
 
-| Target | Accuracy (95% CI) | {{$.Q5.CostAxis}} | Line accuracy | Gain (points) | Share ({{$.Q5.ShareHeader}}) |
-|-------:|------------------:|------:|--------------:|--------------:|------|
+| {{.Knob}} | Accuracy (95% CI) | {{$.Q5.CostAxis}} | Line accuracy | Gain over line | Hull accuracy | Gain over hull | Share ({{$.Q5.ShareHeader}}) |
+|------:|------------------:|------:|--------------:|---------------:|--------------:|---------------:|------|
 {{- range .Rows}}
-| {{.Target}}{{if .Operating}} (operating point){{end}} | {{.Accuracy}} | {{.Cost}} | {{.LineAccuracy}} | {{.Gain}} | {{.Share}} |
+| {{.Target}}{{if .Operating}} (operating point){{end}} | {{.Accuracy}} | {{.Cost}} | {{.LineAccuracy}} | {{.Gain}} | {{.HullAccuracy}} | {{.HullGain}} | {{.Share}} |
 {{- end}}
 {{end}}
 **Correctness models.** How well each candidate's held-out probability of a
@@ -500,7 +509,38 @@ L2 strength the inner cross-validation chose (the mode over folds).
 - Command: `{{.Command}}`.
 - Cost: {{.Spent}}{{if not .Live}} (local models only){{end}}.
 
-{{/* Q5 findings: written after the run */ -}}
+{{with .Findings}}{{with $r := index .Variant "router"}}{{with $c := index $.Q5.Findings.Variant "router-cheap"}}{{with $k := index $.Q5.Findings.Variant "router-cost"}}
+**What it says.**
+
+- **The served router{{if index $.Q5.Findings.SureLine "router"}} beats{{else}} does not clearly beat{{end}} the line, and
+  {{if index $.Q5.Findings.AboveHull "router"}}sits above{{else}}sits below{{end}} the candidates' hull.** Across the line's cost
+  range `router` averages {{$r.AUCGain}} points over the line ({{$r.AUCGainCI}}) and {{$r.AUCHullGain}}
+  over the hull ({{$r.AUCHullGainCI}}).{{if $.Q5.Findings.Middle}} The hull is not the line here: {{$.Q5.Findings.Middle}}
+  sits above the line on its own, so a router can gain over the line just
+  by sending traffic to it, and only the gain over the hull is routing.{{end}}
+- **Correctness is hard to predict from the prompt.** Held-out AUROC of
+  the correctness models is {{$.Q5.Findings.AUROC}} (0.5 is chance). Adding the 768-dimension
+  embedding to the nine cheap features {{if index $.Q5.Findings.AboveHull "router-cheap"}}does not help{{else}}moves the frontier from {{$c.AUCHullGain}} to
+  {{$r.AUCHullGain}} points over the hull{{end}}, but the
+  correctness models table shows it ranks right from wrong answers worse
+  than the cheap features alone: a few hundred training prompts are too
+  few for that many dimensions, even with the L2 strength the inner
+  cross-validation picked. Meanwhile the oracle reaches {{$.Q5.Findings.Oracle}}:
+  the candidates do differ question by question; the features cannot see
+  where.
+- **The serving rule ignores that cost varies by question.** It orders the
+  candidates by their mean cost, but a multiple-choice reply is a few
+  tokens while a worked solution is hundreds.{{if $.Q5.Findings.TopRule}} The dataset rule {{$.Q5.Findings.TopRule}}
+  is {{$.Q5.Findings.TopRuleGain}} points above the hull: the larger of its two models answers
+  only the multiple-choice questions, where its replies are short.{{end}} `router-cost` keeps `router-cheap`'s predictions and adds a
+  per-question cost estimate (a ridge regression on the same cheap
+  features, out of fold), sending each question to the candidate with the
+  highest P(correct) − weight × cost. It averages {{$k.AUCGain}} points over the line
+  ({{$k.AUCGainCI}}) and {{$k.AUCHullGain}} over the hull ({{$k.AUCHullGainCI}}). It was designed after the first run
+  showed the problem, so it is a diagnosis to confirm on fresh questions,
+  not a result; the gateway still serves the threshold rule.
+{{end}}{{end}}{{end}}{{end}}
+
 **Limitations.**
 {{if not .Live}}
 - Every candidate is a local model on one machine, so the cost axis is
