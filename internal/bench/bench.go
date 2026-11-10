@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -37,6 +38,9 @@ const (
 	// DefaultAnthropicMaxTokens is used for the Anthropic format, where
 	// max_tokens is required. The OpenAI format omits it when zero.
 	DefaultAnthropicMaxTokens = 64
+	// DefaultRepeatPool is the number of distinct repeated prompts when
+	// Repeat is set and RepeatPool is not.
+	DefaultRepeatPool = 50
 )
 
 // Config describes one run.
@@ -69,6 +73,21 @@ type Config struct {
 	// Result, so a later analysis can compute statistics the summary does
 	// not have, such as a confidence interval on a percentile.
 	KeepSamples bool
+	// Repeat is the share of requests, in [0, 1], that reuse a prompt from
+	// a fixed pool of RepeatPool prompts instead of sending a unique one,
+	// so a cache in front of the target sees repeats. The first use of a
+	// pool prompt is a miss that fills the cache; later uses can hit.
+	// Whether request i repeats, and which pool prompt it uses, depends
+	// only on Seed and i, so a run is reproducible whatever the timing.
+	Repeat     float64
+	RepeatPool int
+	Seed       uint64
+	// CacheDirective, if set, is sent as the gateway's cache directive
+	// header (off, exact or semantic) on every request.
+	CacheDirective string
+	// Log, if set, receives one JSON line per scheduled request when the
+	// run ends, warm-up included, in schedule order (see Record).
+	Log io.Writer
 }
 
 // withDefaults validates c and fills zero fields.
@@ -104,6 +123,15 @@ func (c Config) withDefaults() (Config, error) {
 	if c.Format == FormatAnthropic && c.MaxTokens == 0 {
 		c.MaxTokens = DefaultAnthropicMaxTokens
 	}
+	if c.Repeat < 0 || c.Repeat > 1 || math.IsNaN(c.Repeat) {
+		return c, fmt.Errorf("bench: repeat must be in [0, 1], got %v", c.Repeat)
+	}
+	if c.RepeatPool < 0 {
+		return c, fmt.Errorf("bench: repeat pool must not be negative, got %d", c.RepeatPool)
+	}
+	if c.Repeat > 0 && c.RepeatPool == 0 {
+		c.RepeatPool = DefaultRepeatPool
+	}
 	return c, nil
 }
 
@@ -121,10 +149,16 @@ type ConfigEcho struct {
 	TimeoutSec  float64 `json:"timeout_seconds"`
 	MaxInFlight int     `json:"max_in_flight"`
 	MaxTokens   int     `json:"max_tokens"`
+	// The repeat workload and the cache directive are recorded only when
+	// set, so a result without them reads as before.
+	Repeat         float64 `json:"repeat,omitempty"`
+	RepeatPool     int     `json:"repeat_pool,omitempty"`
+	Seed           uint64  `json:"seed,omitempty"`
+	CacheDirective string  `json:"cache_directive,omitempty"`
 }
 
 func echo(c Config) ConfigEcho {
-	return ConfigEcho{
+	e := ConfigEcho{
 		Label:       c.Label,
 		URL:         c.URL,
 		Format:      c.Format,
@@ -137,6 +171,11 @@ func echo(c Config) ConfigEcho {
 		MaxInFlight: c.MaxInFlight,
 		MaxTokens:   c.MaxTokens,
 	}
+	if c.Repeat > 0 {
+		e.Repeat, e.RepeatPool, e.Seed = c.Repeat, c.RepeatPool, c.Seed
+	}
+	e.CacheDirective = c.CacheDirective
+	return e
 }
 
 // Result is the outcome of a run. Its JSON form is the raw result file the
@@ -285,10 +324,14 @@ schedule:
 	res.StartedAt = startedAt.UTC()
 	res.PeakInFlight = int(peak)
 	res.Hardware = DetectHardware()
-	if err := ctx.Err(); err != nil {
-		return res, fmt.Errorf("bench: run interrupted: %w", err)
+	var logErr error
+	if cfg.Log != nil {
+		logErr = writeLog(cfg.Log, &cfg, results[:n], start)
 	}
-	return res, nil
+	if err := ctx.Err(); err != nil {
+		return res, errors.Join(fmt.Errorf("bench: run interrupted: %w", err), logErr)
+	}
+	return res, logErr
 }
 
 // summarise builds the Result from the scheduled requests.
