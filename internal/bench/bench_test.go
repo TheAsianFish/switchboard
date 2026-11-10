@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -69,7 +70,7 @@ func TestSummarise(t *testing.T) {
 	t.Parallel()
 	in := []time.Duration{3 * time.Millisecond, 1 * time.Millisecond, 2*time.Millisecond + 1234*time.Nanosecond, 10 * time.Millisecond}
 	got := Summarise(in)
-	want := Stats{Count: 4, Mean: 4.0, P50: 2.001, P90: 10, P99: 10, P999: 10, Max: 10}
+	want := Stats{Count: 4, Mean: 4.0, P50: 2.001, P90: 10, P95: 10, P99: 10, P999: 10, Max: 10}
 	if got != want {
 		t.Errorf("Summarise = %+v, want %+v", got, want)
 	}
@@ -112,6 +113,35 @@ func TestSummariseCountsSendDelay(t *testing.T) {
 	res := summarise(Config{Duration: time.Second}, rs, at, at.Add(time.Second))
 	if res.Latency.P50 != 60 || res.TTFT.P50 != 55 || res.SendDelay.P50 != 50 {
 		t.Errorf("latency %v, ttft %v, send delay %v ms; want 60, 55, 50", res.Latency.P50, res.TTFT.P50, res.SendDelay.P50)
+	}
+}
+
+// TestSummariseKeepsSamples checks the per-request values are those of the
+// measured successful requests only, in schedule order.
+func TestSummariseKeepsSamples(t *testing.T) {
+	t.Parallel()
+	at := time.Unix(1000, 0)
+	ok := func(start time.Time, ttft, total time.Duration) sample {
+		return sample{outcome: OutcomeOK, sent: start, firstToken: start.Add(ttft), done: start.Add(total)}
+	}
+	rs := []scheduled{
+		{at: at, warmup: true, sample: ok(at, time.Millisecond, 2*time.Millisecond)},
+		{at: at, sample: ok(at, 3*time.Millisecond, 4*time.Millisecond)},
+		{at: at, sample: sample{outcome: "http_500", sent: at, done: at.Add(time.Millisecond)}},
+		{at: at, sample: ok(at, 1500*time.Microsecond, 7*time.Millisecond)},
+	}
+	for _, keep := range []bool{false, true} {
+		res := summarise(Config{Duration: time.Second, KeepSamples: keep}, rs, at, at.Add(time.Second))
+		if !keep {
+			if res.Samples != nil {
+				t.Errorf("samples recorded without KeepSamples: %+v", res.Samples)
+			}
+			continue
+		}
+		want := &Samples{LatencyMS: []float64{4, 7}, TTFTMS: []float64{3, 1.5}}
+		if !reflect.DeepEqual(res.Samples, want) {
+			t.Errorf("samples %+v, want %+v", res.Samples, want)
+		}
 	}
 }
 

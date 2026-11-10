@@ -9,6 +9,7 @@
 //	switchboard eval cache-data   Q3: build the cache pair sets (needs Ollama)
 //	switchboard eval cache        Q3: semantic cache threshold sweep (needs Ollama)
 //	switchboard eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
+//	switchboard eval hedge-ledger Q4: summarise the fake provider's ledger (stdin)
 //	switchboard version           print the build version
 package main
 
@@ -31,6 +32,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/cacheeval"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/core"
+	"github.com/TheAsianFish/switchboard/internal/hedge"
 	"github.com/TheAsianFish/switchboard/internal/limitseval"
 	"github.com/TheAsianFish/switchboard/internal/pipeline"
 	"github.com/TheAsianFish/switchboard/internal/provider"
@@ -52,6 +54,7 @@ commands:
   eval cache-data   Q3: build the cache pair sets (needs Ollama)
   eval cache        Q3: semantic cache threshold sweep (needs Ollama)
   eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
+  eval hedge-ledger Q4: summarise the fake provider's ledger read on stdin
   version           print the build version
 `
 
@@ -78,13 +81,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && args[1] == "results" {
 			return results.Main(args[2:], stdout, stderr)
 		}
+		if len(args) > 1 && args[1] == "hedge-ledger" {
+			return results.LedgerMain(os.Stdin, stdout, stderr)
+		}
 		if len(args) > 1 && (args[1] == "limits" || args[1] == "budget") {
 			return limitseval.Main(ctx, args[1:], stdout, stderr)
 		}
 		if len(args) > 1 && (args[1] == "cache-data" || args[1] == "cache" || args[1] == "cache-index") {
 			return cacheeval.Main(ctx, args[1:], stdout, stderr)
 		}
-		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache|cache-index [flags]")
+		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache|cache-index|hedge-ledger [flags]")
 		return 2
 	case "version":
 		_, _ = fmt.Fprintln(stdout, version())
@@ -144,8 +150,30 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		return err
 	}
 	slog.SetDefault(log)
+	shutdownTracing, err := telemetry.SetupTracing(ctx, telemetry.TraceConfig{
+		Endpoint: cfg.Tracing.Endpoint, SampleRatio: cfg.Tracing.SampleRatio,
+		ServiceName: cfg.Tracing.ServiceName, Version: version(),
+	}, log)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Runs after the listeners have drained, so the last requests'
+		// spans are flushed; bounded so a dead collector cannot hold up
+		// the exit.
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(sctx); err != nil {
+			log.Warn("tracing shutdown", slog.String("error", err.Error()))
+		}
+	}()
+	if cfg.Tracing.Endpoint != "" {
+		log.Info("tracing on", slog.String("endpoint", cfg.Tracing.Endpoint), slog.Float64("sample_ratio", cfg.Tracing.SampleRatio))
+	}
 
+	metrics := telemetry.NewMetrics(true)
 	built := make(map[string]coreProvider, len(cfg.Providers))
+	var health []*hedge.Provider
 	for _, p := range cfg.Providers {
 		prov, err := provider.Build(p)
 		if err != nil {
@@ -154,13 +182,20 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 		if provider.Disabled(prov) {
 			log.Warn("provider has no API key; its models will refuse requests",
 				slog.String("provider", p.Name), slog.String("env", p.APIKeyEnv))
+			built[p.Name] = prov
+			continue
 		}
-		built[p.Name] = prov
+		rc := resilienceConfig(p.Resilience)
+		h := hedge.New(p.Name, prov, rc, hedge.WithObserver(metrics))
+		log.Info("provider resilience", slog.String("provider", p.Name), slog.Int("retries", rc.Retries),
+			slog.Int("breaker_failures", rc.Breaker.Failures), slog.Bool("hedge", rc.Hedge.Enabled),
+			slog.Duration("hedge_delay", rc.Hedge.Delay), slog.Float64("hedge_budget", rc.Hedge.Budget))
+		built[p.Name] = h
+		health = append(health, h)
 	}
 	if len(cfg.Keys) == 0 {
 		log.Warn("no API keys configured; every request will be refused")
 	}
-	metrics := telemetry.NewMetrics(true)
 	pol, closePolicy, err := buildPolicy(ctx, cfg, metrics, log)
 	if err != nil {
 		return err
@@ -175,7 +210,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 	defer cancel()
 	adminErr := make(chan error, 1)
 	go func() {
-		err := server.Run(ctx, cfg.AdminListen, adminHandler(metrics), log, nil)
+		err := server.Run(ctx, cfg.AdminListen, adminHandler(metrics, health), log, nil)
 		if err != nil {
 			cancel() // the gateway without its metrics is not worth running
 		}
@@ -210,6 +245,10 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	latency := fs.Duration("latency", fake.DefaultConfig.Latency, "delay before the first byte (and the whole reply when not streaming)")
 	tokens := fs.Int("tokens", fake.DefaultConfig.Tokens, "output tokens per reply")
 	interval := fs.Duration("token-interval", fake.DefaultConfig.TokenInterval, "delay between streamed tokens")
+	sigma := fs.Float64("latency-sigma", 0, "log-normal spread of the first-byte delay around -latency (0: fixed)")
+	slowFraction := fs.Float64("slow-fraction", 0, "share of requests whose first byte is -slow-factor times slower")
+	slowFactor := fs.Float64("slow-factor", 10, "how much slower a slow request is")
+	seed := fs.Uint64("seed", 1, "seed for the latency draws")
 	logLevel := fs.String("log-level", envOr("SWITCHBOARD_LOG_LEVEL", "warn"), "log level; warn by default so a benchmark measures serving, not logging")
 	logFormat := fs.String("log-format", envOr("SWITCHBOARD_LOG_FORMAT", "json"), "json or text")
 	if err := parse(fs, args); err != nil {
@@ -219,14 +258,16 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fp := fake.New(fake.Config{Latency: *latency, Tokens: *tokens, TokenInterval: *interval})
+	fp := fake.New(fake.Config{Latency: *latency, Tokens: *tokens, TokenInterval: *interval,
+		LatencySigma: *sigma, SlowFraction: *slowFraction, SlowFactor: *slowFactor, Seed: *seed})
 	gw := pipeline.Open{Provider: fp, Names: []string{"fake"}}
 	mux := http.NewServeMux()
 	mux.Handle("/ledger", fp.LedgerHandler())
 	mux.Handle("/ledger/", fp.LedgerHandler())
 	mux.Handle("/", server.Handler(gw, log))
 	log.Warn("fake provider starting", slog.String("listen", *listen), slog.Duration("latency", *latency),
-		slog.Int("tokens", *tokens), slog.Duration("token_interval", *interval))
+		slog.Int("tokens", *tokens), slog.Duration("token_interval", *interval),
+		slog.Float64("latency_sigma", *sigma), slog.Float64("slow_fraction", *slowFraction), slog.Float64("slow_factor", *slowFactor))
 	return server.Run(ctx, *listen, mux, log, nil)
 }
 

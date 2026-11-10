@@ -1,4 +1,5 @@
-// Package telemetry holds logging setup and the per-request log context.
+// Package telemetry holds the process logger and the per-request log
+// context, the Prometheus metrics and the OpenTelemetry tracing setup.
 package telemetry
 
 import (

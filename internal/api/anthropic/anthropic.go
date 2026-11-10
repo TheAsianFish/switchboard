@@ -3,6 +3,12 @@
 // renders the reply as a Messages response or as Anthropic's server-sent
 // event sequence. GET /v1/models lists the caller's models in Anthropic's
 // list shape.
+//
+// Text, client tools, tool_choice, tool_use and tool_result blocks
+// (tool_result content as a string or text blocks) are supported; replies
+// carry tool_use blocks, streamed as content_block_start, input_json_delta
+// and content_block_stop, with stop_reason tool_use. Images, documents,
+// thinking and server tools are refused with an invalid-request error.
 package anthropic
 
 import (
@@ -55,7 +61,12 @@ func Messages(gw core.Gateway) http.Handler {
 			writeError(ctx, w, err)
 			return
 		}
-		writeJSON(ctx, w, http.StatusOK, renderMessage(resp))
+		msg, err := renderMessage(resp)
+		if err != nil {
+			writeError(ctx, w, err)
+			return
+		}
+		writeJSON(ctx, w, http.StatusOK, msg)
 	})
 }
 

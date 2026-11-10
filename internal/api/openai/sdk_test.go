@@ -2,14 +2,17 @@ package openai_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/shared"
 
 	"github.com/TheAsianFish/switchboard/internal/api/openai"
 	"github.com/TheAsianFish/switchboard/internal/core"
@@ -137,6 +140,76 @@ func TestSDKStream(t *testing.T) {
 	}
 	if acc.Usage.PromptTokens != 5 || acc.Usage.CompletionTokens != 12 || acc.Usage.TotalTokens != 17 {
 		t.Errorf("usage %+v", acc.Usage)
+	}
+}
+
+// A streamed tool-call conversation: the fake calls the tool, the SDK
+// accumulates the call, and the tool's result goes back in a "tool"
+// message for a text answer.
+func TestSDKStreamToolConversation(t *testing.T) {
+	t.Parallel()
+	srv, p := sdkServer(t)
+	client := sdkClient(srv, sdkKey)
+	ctx := context.Background()
+	params := sdk.ChatCompletionNewParams{
+		Model:    "fake",
+		Messages: []sdk.ChatCompletionMessageParamUnion{sdk.UserMessage("weather in Paris?")},
+		Tools: []sdk.ChatCompletionToolUnionParam{sdk.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
+			Name:        "get_weather",
+			Description: sdk.String("Weather for a city"),
+			Parameters:  shared.FunctionParameters{"type": "object", "properties": map[string]any{"city": map[string]any{"type": "string"}}},
+		})},
+		ToolChoice: sdk.ChatCompletionToolChoiceOptionUnionParam{OfAuto: sdk.String("auto")},
+	}
+
+	turn := func() (sdk.ChatCompletionAccumulator, []sdk.FinishedChatCompletionToolCall) {
+		t.Helper()
+		stream := client.Chat.Completions.NewStreaming(ctx, params)
+		defer func() { _ = stream.Close() }()
+		var acc sdk.ChatCompletionAccumulator
+		var finished []sdk.FinishedChatCompletionToolCall
+		for stream.Next() {
+			acc.AddChunk(stream.Current())
+			if tc, ok := acc.JustFinishedToolCall(); ok {
+				finished = append(finished, tc)
+			}
+		}
+		if err := stream.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if len(acc.Choices) != 1 {
+			t.Fatalf("choices %+v", acc.Choices)
+		}
+		return acc, finished
+	}
+
+	acc, finished := turn()
+	msg := acc.Choices[0].Message
+	if acc.Choices[0].FinishReason != "tool_calls" || len(msg.ToolCalls) != 1 || len(finished) != 1 {
+		t.Fatalf("finish %q, calls %+v, finished %+v", acc.Choices[0].FinishReason, msg.ToolCalls, finished)
+	}
+	call := msg.ToolCalls[0]
+	var args map[string]string
+	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil || args["city"] == "" {
+		t.Fatalf("arguments %q: %v", call.Function.Arguments, err)
+	}
+	if call.Function.Name != "get_weather" || !strings.HasPrefix(call.ID, "call_") || finished[0].ID != call.ID || finished[0].Arguments != call.Function.Arguments {
+		t.Errorf("call %+v, finished %+v", call, finished[0])
+	}
+
+	params.Messages = append(params.Messages, msg.ToParam(), sdk.ToolMessage("18 C and sunny", call.ID))
+	acc, finished = turn()
+	if acc.Choices[0].FinishReason != "stop" || acc.Choices[0].Message.Content == "" || len(finished) != 0 {
+		t.Fatalf("answer %+v", acc.Choices[0])
+	}
+	got := p.LastRequest()
+	want := []core.Message{
+		{Role: core.RoleUser, Text: "weather in Paris?"},
+		{Role: core.RoleAssistant, ToolCalls: []core.ToolCall{{ID: call.ID, Name: "get_weather", Arguments: json.RawMessage(call.Function.Arguments)}}},
+		{Role: core.RoleUser, ToolResults: []core.ToolResult{{CallID: call.ID, Content: "18 C and sunny"}}},
+	}
+	if !reflect.DeepEqual(got.Messages, want) || len(got.Tools) != 1 || got.ToolChoice.Mode != core.ToolChoiceAuto {
+		t.Errorf("provider saw %+v\nwant messages %+v", got, want)
 	}
 }
 

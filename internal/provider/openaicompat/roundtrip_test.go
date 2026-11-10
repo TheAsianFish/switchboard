@@ -2,6 +2,7 @@ package openaicompat_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math/rand"
@@ -22,6 +23,7 @@ type loopGateway struct {
 	mu     sync.Mutex
 	last   *core.Request
 	events []core.Event
+	resp   *core.Response
 }
 
 func (g *loopGateway) Authenticate(ctx context.Context, _ string) (context.Context, error) {
@@ -37,7 +39,19 @@ func (g *loopGateway) record(req *core.Request) {
 
 func (g *loopGateway) Complete(_ context.Context, req *core.Request) (*core.Response, error) {
 	g.record(req)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.resp != nil {
+		r := *g.resp
+		return &r, nil
+	}
 	return &core.Response{ID: "r", Model: req.Model, Text: "ok", StopReason: core.StopEndTurn}, nil
+}
+
+func (g *loopGateway) setResponse(r *core.Response) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.resp = r
 }
 
 func (g *loopGateway) Stream(_ context.Context, req *core.Request) (core.Stream, error) {
@@ -110,12 +124,19 @@ func randRequest(r *rand.Rand) core.Request {
 		req.System = randText(r, 8)
 	}
 	for range 1 + r.Intn(5) {
-		role := core.RoleUser
+		m := core.Message{Role: core.RoleUser, Text: randText(r, 10)}
 		if r.Intn(2) == 0 {
-			role = core.RoleAssistant
+			m.Role = core.RoleAssistant
+			m.ToolCalls = randCalls(r)
+		} else if r.Intn(3) == 0 && !endsInResults(req.Messages) {
+			// A user turn of tool results has no text in this format:
+			// it is "tool" messages alone, and two in a row would be one.
+			m.Text, m.ToolResults = "", randResults(r)
 		}
-		req.Messages = append(req.Messages, core.Message{Role: role, Text: randText(r, 10)})
+		req.Messages = append(req.Messages, m)
 	}
+	req.Tools = randTools(r)
+	req.ToolChoice = randChoice(r)
 	if r.Intn(2) == 0 {
 		req.MaxTokens = 1 + r.Intn(4096)
 	}
@@ -125,6 +146,70 @@ func randRequest(r *rand.Rand) core.Request {
 		}
 	}
 	return req
+}
+
+func endsInResults(msgs []core.Message) bool {
+	return len(msgs) > 0 && len(msgs[len(msgs)-1].ToolResults) > 0
+}
+
+// randJSON is a compact JSON object holding random text, as the front end
+// keeps schemas and as the provider sends them.
+func randJSON(r *rand.Rand) json.RawMessage {
+	obj := map[string]any{"type": "object"}
+	if r.Intn(2) == 0 {
+		obj["properties"] = map[string]any{randText(r, 2): map[string]any{"type": "string", "description": randText(r, 4)}}
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func randTools(r *rand.Rand) []core.Tool {
+	if r.Intn(2) == 0 {
+		return nil
+	}
+	var tools []core.Tool
+	for range 1 + r.Intn(3) {
+		t := core.Tool{Name: "f" + randText(r, 2), Description: randText(r, 6)}
+		if r.Intn(4) > 0 {
+			t.Parameters = randJSON(r)
+		}
+		tools = append(tools, t)
+	}
+	return tools
+}
+
+func randChoice(r *rand.Rand) core.ToolChoice {
+	modes := []core.ToolChoiceMode{"", core.ToolChoiceAuto, core.ToolChoiceNone, core.ToolChoiceAny, core.ToolChoiceTool}
+	tc := core.ToolChoice{Mode: modes[r.Intn(len(modes))], DisableParallel: r.Intn(3) == 0}
+	if tc.Mode == core.ToolChoiceTool {
+		tc.Name = "f" + randText(r, 2)
+	}
+	return tc
+}
+
+// randCalls returns tool calls whose arguments are JSON text as a client
+// may write it, spacing and all: this format carries it as a string.
+func randCalls(r *rand.Rand) []core.ToolCall {
+	var calls []core.ToolCall
+	for range r.Intn(3) {
+		args := randJSON(r)
+		if r.Intn(2) == 0 {
+			args = json.RawMessage(`{ "a" : [1, 2.5, null, true] }`)
+		}
+		calls = append(calls, core.ToolCall{ID: "call_" + randText(r, 2), Name: "f" + randText(r, 2), Arguments: args})
+	}
+	return calls
+}
+
+func randResults(r *rand.Rand) []core.ToolResult {
+	var rs []core.ToolResult
+	for range 1 + r.Intn(3) {
+		rs = append(rs, core.ToolResult{CallID: "call_" + randText(r, 2), Content: randText(r, 8)})
+	}
+	return rs
 }
 
 func TestRoundTripRequest(t *testing.T) {
@@ -152,7 +237,39 @@ func TestRoundTripRequest(t *testing.T) {
 	}
 }
 
-var stopReasons = []core.StopReason{core.StopEndTurn, core.StopMaxTokens, core.StopContentFilter}
+var stopReasons = []core.StopReason{core.StopEndTurn, core.StopMaxTokens, core.StopContentFilter, core.StopToolUse}
+
+// A non-streamed reply with tool calls comes back unchanged, but for the
+// id prefix and calls without arguments, which OpenAI writes as {}.
+func TestRoundTripResponse(t *testing.T) {
+	t.Parallel()
+	p, gw := loop(t)
+	r := rand.New(rand.NewSource(3))
+	for i := range 200 {
+		sent := &core.Response{ID: "chatcmpl-" + randText(r, 3), Model: "m" + randText(r, 2), Text: randText(r, 8), StopReason: stopReasons[r.Intn(len(stopReasons))], ToolCalls: randCalls(r)}
+		if len(sent.ToolCalls) > 0 && r.Intn(4) == 0 {
+			sent.ToolCalls[0].Arguments = nil
+		}
+		gw.setResponse(sent)
+		got, err := p.Complete(context.Background(), &core.Request{Model: "m", Messages: []core.Message{{Role: core.RoleUser, Text: "q"}}})
+		if err != nil {
+			t.Fatalf("case %d: %v", i, err)
+		}
+		want := *sent
+		want.ToolCalls = append([]core.ToolCall(nil), sent.ToolCalls...)
+		if len(want.ToolCalls) > 0 {
+			if want.ToolCalls[0].Arguments == nil {
+				want.ToolCalls[0].Arguments = json.RawMessage("{}")
+			}
+			if want.StopReason == core.StopEndTurn {
+				want.StopReason = core.StopToolUse
+			}
+		}
+		if !reflect.DeepEqual(got, &want) {
+			t.Fatalf("case %d:\ngot  %+v\nwant %+v", i, got, &want)
+		}
+	}
+}
 
 // randEvents returns a well-formed stream and the events the provider should
 // read back after the OpenAI wire format: empty deltas vanish, the id gains
@@ -170,7 +287,27 @@ func randEvents(r *rand.Rand) (sent, want []core.Event) {
 		wantID = "chatcmpl-" + id
 	}
 	want = append(want, core.Event{Kind: core.EventStart, ID: wantID, Model: model})
+	calls := 0
 	for range r.Intn(20) {
+		if r.Intn(4) == 0 {
+			// A tool call, its arguments in pieces; empty pieces vanish,
+			// and a call left with none reads back as "{}".
+			ev := core.Event{Kind: core.EventToolCallStart, ToolIndex: calls, ToolCallID: "call_" + randText(r, 2), ToolName: "f" + randText(r, 2)}
+			sent, want = append(sent, ev), append(want, ev)
+			args := false
+			for range r.Intn(4) {
+				d := core.Event{Kind: core.EventToolCallDelta, ToolIndex: calls, Arguments: randText(r, 3)}
+				sent = append(sent, d)
+				if d.Arguments != "" {
+					want, args = append(want, d), true
+				}
+			}
+			if !args {
+				want = append(want, core.Event{Kind: core.EventToolCallDelta, ToolIndex: calls, Arguments: "{}"})
+			}
+			calls++
+			continue
+		}
 		text := randText(r, 4)
 		sent = append(sent, core.Event{Kind: core.EventDelta, Text: text})
 		if text != "" {
@@ -184,6 +321,10 @@ func randEvents(r *rand.Rand) (sent, want []core.Event) {
 	}
 	sent = append(sent, stop)
 	wantStop := stop
+	if calls > 0 && stop.StopReason == core.StopEndTurn {
+		// "stop" after tool calls reads as tool_use: see stopReason.
+		wantStop.StopReason = core.StopToolUse
+	}
 	if stop.Usage.PromptTokens() == 0 {
 		wantStop.Usage.InputTokens = start.Usage.InputTokens
 		wantStop.Usage.CacheReadTokens = start.Usage.CacheReadTokens

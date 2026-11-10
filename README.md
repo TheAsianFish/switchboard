@@ -10,13 +10,16 @@ latency tail, an exact and a semantic cache with a measured false-hit rate, a
 and model, OpenTelemetry traces, Prometheus metrics and a small admin page.
 Every feature ships with the benchmark or eval that says what it is worth.
 
-**Status: M3 of 7.** The streaming spine (M1), shared state (M2) and the
-response cache (M3) work: both front ends; the Anthropic, OpenAI-compatible
-and fake providers; per-key request and token rate limits and dollar
-budgets shared by every replica through Redis, with a degrade policy for
-when Redis is down; cost accounting from a price table; Prometheus metrics;
-and an exact plus semantic response cache in Redis, namespaced per tenant,
-whose threshold comes from `make eval-cache`. Hedging, the router and the
+**Status: M4 of 7.** The streaming spine (M1), shared state (M2), the
+response cache (M3) and resilience and observability (M4) work: both front
+ends, with text and tool calls, in and out of every backend; the Anthropic,
+OpenAI-compatible and fake providers; per-key request and token rate limits
+and dollar budgets shared by every replica through Redis, with a degrade
+policy for when Redis is down; cost accounting from a price table; an exact
+plus semantic response cache in Redis, namespaced per tenant, whose
+threshold comes from `make eval-cache`; retries, hedged requests with a
+per-tenant hedge budget and a circuit breaker per provider; OpenTelemetry
+traces with a span per stage, and Prometheus metrics. The router and the
 admin page follow (see [PLAN.md](PLAN.md)).
 Every measured number lives in [RESULTS.md](RESULTS.md), which is rendered
 from the raw files under `eval/results/`.
@@ -102,7 +105,12 @@ listener (`admin_listen`, default `127.0.0.1:9090`).
 
 Docker: `make docker` builds a distroless image. `make dev` runs one replica
 with Redis, Ollama and the fake provider in compose, and `make fleet` runs
-three replicas behind nginx sharing one Redis.
+three replicas behind nginx sharing one Redis. Both also run Jaeger (UI on
+http://localhost:16686) and Prometheus (http://localhost:9095), which
+scrapes every replica. With tracing on (`tracing.endpoint`, set in compose)
+every request is one trace with a span per pipeline stage, and every
+response carries its trace id in `X-Trace-Id`; `scripts/trace-check.sh`
+sends a request and prints its span tree from Jaeger.
 
 ## Architecture
 
@@ -117,7 +125,8 @@ flowchart LR
     FO[api/openai<br/>/v1/chat/completions]
     FA[api/anthropic<br/>/v1/messages]
     P[pipeline<br/>auth · route · limits · budget<br/>cache · provider · settle · log]
-    M[admin listener<br/>/metrics]
+    H[hedge<br/>retries · hedging · breaker]
+    M[admin listener<br/>/metrics · /providers]
     FO --> P
     FA --> P
     P --> M
@@ -128,9 +137,11 @@ flowchart LR
   LB --> FA
   P <-->|Lua: fixed window or GCRA,<br/>reserve / settle,<br/>exact keys, vector index| R[(Redis 8)]
   P -->|/api/embed<br/>last user turn| E[Ollama embeddings]
-  P --> PA[provider/anthropic<br/>anthropic-sdk-go]
-  P --> PO[provider/openaicompat<br/>Ollama · vLLM · llama.cpp]
-  P --> PF[provider/fake]
+  P -->|OTLP spans| J[Jaeger]
+  P --> H
+  H --> PA[provider/anthropic<br/>anthropic-sdk-go]
+  H --> PO[provider/openaicompat<br/>Ollama · vLLM · llama.cpp]
+  H --> PF[provider/fake]
   PA --> ANT[Anthropic API or<br/>Ollama /v1/messages]
   PO --> OL[Ollama /v1/chat/completions]
 ```
@@ -144,8 +155,8 @@ for all four client × backend combinations.
 **The hard part in M1: streaming through two translations without
 changing what the client sees.** The front end reads the provider's first
 event *before* it writes any header, so an upstream failure before the first
-token is an ordinary HTTP error with the right status code (and, from M4, can
-be retried) rather than a 200 followed by a broken stream. After that, each
+token is an ordinary HTTP error with the right status code (and is retried
+by the gateway first) rather than a 200 followed by a broken stream. After that, each
 token is flushed as it arrives, a client disconnect cancels the upstream
 call through the request context, and a mid-stream failure is reported in
 the client's own error format. Usage is normalised once (`input`,
@@ -212,6 +223,28 @@ small contexts measured FLAT and HNSW are equally fast, FLAT is exact and
 builds in a second, and its unfiltered worst case at 100,000 entries
 (about 5–9 ms) is still below the embedding call, so the index is FLAT.
 
+**The hard part in M4: cutting the latency tail without paying for it
+twice.** A slow upstream request is usually not slow because of the prompt
+but because of where it landed, so asking again often comes back fast.
+The provider wrapper in `internal/hedge` turns each request into a race:
+one attempt, and if no token has arrived after the hedge delay, a second;
+the first to produce a token wins and the other is cancelled. Three things
+make that safe. The delay is the rolling p95 of first-token times, so only
+the slowest twentieth of requests can hedge. A per-tenant budget caps
+hedges at a tenth of the tenant's requests, so a provider that slows down
+for everyone (exactly when hedging would fire the most) cannot double the
+load on it. And the window that sets the delay is fed the first attempt's
+time, or, when a hedge beat it, how long it had already waited, so the
+delay does not drift down as hedging succeeds. A hedged-away attempt is
+charged at its prompt estimate, since the provider may have billed it.
+Failures before the first token are retried with jittered backoff; after a
+token reaches the client nothing is retried. A breaker per provider fails
+fast after consecutive provider failures and probes after a cooldown.
+`make bench-hedge` measures the trade on a synthetic slow tail, and
+`eval/hedge/ollama.sh` repeats it against a real model on local Ollama.
+RESULTS.md (Q4) has both. Every stage, and both attempts of a hedge, are
+spans in one trace (`eval/results/m4-trace/`).
+
 How the M1 streaming path is checked:
 
 - recorded real streams from Ollama in both formats replay through the
@@ -241,6 +274,12 @@ How the M1 streaming path is checked:
 | Cache key uses the `max_tokens` sent upstream, not the client's | A reply the gateway capped for a budgeted key must not answer an uncapped request. | The client's request alone: a truncated reply leaks across keys of one tenant. |
 | Integer nanodollars, prices to a tenth of a cent per MTok | Ledgers sum exactly over millions of requests, so spend can be checked to the cent. | Float dollars: rounding drift in the totals. |
 | Metrics on a separate loopback listener | Per-key names and spend never reach the public port. | `/metrics` on the API port. |
+| Hedge after the rolling p95 first-token time, capped per tenant | Only the slowest twentieth can hedge, and a slow provider cannot be sent more than a tenth more traffic by the gateway. | A fixed delay: wrong as soon as the model or load changes. Hedging every request: doubles spend and load. |
+| Feed the hedge window the first attempt's time, or its wait when it lost | Keeps the window's tail, so the delay does not fall as hedging succeeds. | The winner's time: only fast hedges are seen, and the delay ratchets down. |
+| Retry only before the first token | A client that has seen part of a reply cannot be given another. | Retrying mid-stream: duplicated or spliced text. |
+| Hedge budget and breaker per replica | A ratio held on each replica's share of traffic holds for the fleet, and a breaker learns from its own traffic in a few requests; neither is worth a Redis round trip per request. | Shared in Redis: a round trip on every request to save a handful of failures. |
+| Tracing off unless `tracing.endpoint` is set | No cost on the request path when nobody collects traces. | Always-on tracing with a no-op exporter: spans are still built. |
+| Continue a caller's `traceparent`, ignore its sampled flag | The header arrives before authentication; trusting the flag would let any caller force every request into the collector. | Parent-based sampling on the caller's flag: an unauthenticated knob on the collector's load. |
 | Open-loop load generator | Requests leave on schedule whether or not earlier ones finished, so a slow target cannot hide its queueing (coordinated omission). | Closed-loop workers: under-report the tail. |
 
 ## Development
@@ -250,7 +289,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). `make check` is the per-PR gate
 minutes. `make bench` reruns the overhead benchmark, `make sdk-smoke` the SDK
 check against Ollama, `make test-limits` the three-replica limit and budget
 test in compose (about 12 minutes), `make eval-cache` the semantic cache
-sweep and the FLAT against HNSW check, `make test-integration` the Lua
+sweep and the FLAT against HNSW check, `make bench-hedge` the hedging
+benchmark, `make test-integration` the Lua
 scripts and the vector index against a real Redis 8, and `make results`
 re-renders RESULTS.md.
 
@@ -258,7 +298,12 @@ re-renders RESULTS.md.
 
 GCRA limiter and its Q2 numbers · a reranking step for semantic hits
 (Q3 shows embeddings alone cannot keep false hits under 1% at a useful hit
-rate on adversarial pairs) · M4 retries, hedging, tool calls and tracing · M5 the evaluated router ·
+rate on adversarial pairs) · Q4 against Claude
+(needs a key) · pass `traceparent` on to providers · a first-token timeout
+per attempt, so a provider that accepts connections and never answers opens
+the breaker instead of waiting on client disconnects · accept tool-call
+arguments that are not JSON in OpenAI-format history (a cut-off call echoed
+back is refused today) · M5 the evaluated router ·
 M6 admin page, chaos run and the per-feature overhead breakdown · M7 release.
 
 ## Licence

@@ -1,8 +1,11 @@
 // Package openai is the OpenAI chat completions front end. It parses
 // POST /v1/chat/completions into a canonical core.Request, hands it to a
 // core.Gateway and renders the reply as an OpenAI JSON body or SSE stream.
-// Only text content is supported; tool use and multimodal parts are refused
-// with an invalid-request error.
+// Text content and function tools are supported: tools, tool_choice,
+// parallel_tool_calls, assistant tool_calls and "tool" messages in, and
+// message.tool_calls or streamed delta.tool_calls with finish_reason
+// "tool_calls" out. Multimodal parts, non-function tools and the legacy
+// functions API are refused with an invalid-request error.
 package openai
 
 import (
@@ -121,13 +124,18 @@ func apiKey(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("x-api-key"))
 }
 
+// randomHex returns 24 random hex digits for made-up ids.
+func randomHex() string {
+	var b [12]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
 // completionID returns the client-facing id for a provider id.
 func completionID(providerID string) string {
 	switch {
 	case providerID == "":
-		var b [12]byte
-		_, _ = rand.Read(b[:])
-		return idPrefix + hex.EncodeToString(b[:])
+		return idPrefix + randomHex()
 	case strings.HasPrefix(providerID, idPrefix):
 		return providerID
 	default:

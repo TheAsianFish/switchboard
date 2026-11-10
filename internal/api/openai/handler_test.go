@@ -201,7 +201,7 @@ func TestRequestErrors(t *testing.T) {
 		t.Errorf("malformed: %d %s", w.Code, w.Body)
 	}
 	w = post(t, h, testKey, `{"model":"m","tools":[{}],"messages":[{"role":"user","content":"x"}]}`)
-	if w.Code != 400 || !strings.Contains(errorOf(t, w.Body.Bytes()).Message, "tool use is not supported yet") {
+	if w.Code != 400 || !strings.Contains(errorOf(t, w.Body.Bytes()).Message, "only function tools are supported") {
 		t.Errorf("tools: %d %s", w.Code, w.Body)
 	}
 	big := `{"model":"m","messages":[{"role":"user","content":"` + strings.Repeat("a", maxBodyBytes) + `"}]}`
@@ -426,6 +426,89 @@ func TestStreamRender(t *testing.T) {
 				t.Error("stream not closed")
 			}
 		})
+	}
+}
+
+func TestCompleteToolCalls(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		resp core.Response
+		msg  string
+	}{
+		{
+			name: "tool calls only",
+			resp: core.Response{ID: "a", Model: "m", StopReason: core.StopToolUse, ToolCalls: []core.ToolCall{
+				{ID: "call_1", Name: "f", Arguments: json.RawMessage(`{"x":1}`)},
+				{ID: "call_2", Name: "g"},
+			}},
+			msg: `{"role":"assistant","content":null,"refusal":null,"tool_calls":[` +
+				`{"id":"call_1","type":"function","function":{"name":"f","arguments":"{\"x\":1}"}},` +
+				`{"id":"call_2","type":"function","function":{"name":"g","arguments":"{}"}}]}`,
+		},
+		{
+			name: "text and a tool call",
+			resp: core.Response{ID: "a", Model: "m", Text: "one sec", StopReason: core.StopToolUse, ToolCalls: []core.ToolCall{{ID: "c", Name: "f", Arguments: json.RawMessage(`{}`)}}},
+			msg:  `{"role":"assistant","content":"one sec","refusal":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"f","arguments":"{}"}}]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := funcProvider{complete: func(context.Context, *core.Request) (*core.Response, error) { r := tt.resp; return &r, nil }}
+			w := post(t, ChatCompletions(&testGateway{p: p}), testKey, simpleBody)
+			var got struct {
+				Choices []struct {
+					Message      json.RawMessage `json:"message"`
+					FinishReason string          `json:"finish_reason"`
+				} `json:"choices"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || len(got.Choices) != 1 {
+				t.Fatalf("body %s: %v", w.Body, err)
+			}
+			if string(got.Choices[0].Message) != tt.msg || got.Choices[0].FinishReason != "tool_calls" {
+				t.Errorf("got  %s %s\nwant %s tool_calls", got.Choices[0].Message, got.Choices[0].FinishReason, tt.msg)
+			}
+		})
+	}
+}
+
+func TestStreamRenderToolCalls(t *testing.T) {
+	t.Parallel()
+	s := newScriptStream(nil,
+		core.Event{Kind: core.EventStart, ID: "s1", Model: "served"},
+		core.Event{Kind: core.EventDelta, Text: "Hi"},
+		core.Event{Kind: core.EventToolCallStart, ToolIndex: 0, ToolCallID: "call_a", ToolName: "f"},
+		core.Event{Kind: core.EventToolCallDelta, ToolIndex: 0, Arguments: `{"x":`},
+		core.Event{Kind: core.EventToolCallDelta, ToolIndex: 0, Arguments: ""},
+		core.Event{Kind: core.EventToolCallDelta, ToolIndex: 0, Arguments: `1}`},
+		core.Event{Kind: core.EventToolCallStart, ToolIndex: 1, ToolCallID: "call_b", ToolName: "g"},
+		core.Event{Kind: core.EventStop, StopReason: core.StopToolUse, Usage: core.Usage{OutputTokens: 2}},
+	)
+	w := post(t, ChatCompletions(streamGateway(s)), testKey, `{"model":"m","stream":true,"messages":[{"role":"user","content":"x"}]}`)
+	head := `{"id":"chatcmpl-s1","object":"chat.completion.chunk","created":0,"model":"served","choices":[{"index":0,"delta":`
+	tail := `,"logprobs":null,"finish_reason":null}]}`
+	want := []string{
+		head + `{"role":"assistant","content":""}` + tail,
+		head + `{"content":"Hi"}` + tail,
+		head + `{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"f","arguments":""}}]}` + tail,
+		head + `{"tool_calls":[{"index":0,"function":{"arguments":"{\"x\":"}}]}` + tail,
+		head + `{"tool_calls":[{"index":0,"function":{"arguments":"1}"}}]}` + tail,
+		head + `{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"g","arguments":""}}]}` + tail,
+		// call_b had no argument fragments: it closes with "{}", so the
+		// client's accumulated arguments are JSON.
+		head + `{"tool_calls":[{"index":1,"function":{"arguments":"{}"}}]}` + tail,
+		head + `{},"logprobs":null,"finish_reason":"tool_calls"}]}`,
+		"[DONE]",
+	}
+	got := sseData(t, w.Body.String())
+	if len(got) != len(want) {
+		t.Fatalf("got %d events:\n%s", len(got), strings.Join(got, "\n"))
+	}
+	for i := range want {
+		if g := zeroCreated(t, got[i]); g != want[i] {
+			t.Errorf("event %d:\ngot  %s\nwant %s", i, g, want[i])
+		}
 	}
 }
 

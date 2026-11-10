@@ -5,6 +5,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 
 	"github.com/TheAsianFish/switchboard/internal/core"
 )
@@ -115,15 +117,20 @@ func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Respo
 		return nil, classify(ctx, err)
 	}
 	var text strings.Builder
+	var calls []core.ToolCall
 	for _, b := range msg.Content {
-		if b.Type == "text" {
+		switch b.Type {
+		case "text":
 			text.WriteString(b.Text)
+		case "tool_use":
+			calls = append(calls, core.ToolCall{ID: b.ID, Name: b.Name, Arguments: b.Input})
 		}
 	}
 	return &core.Response{
 		ID:         msg.ID,
 		Model:      msg.Model,
 		Text:       text.String(),
+		ToolCalls:  calls,
 		StopReason: stopReason(msg.StopReason),
 		Usage: core.Usage{
 			InputTokens:      int(msg.Usage.InputTokens),
@@ -146,7 +153,7 @@ func (p *Provider) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 		cancel()
 		return nil, err
 	}
-	return &stream{ctx: ctx, cancel: cancel, s: s}, nil
+	return &stream{ctx: ctx, cancel: cancel, s: s, toolBlock: -1}, nil
 }
 
 // params translates a canonical request into the SDK's parameters.
@@ -164,13 +171,16 @@ func (p *Provider) params(req *core.Request) sdk.MessageNewParams {
 		params.System = []sdk.TextBlockParam{{Text: req.System}}
 	}
 	for _, m := range req.Messages {
-		block := sdk.NewTextBlock(m.Text)
 		if m.Role == core.RoleAssistant {
-			params.Messages = append(params.Messages, sdk.NewAssistantMessage(block))
+			params.Messages = append(params.Messages, sdk.NewAssistantMessage(assistantBlocks(m)...))
 		} else {
-			params.Messages = append(params.Messages, sdk.NewUserMessage(block))
+			params.Messages = append(params.Messages, sdk.NewUserMessage(userBlocks(m)...))
 		}
 	}
+	for _, t := range req.Tools {
+		params.Tools = append(params.Tools, toolParam(t))
+	}
+	params.ToolChoice = toolChoice(req.ToolChoice)
 	if req.Temperature != nil {
 		params.Temperature = sdk.Float(*req.Temperature)
 	}
@@ -183,7 +193,86 @@ func (p *Provider) params(req *core.Request) sdk.MessageNewParams {
 	return params
 }
 
-// stopReason maps Anthropic's stop reason to the canonical one.
+// userBlocks renders a user turn: its tool results, then its text, which
+// is left out when empty after tool results (the API refuses empty text
+// blocks; a plain empty turn is sent as it was asked for).
+func userBlocks(m core.Message) []sdk.ContentBlockParamUnion {
+	blocks := make([]sdk.ContentBlockParamUnion, 0, len(m.ToolResults)+1)
+	for _, r := range m.ToolResults {
+		res := sdk.ToolResultBlockParam{ToolUseID: r.CallID}
+		if r.Content != "" {
+			res.Content = []sdk.ToolResultBlockParamContentUnion{{OfText: &sdk.TextBlockParam{Text: r.Content}}}
+		}
+		if r.IsError {
+			res.IsError = sdk.Bool(true)
+		}
+		blocks = append(blocks, sdk.ContentBlockParamUnion{OfToolResult: &res})
+	}
+	if m.Text != "" || len(blocks) == 0 {
+		blocks = append(blocks, sdk.NewTextBlock(m.Text))
+	}
+	return blocks
+}
+
+// assistantBlocks renders an assistant turn: its text, then its tool calls.
+// Arguments are sent as raw JSON; none means {}.
+func assistantBlocks(m core.Message) []sdk.ContentBlockParamUnion {
+	blocks := make([]sdk.ContentBlockParamUnion, 0, len(m.ToolCalls)+1)
+	if m.Text != "" || len(m.ToolCalls) == 0 {
+		blocks = append(blocks, sdk.NewTextBlock(m.Text))
+	}
+	for _, c := range m.ToolCalls {
+		input := c.Arguments
+		if len(input) == 0 {
+			input = json.RawMessage("{}")
+		}
+		blocks = append(blocks, sdk.NewToolUseBlock(c.ID, input, c.Name))
+	}
+	return blocks
+}
+
+// toolParam renders a tool with its schema as sent; a tool without one
+// (the OpenAI format allows that) gets an empty object schema.
+func toolParam(t core.Tool) sdk.ToolUnionParam {
+	raw := t.Parameters
+	if len(raw) == 0 {
+		raw = json.RawMessage(`{"type":"object"}`) // a zero schema param would be left out
+	}
+	var schema sdk.ToolInputSchemaParam
+	param.SetJSON(raw, &schema)
+	tool := sdk.ToolParam{Name: t.Name, InputSchema: schema}
+	if t.Description != "" {
+		tool.Description = sdk.String(t.Description)
+	}
+	return sdk.ToolUnionParam{OfTool: &tool}
+}
+
+// toolChoice renders a tool choice. With no mode but parallel calls off it
+// is auto, the default the client left unsaid.
+func toolChoice(tc core.ToolChoice) sdk.ToolChoiceUnionParam {
+	var disable param.Opt[bool]
+	if tc.DisableParallel {
+		disable = sdk.Bool(true)
+	}
+	switch tc.Mode {
+	case core.ToolChoiceNone:
+		return sdk.ToolChoiceUnionParam{OfNone: &sdk.ToolChoiceNoneParam{}}
+	case core.ToolChoiceAny:
+		return sdk.ToolChoiceUnionParam{OfAny: &sdk.ToolChoiceAnyParam{DisableParallelToolUse: disable}}
+	case core.ToolChoiceTool:
+		return sdk.ToolChoiceUnionParam{OfTool: &sdk.ToolChoiceToolParam{Name: tc.Name, DisableParallelToolUse: disable}}
+	case core.ToolChoiceAuto:
+		return sdk.ToolChoiceUnionParam{OfAuto: &sdk.ToolChoiceAutoParam{DisableParallelToolUse: disable}}
+	default:
+		if tc.DisableParallel {
+			return sdk.ToolChoiceUnionParam{OfAuto: &sdk.ToolChoiceAutoParam{DisableParallelToolUse: disable}}
+		}
+		return sdk.ToolChoiceUnionParam{}
+	}
+}
+
+// stopReason maps Anthropic's stop reason to the canonical one (the table
+// is in core).
 func stopReason(s sdk.StopReason) core.StopReason {
 	switch s {
 	case sdk.StopReasonMaxTokens, sdk.StopReasonModelContextWindowExceeded:
@@ -191,9 +280,13 @@ func stopReason(s sdk.StopReason) core.StopReason {
 		return core.StopMaxTokens
 	case sdk.StopReasonStopSequence:
 		return core.StopSequence
+	case sdk.StopReasonToolUse:
+		return core.StopToolUse
 	case sdk.StopReasonRefusal:
 		return core.StopContentFilter
 	default:
+		// end_turn, and pause_turn: that belongs to server tools, which
+		// the gateway never sends, and leaves nothing to continue.
 		return core.StopEndTurn
 	}
 }

@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand"
 	"net/http/httptest"
 	"reflect"
@@ -24,6 +25,7 @@ type recordingGateway struct {
 	mu     sync.Mutex
 	last   *core.Request
 	events []core.Event
+	resp   *core.Response
 }
 
 func (g *recordingGateway) Authenticate(ctx context.Context, apiKey string) (context.Context, error) {
@@ -37,7 +39,17 @@ func (g *recordingGateway) Complete(_ context.Context, req *core.Request) (*core
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.last = req
+	if g.resp != nil {
+		r := *g.resp
+		return &r, nil
+	}
 	return &core.Response{ID: "msg_x", Model: req.Model, Text: "ok", StopReason: core.StopEndTurn}, nil
+}
+
+func (g *recordingGateway) setResponse(r *core.Response) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.resp = r
 }
 
 func (g *recordingGateway) Stream(_ context.Context, req *core.Request) (core.Stream, error) {
@@ -97,12 +109,17 @@ func randRequest(r *rand.Rand) *core.Request {
 		req.System = randText(r, 8)
 	}
 	for range 1 + r.Intn(5) {
-		role := core.RoleUser
+		m := core.Message{Role: core.RoleUser, Text: randText(r, 12)}
 		if r.Intn(2) == 0 {
-			role = core.RoleAssistant
+			m.Role = core.RoleAssistant
+			m.ToolCalls = randCalls(r)
+		} else {
+			m.ToolResults = randResults(r)
 		}
-		req.Messages = append(req.Messages, core.Message{Role: role, Text: randText(r, 12)})
+		req.Messages = append(req.Messages, m)
 	}
+	req.Tools = randTools(r)
+	req.ToolChoice = randChoice(r)
 	if r.Intn(3) > 0 {
 		req.MaxTokens = 1 + r.Intn(200000)
 	}
@@ -120,6 +137,62 @@ func randRequest(r *rand.Rand) *core.Request {
 		}
 	}
 	return req
+}
+
+// randObject is a compact JSON object holding random text: the form the
+// front end keeps tool inputs and schemas in.
+func randObject(r *rand.Rand) json.RawMessage {
+	obj := map[string]any{}
+	for range r.Intn(3) {
+		obj[randText(r, 2)] = []any{randText(r, 3), r.Intn(100), r.Intn(2) == 0, nil, map[string]any{"n": 1.5}}[r.Intn(5)]
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func randTools(r *rand.Rand) []core.Tool {
+	if r.Intn(2) == 0 {
+		return nil
+	}
+	var tools []core.Tool
+	for range 1 + r.Intn(3) {
+		tools = append(tools, core.Tool{Name: nonEmptyText(r, 2), Description: randText(r, 6), Parameters: randObject(r)})
+	}
+	return tools
+}
+
+// randChoice never asks for parallel calls off without a mode, or with
+// none: the Messages API says that only inside auto, any or tool, so the
+// first comes back as auto and the second cannot be sent.
+func randChoice(r *rand.Rand) core.ToolChoice {
+	modes := []core.ToolChoiceMode{"", core.ToolChoiceAuto, core.ToolChoiceNone, core.ToolChoiceAny, core.ToolChoiceTool}
+	tc := core.ToolChoice{Mode: modes[r.Intn(len(modes))]}
+	if tc.Mode != "" && tc.Mode != core.ToolChoiceNone {
+		tc.DisableParallel = r.Intn(2) == 0
+	}
+	if tc.Mode == core.ToolChoiceTool {
+		tc.Name = nonEmptyText(r, 2)
+	}
+	return tc
+}
+
+func randCalls(r *rand.Rand) []core.ToolCall {
+	var calls []core.ToolCall
+	for range r.Intn(3) {
+		calls = append(calls, core.ToolCall{ID: "toolu_" + nonEmptyText(r, 2), Name: nonEmptyText(r, 2), Arguments: randObject(r)})
+	}
+	return calls
+}
+
+func randResults(r *rand.Rand) []core.ToolResult {
+	var rs []core.ToolResult
+	for range r.Intn(3) {
+		rs = append(rs, core.ToolResult{CallID: "toolu_" + nonEmptyText(r, 2), Content: randText(r, 8), IsError: r.Intn(3) == 0})
+	}
+	return rs
 }
 
 func TestRoundTripRequest(t *testing.T) {
@@ -160,7 +233,29 @@ func TestRoundTripRequest(t *testing.T) {
 	}
 }
 
-var stopReasons = []core.StopReason{core.StopEndTurn, core.StopMaxTokens, core.StopSequence, core.StopContentFilter}
+var stopReasons = []core.StopReason{core.StopEndTurn, core.StopMaxTokens, core.StopSequence, core.StopToolUse, core.StopContentFilter}
+
+// A non-streamed reply with text and tool calls comes back unchanged but
+// for the id prefix.
+func TestRoundTripResponse(t *testing.T) {
+	t.Parallel()
+	gw := &recordingGateway{}
+	srv := httptest.NewServer(anthropicapi.Messages(gw))
+	defer srv.Close()
+	p := newProvider(t, srv, 0)
+	r := rand.New(rand.NewSource(3))
+	for i := range roundTripCases {
+		sent := &core.Response{ID: "msg_" + nonEmptyText(r, 3), Model: nonEmptyText(r, 2), Text: randText(r, 8), ToolCalls: randCalls(r), StopReason: stopReasons[r.Intn(len(stopReasons))]}
+		gw.setResponse(sent)
+		got, err := p.Complete(context.Background(), testRequest())
+		if err != nil {
+			t.Fatalf("case %d: %v", i, err)
+		}
+		if !reflect.DeepEqual(got, sent) {
+			t.Fatalf("case %d:\n got %#v\nwant %#v", i, got, sent)
+		}
+	}
+}
 
 func randUsage(r *rand.Rand) core.Usage {
 	field := func() int {
@@ -182,7 +277,18 @@ func randEvents(r *rand.Rand) []core.Event {
 	}
 	start := core.Event{Kind: core.EventStart, ID: id, Model: nonEmptyText(r, 3), Usage: randUsage(r)}
 	evs := []core.Event{start}
+	calls := 0
 	for range r.Intn(20) {
+		if r.Intn(4) == 0 {
+			// A tool call with its arguments in pieces, which the
+			// format passes on as they are, valid JSON or not.
+			evs = append(evs, core.Event{Kind: core.EventToolCallStart, ToolIndex: calls, ToolCallID: "toolu_" + nonEmptyText(r, 2), ToolName: nonEmptyText(r, 2)})
+			for range r.Intn(4) {
+				evs = append(evs, core.Event{Kind: core.EventToolCallDelta, ToolIndex: calls, Arguments: nonEmptyText(r, 3)})
+			}
+			calls++
+			continue
+		}
 		evs = append(evs, core.Event{Kind: core.EventDelta, Text: nonEmptyText(r, 5)})
 	}
 	final := start.Usage

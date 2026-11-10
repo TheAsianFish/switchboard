@@ -65,6 +65,10 @@ type Config struct {
 	MaxTokens int
 	// Label names the run in the Result, for example "gateway-stream-200".
 	Label string
+	// KeepSamples records every measured request's latency and TTFT in the
+	// Result, so a later analysis can compute statistics the summary does
+	// not have, such as a confidence interval on a percentile.
+	KeepSamples bool
 }
 
 // withDefaults validates c and fills zero fields.
@@ -168,6 +172,17 @@ type Result struct {
 	// SendDelay is actual send time minus scheduled time.
 	SendDelay Stats    `json:"send_delay"`
 	Hardware  Hardware `json:"hardware"`
+	// Samples holds the per-request values behind Latency and TTFT when
+	// Config.KeepSamples is set.
+	Samples *Samples `json:"samples,omitempty"`
+}
+
+// Samples are the measured successful requests' latency and TTFT in
+// milliseconds, rounded to the microsecond, in the order the requests were
+// scheduled. TTFT omits requests that produced no text.
+type Samples struct {
+	LatencyMS []float64 `json:"latency_ms"`
+	TTFTMS    []float64 `json:"ttft_ms"`
 }
 
 // Errors is the number of measured requests whose outcome was not ok,
@@ -310,7 +325,18 @@ func summarise(cfg Config, rs []scheduled, start, end time.Time) *Result {
 	res.Latency = Summarise(latency)
 	res.TTFT = Summarise(ttft)
 	res.SendDelay = Summarise(delay)
+	if cfg.KeepSamples {
+		res.Samples = &Samples{LatencyMS: millis(latency), TTFTMS: millis(ttft)}
+	}
 	return res
+}
+
+func millis(ds []time.Duration) []float64 {
+	out := make([]float64, len(ds))
+	for i, d := range ds {
+		out[i] = round3(ms(d))
+	}
+	return out
 }
 
 func round3(f float64) float64 { return math.Round(f*1000) / 1000 }

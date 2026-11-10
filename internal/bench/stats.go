@@ -17,6 +17,7 @@ type Stats struct {
 	Mean  float64 `json:"mean_ms"`
 	P50   float64 `json:"p50_ms"`
 	P90   float64 `json:"p90_ms"`
+	P95   float64 `json:"p95_ms"`
 	P99   float64 `json:"p99_ms"`
 	P999  float64 `json:"p999_ms"`
 	Max   float64 `json:"max_ms"`
@@ -39,6 +40,7 @@ func Summarise(samples []time.Duration) Stats {
 		Mean:  ms(time.Duration(sum / float64(len(s)))),
 		P50:   ms(Percentile(s, 50)),
 		P90:   ms(Percentile(s, 90)),
+		P95:   ms(Percentile(s, 95)),
 		P99:   ms(Percentile(s, 99)),
 		P999:  ms(Percentile(s, 99.9)),
 		Max:   ms(s[len(s)-1]),

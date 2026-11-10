@@ -6,13 +6,16 @@
 #
 # The API is on http://localhost:8080 either way. Each replica's admin
 # listener (/metrics) is published on loopback: 9090 for the dev replica,
-# 9091-9093 for the fleet. Jaeger and Prometheus join in a later milestone.
+# 9091-9093 for the fleet. Both profiles also run Jaeger, which the gateways
+# send their traces to (UI on http://localhost:16686; every response carries
+# its trace id in X-Trace-Id), and Prometheus, which scrapes every replica
+# (UI on http://localhost:9095).
 name: switchboard
 
 x-gateway: &gateway
   build: ..
   image: switchboard:dev
-  depends_on: [redis]
+  depends_on: [redis, jaeger]
   restart: unless-stopped
   environment: &gateway-env
     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -23,6 +26,7 @@ x-gateway: &gateway
     # The semantic cache embeds prompts with the same Ollama (pull
     # nomic-embed-text into it first).
     SWITCHBOARD_CACHE_EMBED_URL: http://ollama:11434
+    SWITCHBOARD_TRACING_ENDPOINT: http://jaeger:4318
 
 x-replica-env: &replica-env
   <<: *gateway-env
@@ -82,6 +86,30 @@ services:
     command: ["fake-provider", "--listen", "0.0.0.0:9101"]
     ports:
       - "127.0.0.1:9101:9101"
+
+  # Traces: the gateways export OTLP over HTTP to 4318; the UI and its
+  # HTTP API (/api/traces/<id>, which scripts/trace-check.sh reads) are on
+  # 16686. 4318 is published too, so a gateway run with `go run` on the
+  # host can send to it. Spans live in memory and go with the container.
+  jaeger:
+    image: jaegertracing/jaeger:2.23.0
+    profiles: [dev, fleet]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4318:4318"
+
+  # Metrics: scrapes each replica's admin listener (deploy/prometheus.yml).
+  # 9090-9093 are the replicas' own /metrics on the host, so the UI is on
+  # 9095.
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    profiles: [dev, fleet]
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9095:9090"
 
   ollama:
     image: ollama/ollama:latest

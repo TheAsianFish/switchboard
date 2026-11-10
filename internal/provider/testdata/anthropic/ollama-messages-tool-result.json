@@ -1,0 +1,1 @@
+{"id":"msg_6bcc170d5ebce69886b3f31e","type":"message","role":"assistant","model":"qwen2.5:0.5b","content":[{"type":"text","text":"The current weather in Paris is 18°C and it's sunny. You can enjoy the warm weather and the beautiful sun."}],"stop_reason":"end_turn","usage":{"input_tokens":28,"cache_read_input_tokens":172,"output_tokens":27}}

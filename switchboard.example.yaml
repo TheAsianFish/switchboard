@@ -52,6 +52,15 @@ cache:
     # (flat) and match_numbers (true) default to what the eval chose; a
     # lower threshold serves more rewordings and more wrong answers.
 
+# OpenTelemetry spans, one per pipeline stage, exported over OTLP/HTTP (to
+# Jaeger in compose). An empty endpoint turns tracing off: no spans and no
+# X-Trace-Id header. SWITCHBOARD_TRACING_ENDPOINT overrides the endpoint;
+# OTEL_EXPORTER_OTLP_ENDPOINT is not read.
+tracing:
+  endpoint: ""              # e.g. http://localhost:4318 (/v1/traces is appended)
+  sample_ratio: 1           # share of traces kept; a caller's traceparent sampled flag is ignored
+  service_name: switchboard
+
 models:
   # Prices are dollars per million tokens. Claude models fall back to the
   # built-in list prices; a model with no price is not counted in spend and

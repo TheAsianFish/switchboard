@@ -54,6 +54,43 @@ func TestDecide(t *testing.T) {
 	}
 }
 
+func TestDecideToolContent(t *testing.T) {
+	t.Parallel()
+	q := core.Message{Role: core.RoleUser, Text: "weather?"}
+	call := core.Message{Role: core.RoleAssistant, ToolCalls: []core.ToolCall{{ID: "c", Name: "f"}}}
+	result := core.Message{Role: core.RoleUser, ToolResults: []core.ToolResult{{CallID: "c", Content: "sunny"}}}
+	tests := []struct {
+		name string
+		key  cache.Mode
+		req  core.Request
+		want cache.Mode
+	}{
+		{"tools", cache.ModeSemantic, core.Request{Messages: []core.Message{q}, Tools: []core.Tool{{Name: "f"}}}, cache.ModeExact},
+		{"tool choice", cache.ModeSemantic, core.Request{Messages: []core.Message{q}, ToolChoice: core.ToolChoice{Mode: core.ToolChoiceNone}}, cache.ModeExact},
+		{"tool result last", cache.ModeSemantic, core.Request{Messages: []core.Message{q, call, result}}, cache.ModeExact},
+		{"tool call earlier", cache.ModeSemantic, core.Request{Messages: []core.Message{q, call, result, {Role: core.RoleAssistant, Text: "sunny"}, q}}, cache.ModeExact},
+		{"exact key unchanged", cache.ModeExact, core.Request{Messages: []core.Message{q}, Tools: []core.Tool{{Name: "f"}}}, cache.ModeExact},
+		{"no tools keeps semantic", cache.ModeSemantic, core.Request{Messages: []core.Message{q}}, cache.ModeSemantic},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := tt.req
+			r.Temperature = zero()
+			d, err := cache.Decide(tt.key, "", &r, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.Mode != tt.want {
+				t.Errorf("mode = %s (%s), want %s", d.Mode, d.Reason, tt.want)
+			}
+			if tt.key == cache.ModeSemantic && tt.want == cache.ModeExact && d.Reason != cache.ReasonToolContent {
+				t.Errorf("reason = %q, want %q", d.Reason, cache.ReasonToolContent)
+			}
+		})
+	}
+}
+
 func TestDecideMaxTemperature(t *testing.T) {
 	t.Parallel()
 	low := 0.2

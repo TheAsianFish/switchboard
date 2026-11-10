@@ -4,7 +4,7 @@ BIN := $(CURDIR)/bin
 GOLANGCI := $(BIN)/golangci-lint
 export GOTOOLCHAIN ?= auto
 
-.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits eval-cache eval-cache-data sdk-smoke record-fixtures results docker clean
+.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge eval-cache eval-cache-data sdk-smoke record-fixtures results docker clean
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -37,10 +37,10 @@ test-integration: ## Lua scripts against a real redis:8 ($$SWITCHBOARD_TEST_REDI
 		scripts/with-redis.sh go test -race -count=1 -tags integration ./...; \
 	fi
 
-dev: ## one gateway, Redis, Ollama and the fake provider in compose
+dev: ## one gateway, Redis, Ollama, the fake provider, Jaeger and Prometheus in compose
 	docker compose -f deploy/compose.yaml --profile dev up --build
 
-fleet: ## three gateways behind nginx sharing Redis, plus Ollama and the fake provider
+fleet: ## three gateways behind nginx sharing Redis, plus Ollama, the fake provider, Jaeger and Prometheus
 	docker compose -f deploy/compose.yaml --profile fleet up --build
 
 bench: ## Q1: gateway overhead through the fake provider (about 12 minutes)
@@ -61,6 +61,10 @@ sdk-smoke: build ## unmodified OpenAI and Anthropic Python SDKs streaming throug
 
 record-fixtures: ## re-capture provider fixtures from Ollama
 	scripts/record-fixtures.sh ollama
+	scripts/record-fixtures.sh ollama-tools
+
+bench-hedge: ## Q4: hedging off and on through the fake provider's slow tail (about 3 minutes)
+	eval/hedge/run.sh
 
 results: ## render RESULTS.md from eval/results/
 	go run ./cmd/switchboard eval results

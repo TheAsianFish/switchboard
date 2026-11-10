@@ -2,9 +2,11 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -101,6 +103,76 @@ func TestSDKMessages(t *testing.T) {
 	}
 	if len(models.Data) != 1 || models.Data[0].ID != "fake" {
 		t.Errorf("models %+v", models.Data)
+	}
+}
+
+// A streamed tool-use conversation: the fake calls the tool, the SDK
+// accumulates the tool_use block from input_json_delta events, and the
+// tool's result goes back in a tool_result block for a text answer.
+func TestSDKStreamToolConversation(t *testing.T) {
+	t.Parallel()
+	srv, p := sdkServer(t)
+	client := sdkClient(srv, testKey)
+	ctx := context.Background()
+	params := sdk.MessageNewParams{
+		Model:     "fake",
+		MaxTokens: 100,
+		Messages:  []sdk.MessageParam{sdk.NewUserMessage(sdk.NewTextBlock("weather in Paris?"))},
+		Tools: []sdk.ToolUnionParam{{OfTool: &sdk.ToolParam{
+			Name:        "get_weather",
+			Description: sdk.String("Weather for a city"),
+			InputSchema: sdk.ToolInputSchemaParam{Properties: map[string]any{"city": map[string]any{"type": "string"}}},
+		}}},
+		ToolChoice: sdk.ToolChoiceUnionParam{OfAuto: &sdk.ToolChoiceAutoParam{}},
+	}
+
+	turn := func() (sdk.Message, []string) {
+		t.Helper()
+		stream := client.Messages.NewStreaming(ctx, params)
+		defer func() { _ = stream.Close() }()
+		var acc sdk.Message
+		var types []string
+		for stream.Next() {
+			ev := stream.Current()
+			types = append(types, ev.Type)
+			if err := acc.Accumulate(ev); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := stream.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return acc, types
+	}
+
+	msg, types := turn()
+	// The SDK drops ping events.
+	want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
+	if msg.StopReason != sdk.StopReasonToolUse || len(msg.Content) != 1 || !reflect.DeepEqual(types, want) {
+		t.Fatalf("stop %q, content %+v, events %v", msg.StopReason, msg.Content, types)
+	}
+	use := msg.Content[0].AsToolUse()
+	var args map[string]string
+	if err := json.Unmarshal(use.Input, &args); err != nil || args["city"] == "" {
+		t.Fatalf("input %s: %v", use.Input, err)
+	}
+	if use.Type != "tool_use" || use.Name != "get_weather" || use.ID == "" {
+		t.Errorf("tool_use %+v", use)
+	}
+
+	params.Messages = append(params.Messages, msg.ToParam(), sdk.NewUserMessage(sdk.NewToolResultBlock(use.ID, "18 C and sunny", false)))
+	answer, _ := turn()
+	if answer.StopReason != sdk.StopReasonEndTurn || len(answer.Content) != 1 || answer.Content[0].Text == "" {
+		t.Fatalf("answer %+v", answer)
+	}
+	got := p.LastRequest()
+	wantMsgs := []core.Message{
+		{Role: core.RoleUser, Text: "weather in Paris?"},
+		{Role: core.RoleAssistant, ToolCalls: []core.ToolCall{{ID: use.ID, Name: "get_weather", Arguments: use.Input}}},
+		{Role: core.RoleUser, ToolResults: []core.ToolResult{{CallID: use.ID, Content: "18 C and sunny"}}},
+	}
+	if !reflect.DeepEqual(got.Messages, wantMsgs) || len(got.Tools) != 1 || got.ToolChoice.Mode != core.ToolChoiceAuto {
+		t.Errorf("provider saw %+v\nwant messages %+v", got, wantMsgs)
 	}
 }
 

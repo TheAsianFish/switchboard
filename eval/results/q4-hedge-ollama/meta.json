@@ -1,0 +1,11 @@
+{
+  "commit": "84a20db",
+  "date": "2026-11-09T22:17:53Z",
+  "model": "qwen2.5:0.5b",
+  "ollama_version": "0.40.15",
+  "rate": 1,
+  "duration": "180s",
+  "warmup": "30s",
+  "max_tokens": 16,
+  "command": "MODEL=qwen2.5:0.5b RATE=1 DURATION=180s WARMUP=30s MAX_TOKENS=16 eval/hedge/ollama.sh"
+}

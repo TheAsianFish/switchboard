@@ -40,6 +40,8 @@ type Metrics struct {
 	cacheFills   *prometheus.CounterVec
 	cacheErrs    *prometheus.CounterVec
 	cacheSaved   *prometheus.CounterVec
+
+	resilience
 }
 
 // NewMetrics registers the gateway's series on a fresh registry, with the
@@ -104,6 +106,7 @@ func NewMetrics(runtime bool) *Metrics {
 	}
 	m.reg.MustRegister(m.requests, m.tokens, m.dollars, m.unpriced, m.duration, m.refusals, m.degraded, m.storeErrs,
 		m.cacheLookups, m.cacheLatency, m.cacheFills, m.cacheErrs, m.cacheSaved)
+	m.resilience = newResilience(m.reg)
 	if runtime {
 		m.reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	}

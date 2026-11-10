@@ -21,9 +21,12 @@ type stream struct {
 
 	started bool
 	finish  string // last finish_reason seen; "" while generating
-	usage   core.Usage
-	queue   []core.Event
-	err     error // sticky: io.EOF once stopped, or the failure
+	// calls maps an upstream tool call index to the canonical one, in the
+	// order the calls opened; the last is the open call.
+	calls []int
+	usage core.Usage
+	queue []core.Event
+	err   error // sticky: io.EOF once stopped, or the failure
 }
 
 func newStream(ctx context.Context, cancel context.CancelFunc, body io.ReadCloser) *stream {
@@ -93,6 +96,12 @@ func (s *stream) read() {
 		if ch.Delta.Content != nil && *ch.Delta.Content != "" {
 			s.queue = append(s.queue, core.Event{Kind: core.EventDelta, Text: *ch.Delta.Content})
 		}
+		for _, tc := range ch.Delta.ToolCalls {
+			if err := s.toolCall(tc); err != nil {
+				s.fail(err)
+				return
+			}
+		}
 		if ch.FinishReason != nil && *ch.FinishReason != "" {
 			s.finish = *ch.FinishReason
 		}
@@ -102,6 +111,36 @@ func (s *stream) read() {
 	}
 }
 
+// toolCall queues the events for one delta.tool_calls entry. A new index
+// (or, without an index, a new id) opens a call; anything else adds to the
+// open call. Servers stream calls one after another, which is what the
+// canonical stream allows: a fragment for a call already closed is an
+// upstream error rather than something to reorder.
+func (s *stream) toolCall(tc toolCall) error {
+	n := len(s.calls)
+	idx := n - 1
+	switch {
+	case tc.Index != nil:
+		idx = *tc.Index
+	case tc.ID != "" || n == 0:
+		idx = n // no index: count each id as the next call
+	}
+	open := n > 0 && s.calls[n-1] == idx
+	if !open {
+		for _, u := range s.calls {
+			if u == idx {
+				return core.Errorf(core.KindUpstream, "upstream: tool call %d continued after the next one started", idx)
+			}
+		}
+		s.calls = append(s.calls, idx)
+		s.queue = append(s.queue, core.Event{Kind: core.EventToolCallStart, ToolIndex: n, ToolCallID: tc.ID, ToolName: tc.Function.Name})
+	}
+	if tc.Function.Arguments != "" {
+		s.queue = append(s.queue, core.Event{Kind: core.EventToolCallDelta, ToolIndex: len(s.calls) - 1, Arguments: tc.Function.Arguments})
+	}
+	return nil
+}
+
 // end handles [DONE] or the end of the body: a stream that saw a
 // finish_reason stops cleanly, any other was cut short.
 func (s *stream) end() {
@@ -109,7 +148,7 @@ func (s *stream) end() {
 		s.fail(core.Errorf(core.KindUpstream, "upstream stream ended early"))
 		return
 	}
-	s.queue = append(s.queue, core.Event{Kind: core.EventStop, StopReason: stopReason(s.finish), Usage: s.usage})
+	s.queue = append(s.queue, core.Event{Kind: core.EventStop, StopReason: stopReason(s.finish, len(s.calls) > 0), Usage: s.usage})
 	s.err = io.EOF
 	s.closer()
 }

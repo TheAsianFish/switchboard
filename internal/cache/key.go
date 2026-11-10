@@ -10,7 +10,9 @@ import (
 )
 
 // keyVersion changes whenever the canonical form changes, so entries
-// written under an old form are never read under a new one.
+// written under an old form are never read under a new one. Fields added
+// with omitempty leave the form of every request without them unchanged
+// and need no new version: the tool fields are such.
 const keyVersion = 2
 
 // Keys locate a request in the cache.
@@ -49,11 +51,71 @@ type canonicalContext struct {
 	Temp   *float64 `json:"temperature"`
 	TopP   *float64 `json:"top_p"`
 	Stop   []string `json:"stop"`
+	// Tools and Choice are what the model was offered; two requests that
+	// differ only there may get different replies.
+	Tools  []keyTool  `json:"tools,omitempty"`
+	Choice *keyChoice `json:"tool_choice,omitempty"`
+	// LastResults are the last user turn's tool results. They belong to
+	// the turn the semantic layer embeds, but that layer never serves a
+	// request with tool content, so hashing them here is enough to keep
+	// exact entries apart.
+	LastResults []keyResult `json:"last_tool_results,omitempty"`
 }
 
 type turn struct {
-	Role core.Role `json:"role"`
-	Text string    `json:"text"`
+	Role    core.Role   `json:"role"`
+	Text    string      `json:"text"`
+	Calls   []keyCall   `json:"tool_calls,omitempty"`
+	Results []keyResult `json:"tool_results,omitempty"`
+}
+
+// Tool content is hashed as given: arguments and schemas are JSON text
+// (kept as strings, so a client's odd but valid spacing cannot fail the
+// encoding), and none of it is cleaned like prose.
+type keyTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Parameters  string `json:"parameters"`
+}
+
+type keyChoice struct {
+	Mode            core.ToolChoiceMode `json:"mode"`
+	Name            string              `json:"name"`
+	DisableParallel bool                `json:"disable_parallel"`
+}
+
+type keyCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type keyResult struct {
+	CallID  string `json:"call_id"`
+	Content string `json:"content"`
+	IsError bool   `json:"is_error"`
+}
+
+func keyResults(rs []core.ToolResult) []keyResult {
+	if len(rs) == 0 {
+		return nil
+	}
+	out := make([]keyResult, len(rs))
+	for i, r := range rs {
+		out[i] = keyResult{CallID: r.CallID, Content: r.Content, IsError: r.IsError}
+	}
+	return out
+}
+
+func keyCalls(cs []core.ToolCall) []keyCall {
+	if len(cs) == 0 {
+		return nil
+	}
+	out := make([]keyCall, len(cs))
+	for i, c := range cs {
+		out[i] = keyCall{ID: c.ID, Name: c.Name, Arguments: string(c.Arguments)}
+	}
+	return out
 }
 
 // KeysFor derives the keys of req for tenant. It reports false when the
@@ -80,12 +142,19 @@ func KeysFor(tenant string, up Upstream, req *core.Request) (Keys, bool) {
 		Turns: make([]turn, 0, n-1), Max: req.MaxTokens, Temp: req.Temperature, TopP: req.TopP, Stop: req.Stop,
 	}
 	for _, m := range req.Messages[:n-1] {
-		c.Turns = append(c.Turns, turn{Role: m.Role, Text: clean(m.Text)})
+		c.Turns = append(c.Turns, turn{Role: m.Role, Text: clean(m.Text), Calls: keyCalls(m.ToolCalls), Results: keyResults(m.ToolResults)})
 	}
+	for _, t := range req.Tools {
+		c.Tools = append(c.Tools, keyTool{Name: t.Name, Description: t.Description, Parameters: string(t.Parameters)})
+	}
+	if tc := req.ToolChoice; tc != (core.ToolChoice{}) {
+		c.Choice = &keyChoice{Mode: tc.Mode, Name: tc.Name, DisableParallel: tc.DisableParallel}
+	}
+	c.LastResults = keyResults(req.Messages[n-1].ToolResults)
 	ctxBytes, err := json.Marshal(c)
 	if err != nil {
-		// Only strings, ints and float pointers: Marshal cannot fail
-		// except on NaN or Inf, which the front ends refuse.
+		// Only strings, ints, bools and float pointers: Marshal cannot
+		// fail except on NaN or Inf, which the front ends refuse.
 		return Keys{}, false
 	}
 	prompt := clean(req.Messages[n-1].Text)

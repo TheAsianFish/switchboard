@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -19,6 +20,20 @@ type textBlock struct {
 	Text string `json:"text"`
 }
 
+// toolUseBlock is a tool call; in content_block_start its input is {} and
+// the arguments follow as input_json_delta events.
+type toolUseBlock struct {
+	Type  string          `json:"type"`
+	ID    string          `json:"id"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+type inputJSONDelta struct {
+	Type        string `json:"type"`
+	PartialJSON string `json:"partial_json"`
+}
+
 type usage struct {
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
@@ -28,14 +43,14 @@ type usage struct {
 
 // message is a Messages response, also the payload of message_start.
 type message struct {
-	ID           string      `json:"id"`
-	Type         string      `json:"type"`
-	Role         string      `json:"role"`
-	Model        string      `json:"model"`
-	Content      []textBlock `json:"content"`
-	StopReason   *string     `json:"stop_reason"`
-	StopSequence *string     `json:"stop_sequence"`
-	Usage        usage       `json:"usage"`
+	ID           string  `json:"id"`
+	Type         string  `json:"type"`
+	Role         string  `json:"role"`
+	Model        string  `json:"model"`
+	Content      []any   `json:"content"`
+	StopReason   *string `json:"stop_reason"`
+	StopSequence *string `json:"stop_sequence"`
+	Usage        usage   `json:"usage"`
 }
 
 func wireUsage(u core.Usage) usage {
@@ -47,27 +62,46 @@ func wireUsage(u core.Usage) usage {
 	}
 }
 
-// renderMessage builds the non-streamed response body.
-func renderMessage(r *core.Response) message {
+// renderMessage builds the non-streamed response body: a text block unless
+// the reply is tool calls alone, then a tool_use block per call. Tool call
+// arguments that are not a JSON object (a model can write anything) cannot
+// be an input and fail the request as an upstream error.
+func renderMessage(r *core.Response) (message, error) {
 	stop := stopReason(r.StopReason)
+	content := make([]any, 0, 1+len(r.ToolCalls))
+	if r.Text != "" || len(r.ToolCalls) == 0 {
+		content = append(content, textBlock{Type: "text", Text: r.Text})
+	}
+	for i, c := range r.ToolCalls {
+		input := c.Arguments
+		if len(input) == 0 {
+			input = json.RawMessage("{}")
+		} else if _, ok := compactObject(input); !ok {
+			return message{}, core.Errorf(core.KindUpstream, "upstream: tool call %d has arguments that are not a JSON object", i)
+		}
+		content = append(content, toolUseBlock{Type: "tool_use", ID: toolUseID(c.ID), Name: c.Name, Input: input})
+	}
 	return message{
 		ID:         messageID(r.ID),
 		Type:       "message",
 		Role:       "assistant",
 		Model:      r.Model,
-		Content:    []textBlock{{Type: "text", Text: r.Text}},
+		Content:    content,
 		StopReason: &stop,
 		Usage:      wireUsage(r.Usage),
-	}
+	}, nil
 }
 
-// stopReason maps a canonical stop reason to Anthropic's.
+// stopReason maps a canonical stop reason to Anthropic's (the table is in
+// core).
 func stopReason(s core.StopReason) string {
 	switch s {
 	case core.StopMaxTokens:
 		return "max_tokens"
 	case core.StopSequence:
 		return "stop_sequence"
+	case core.StopToolUse:
+		return "tool_use"
 	case core.StopContentFilter:
 		return "refusal"
 	default:
@@ -75,13 +109,26 @@ func stopReason(s core.StopReason) string {
 	}
 }
 
+func randomHex() string {
+	var b [12]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+// toolUseID passes a provider's tool call id through, whatever its prefix
+// (clients echo it back, so it must not change), or makes one up.
+func toolUseID(id string) string {
+	if id == "" {
+		return "toolu_" + randomHex()
+	}
+	return id
+}
+
 // messageID gives a provider id Anthropic's "msg_" prefix, or makes one up
 // when the provider sent none.
 func messageID(id string) string {
 	if id == "" {
-		var b [12]byte
-		_, _ = rand.Read(b[:])
-		return "msg_" + hex.EncodeToString(b[:])
+		return "msg_" + randomHex()
 	}
 	if strings.HasPrefix(id, "msg_") {
 		return id
@@ -96,17 +143,17 @@ type (
 		Message message `json:"message"`
 	}
 	contentBlockStartEvent struct {
-		Type         string    `json:"type"`
-		Index        int       `json:"index"`
-		ContentBlock textBlock `json:"content_block"`
+		Type         string `json:"type"`
+		Index        int    `json:"index"`
+		ContentBlock any    `json:"content_block"`
 	}
 	pingEvent struct {
 		Type string `json:"type"`
 	}
 	contentBlockDeltaEvent struct {
-		Type  string    `json:"type"`
-		Index int       `json:"index"`
-		Delta textBlock `json:"delta"`
+		Type  string `json:"type"`
+		Index int    `json:"index"`
+		Delta any    `json:"delta"`
 	}
 	contentBlockStopEvent struct {
 		Type  string `json:"type"`
@@ -203,10 +250,31 @@ func serveStream(ctx context.Context, w http.ResponseWriter, gw core.Gateway, re
 
 // streamWriter writes Anthropic stream events; each write reports whether
 // the client is still there.
+//
+// Content blocks open lazily: a text block on the first text, a tool_use
+// block on each tool call, each closing the block before it. A reply with
+// no content at all still gets one empty text block, as the API sends.
+// The ping follows the first content_block_start, where the API puts it.
 type streamWriter struct {
 	ctx context.Context
 	w   *sse.Writer
+
+	blocks int        // content blocks opened so far
+	open   blockState // the open block, if any
 }
+
+type blockState struct {
+	kind blockKind
+	tool int // canonical tool index of an open tool_use block
+}
+
+type blockKind int
+
+const (
+	blockNone blockKind = iota
+	blockText
+	blockTool
+)
 
 func (s *streamWriter) write(name string, payload any) bool {
 	data, err := marshal(payload)
@@ -229,12 +297,34 @@ func (s *streamWriter) start(ev core.Event) bool {
 		Type:    "message",
 		Role:    "assistant",
 		Model:   ev.Model,
-		Content: []textBlock{},
+		Content: []any{},
 		Usage:   u,
 	}
-	return s.write("message_start", messageStartEvent{Type: "message_start", Message: msg}) &&
-		s.write("content_block_start", contentBlockStartEvent{Type: "content_block_start", ContentBlock: textBlock{Type: "text", Text: ""}}) &&
-		s.write("ping", pingEvent{Type: "ping"})
+	return s.write("message_start", messageStartEvent{Type: "message_start", Message: msg})
+}
+
+// openBlock closes the open block, if any, and starts the next one.
+func (s *streamWriter) openBlock(st blockState, block any) bool {
+	if !s.closeBlock() {
+		return false
+	}
+	if !s.write("content_block_start", contentBlockStartEvent{Type: "content_block_start", Index: s.blocks, ContentBlock: block}) {
+		return false
+	}
+	s.blocks++
+	s.open = st
+	if s.blocks == 1 {
+		return s.write("ping", pingEvent{Type: "ping"})
+	}
+	return true
+}
+
+func (s *streamWriter) closeBlock() bool {
+	if s.open.kind == blockNone {
+		return true
+	}
+	s.open = blockState{}
+	return s.write("content_block_stop", contentBlockStopEvent{Type: "content_block_stop", Index: s.blocks - 1})
 }
 
 func (s *streamWriter) stop(ev core.Event) {
@@ -243,21 +333,39 @@ func (s *streamWriter) stop(ev core.Event) {
 		in, cw, cr := ev.Usage.InputTokens, ev.Usage.CacheWriteTokens, ev.Usage.CacheReadTokens
 		du.InputTokens, du.CacheCreationInputTokens, du.CacheReadInputTokens = &in, &cw, &cr
 	}
-	if s.write("content_block_stop", contentBlockStopEvent{Type: "content_block_stop"}) &&
+	if s.blocks == 0 && !s.openBlock(blockState{kind: blockText}, textBlock{Type: "text"}) {
+		return
+	}
+	if s.closeBlock() &&
 		s.write("message_delta", messageDeltaEvent{Type: "message_delta", Delta: messageDelta{StopReason: stopReason(ev.StopReason)}, Usage: du}) {
 		s.write("message_stop", messageStopEvent{Type: "message_stop"})
 	}
 }
 
-// event writes a delta or the closing events and reports whether the stream
-// goes on.
+// event writes a delta, a block boundary or the closing events and reports
+// whether the stream goes on.
 func (s *streamWriter) event(ev core.Event) bool {
 	switch ev.Kind {
 	case core.EventDelta:
 		if ev.Text == "" {
 			return true
 		}
-		return s.write("content_block_delta", contentBlockDeltaEvent{Type: "content_block_delta", Delta: textBlock{Type: "text_delta", Text: ev.Text}})
+		if s.open.kind != blockText && !s.openBlock(blockState{kind: blockText}, textBlock{Type: "text"}) {
+			return false
+		}
+		return s.write("content_block_delta", contentBlockDeltaEvent{Type: "content_block_delta", Index: s.blocks - 1, Delta: textBlock{Type: "text_delta", Text: ev.Text}})
+	case core.EventToolCallStart:
+		block := toolUseBlock{Type: "tool_use", ID: toolUseID(ev.ToolCallID), Name: ev.ToolName, Input: json.RawMessage("{}")}
+		return s.openBlock(blockState{kind: blockTool, tool: ev.ToolIndex}, block)
+	case core.EventToolCallDelta:
+		if s.open.kind != blockTool || s.open.tool != ev.ToolIndex {
+			s.fail(core.Errorf(core.KindUpstream, "upstream sent arguments for tool call %d, which is not open", ev.ToolIndex))
+			return false
+		}
+		if ev.Arguments == "" {
+			return true
+		}
+		return s.write("content_block_delta", contentBlockDeltaEvent{Type: "content_block_delta", Index: s.blocks - 1, Delta: inputJSONDelta{Type: "input_json_delta", PartialJSON: ev.Arguments}})
 	case core.EventStop:
 		s.stop(ev)
 		return false

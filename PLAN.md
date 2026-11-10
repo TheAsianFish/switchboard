@@ -430,10 +430,63 @@ Changes made while building:
     the measured threshold but off by default, and a reranking stage is
     on the roadmap rather than a lower threshold.
 
+- **M4.**
+  - Retries, hedging and the circuit breaker are one provider wrapper
+    (`internal/hedge`), configured per provider under `resilience`. A
+    request is a series of races: one attempt, a second after the hedge
+    delay if the tenant's budget allows, the first to produce a token
+    wins and the other is cancelled. A race that fails before any token
+    reached the client is retried with full-jitter backoff (two retries
+    by default; a `Retry-After` above `max_retry_after` goes back to the
+    client). Nothing is retried after a token has been sent.
+  - The hedge delay is the rolling p95 of the first attempt's own
+    first-token time per upstream model, from the last 1000 requests,
+    used once 100 are in. When the first attempt loses, the time it had
+    waited goes in instead (its real time is at least that), so the
+    window keeps its tail and the delay does not drift down as hedging
+    succeeds. A hedge's own time never goes in: it is seen only when it
+    wins, which selects fast ones.
+  - The hedge budget is a per-tenant credit: each request earns the
+    budget share (10%) of a hedge, up to 10 saved, each hedge spends one.
+    It is per replica, because a ratio held on every replica's share of
+    the traffic holds for the fleet.
+  - Hedging is off by default for every provider, not only paid ones.
+  - A hedged-away attempt is charged at the prompt estimate: the upstream
+    may have read and billed its prompt, and nothing reports what it
+    cost.
+  - The breaker counts consecutive overloaded, timed-out and upstream
+    failures (not rate limits, client errors or cancellations), opens
+    after five, fails fast with `overloaded` and a `Retry-After` for its
+    cooldown (10 s), then lets one probe through per cooldown. It is per
+    replica. Health is on the admin listener at `/providers` and in
+    `switchboard_provider_breaker_state`.
+  - Tool calls: canonical `Tool`, `ToolChoice`, `ToolCall` and
+    `ToolResult` types and two stream events (tool-call start, argument
+    delta) carry tools through both front ends and both providers;
+    `tool_use` maps to OpenAI's `tool_calls`. The exact cache key hashes
+    tool content, the semantic layer refuses it, and a reply with tool
+    calls is never stored. Fixtures are real `qwen2.5:0.5b` captures from
+    Ollama 0.40.15.
+  - Tracing: a root span per HTTP request and a span per stage (`auth`,
+    `route`, `ratelimit`, `budget.reserve`, `cache.lookup`, `provider`
+    with one `provider.attempt` per attempt, `settle`, `cache.fill`),
+    exported over OTLP/HTTP when `tracing.endpoint` is set and absent
+    otherwise; `X-Trace-Id` on every response, `trace_id` on every log
+    line. Jaeger and Prometheus run in compose.
+  - Q4's live part against Claude is not run (no key; under "To
+    measure"). In its place, besides the synthetic tail, the same
+    comparison runs against a real model on local Ollama
+    (`eval/hedge/ollama.sh`).
+  - Done-criteria evidence: `eval/results/m4-trace/` is a Jaeger trace of
+    one streamed and one non-streamed request with every stage and both
+    attempts of a hedge (`scripts/trace-check.sh --local`); RESULTS.md Q4
+    holds the hedging numbers with extra requests and token spend
+    (`make bench-hedge`).
+
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
 - [x] M3: Exact and semantic cache — canonical request hash cache; `embed` client for Ollama `/api/embed` with a fake; vector index interface with Redis HNSW/FLAT and in-memory FLAT implementations; cacheability rules (temperature, explicit header, context hash) and tenant namespacing; cached streams replayed in the client's wire format; `make eval-cache` with the PAWS-Wiki and GSM8K-perturbation pair sets, the threshold sweep and the FLAT vs HNSW latency check; RESULTS.md cache section answering Q3. Done when the cross-tenant and cross-context leak tests pass, the eval runs end to end on a laptop with Ollama, and the chosen threshold is the one the eval produced.
-- [ ] M4: Resilience and observability — retries with backoff on retryable statuses, hedged requests bounded by time-to-first-token and a per-tenant hedge budget, per-provider circuit breaker and health; tool-call and `stop_reason` translation in both wire formats; OpenTelemetry spans per pipeline stage exported over OTLP to Jaeger in compose, trace id in the response headers; `make bench-hedge` answering Q4 on the synthetic tail and on a real provider where a key exists. Done when a trace shows every stage and the hedge, and the hedging numbers are in RESULTS.md with their cost.
+- [x] M4: Resilience and observability — retries with backoff on retryable statuses, hedged requests bounded by time-to-first-token and a per-tenant hedge budget, per-provider circuit breaker and health; tool-call and `stop_reason` translation in both wire formats; OpenTelemetry spans per pipeline stage exported over OTLP to Jaeger in compose, trace id in the response headers; `make bench-hedge` answering Q4 on the synthetic tail and on a real provider where a key exists. Done when a trace shows every stage and the hedge, and the hedging numbers are in RESULTS.md with their cost.
 - [ ] M5: Evaluated router — committed eval set (GSM8K + MMLU, 600 questions); `switchboard eval router label` runs every candidate through the gateway and records correctness, usage, dollars and latency (replays from recordings at $0); feature extraction and the per-candidate logistic models trained in Go; `model: "auto"` with a configurable quality target; `make eval-router` with 5-fold cross-validation, the four baselines and the random-mix line; RESULTS.md router section answering Q5 (live labels when a key exists, otherwise the Ollama candidate and "To measure"). Done when the router's held-out frontier is plotted against the line and the gateway serves `auto` from the trained weights.
 - [ ] M6: Admin page, chaos and the overhead breakdown — admin JSON API on the loopback listener (keys, limits, spend, cache stats, router decisions, recent requests with trace links); React + TypeScript page embedded in the binary with Vitest tests; `chaos/run.sh` with the phased kill schedule and per-phase report; `make bench` extended to the per-feature breakdown. RESULTS.md answers Q1 in full and Q6. Done when the chaos run completes on a laptop with a report, the admin page shows a live fleet, and `make ui-check` is in CI.
 - [ ] M7: Release readiness — `go install` path verified in a clean container, release archives, `release.yml` guarded by `v*` tags building the multi-arch image to GHCR, RELEASE.md with every maintainer step; README complete (what/why, demo GIF placeholder with capture instructions, quickstart for both SDKs, Mermaid architecture, design decisions and trade-offs, results table rendered from RESULTS.md, roadmap); RESULTS.md complete with every measured number, its method, cost and hardware, and every unmeasured one under "To measure" with its command. Done when a fresh clone runs the quickstart from the README alone and the release workflow dry-runs green.

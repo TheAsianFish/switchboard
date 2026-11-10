@@ -25,6 +25,7 @@ type chatRequest struct {
 	N                   *int            `json:"n"`
 	Tools               json.RawMessage `json:"tools"`
 	ToolChoice          json.RawMessage `json:"tool_choice"`
+	ParallelToolCalls   *bool           `json:"parallel_tool_calls"`
 	Functions           json.RawMessage `json:"functions"`
 	FunctionCall        json.RawMessage `json:"function_call"`
 	ResponseFormat      json.RawMessage `json:"response_format"`
@@ -38,6 +39,7 @@ type chatMessage struct {
 	Role         string          `json:"role"`
 	Content      json.RawMessage `json:"content"`
 	ToolCalls    json.RawMessage `json:"tool_calls"`
+	ToolCallID   string          `json:"tool_call_id"`
 	FunctionCall json.RawMessage `json:"function_call"`
 }
 
@@ -52,7 +54,8 @@ type options struct {
 	includeUsage bool
 }
 
-const errToolUse = "tool use is not supported yet"
+// errFunctions refuses the legacy functions API, which tools replaced.
+const errFunctions = "the legacy functions API is not supported: use tools"
 
 // parseRequest turns a request body into a canonical request. Every error is
 // a *core.Error of kind KindInvalidRequest with a client-safe message.
@@ -67,8 +70,8 @@ func parseRequest(body []byte) (*core.Request, options, error) {
 	if len(in.Messages) == 0 {
 		return nil, options{}, invalid("messages is required and must not be empty")
 	}
-	if present(in.Tools) || present(in.ToolChoice) || present(in.Functions) || present(in.FunctionCall) {
-		return nil, options{}, invalid(errToolUse)
+	if present(in.Functions) || present(in.FunctionCall) {
+		return nil, options{}, invalid(errFunctions)
 	}
 	if in.N != nil && *in.N != 1 {
 		return nil, options{}, invalid("n must be 1: only one choice per request is supported")
@@ -100,6 +103,12 @@ func parseRequest(body []byte) (*core.Request, options, error) {
 		return nil, options{}, err
 	}
 	req.Stop = stop
+	if req.Tools, err = parseTools(in.Tools); err != nil {
+		return nil, options{}, err
+	}
+	if req.ToolChoice, err = parseToolChoice(in.ToolChoice, in.ParallelToolCalls); err != nil {
+		return nil, options{}, err
+	}
 
 	var system []string
 	for i, m := range in.Messages {
@@ -113,17 +122,38 @@ func parseRequest(body []byte) (*core.Request, options, error) {
 				return nil, options{}, err
 			}
 			system = append(system, text)
-		case "user", "assistant":
+		case "user":
 			if present(m.ToolCalls) || present(m.FunctionCall) {
-				return nil, options{}, invalid("messages[%d]: %s", i, errToolUse)
+				return nil, options{}, invalid("messages[%d]: only assistant messages carry tool calls", i)
 			}
 			text, err := parseContent(m.Content, i)
 			if err != nil {
 				return nil, options{}, err
 			}
-			req.Messages = append(req.Messages, core.Message{Role: core.Role(m.Role), Text: text})
-		case "tool", "function":
-			return nil, options{}, invalid("messages[%d]: role %q: %s", i, m.Role, errToolUse)
+			req.Messages = append(req.Messages, core.Message{Role: core.RoleUser, Text: text})
+		case "assistant":
+			if present(m.FunctionCall) {
+				return nil, options{}, invalid("messages[%d]: %s", i, errFunctions)
+			}
+			msg, err := parseAssistant(m, i)
+			if err != nil {
+				return nil, options{}, err
+			}
+			req.Messages = append(req.Messages, msg)
+		case "tool":
+			res, err := parseToolResult(m, i)
+			if err != nil {
+				return nil, options{}, err
+			}
+			// Consecutive tool messages answer one assistant turn: they
+			// become one user turn, the way the Anthropic format sends them.
+			if n := len(req.Messages); n > 0 && isToolTurn(req.Messages[n-1]) {
+				req.Messages[n-1].ToolResults = append(req.Messages[n-1].ToolResults, res)
+			} else {
+				req.Messages = append(req.Messages, core.Message{Role: core.RoleUser, ToolResults: []core.ToolResult{res}})
+			}
+		case "function":
+			return nil, options{}, invalid("messages[%d]: %s", i, errFunctions)
 		case "":
 			return nil, options{}, invalid("messages[%d].role is required", i)
 		default:
