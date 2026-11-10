@@ -28,7 +28,7 @@ replica; a chaos run that kills a replica and Redis under load; and the
 overhead of every feature, measured one at a time. The release follows
 (see [PLAN.md](PLAN.md)).
 
-![The admin page during the chaos run: replica 2 was killed 21 s earlier and shows as down, the budgeted key has spent its budget, and recent requests stream in from the two live replicas.](docs/admin.png)
+![The admin page during an earlier chaos run (before the load balancer picked replicas at random): replica 2 was killed 21 s earlier and shows as down, the budgeted key has spent its budget, and recent requests stream in from the two live replicas.](docs/admin.png)
 Every measured number lives in [RESULTS.md](RESULTS.md), which is rendered
 from the raw files under `eval/results/`.
 
@@ -271,8 +271,8 @@ group, with a bootstrap interval on every step and the direct runs' own
 drift beside it. The breakdown found a real inefficiency: on an `auto`
 request the router and the semantic cache each embedded the same prompt,
 two calls to Ollama for one request. A per-request memo now shares the
-vector, and the re-run shows the router adding nothing measurable on top
-of the cache. `make chaos` runs three replicas behind nginx under three
+vector, and the re-run shows the router adding nothing measurable at p50 on
+top of the cache. `make chaos` runs three replicas behind nginx under three
 load streams (a cached workload, a rate-limited key, a budgeted key),
 kills a replica and then Redis, restarts both, and reports every phase
 from the per-request logs and the fake provider's ledger, with recovery

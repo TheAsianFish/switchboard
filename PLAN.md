@@ -729,14 +729,17 @@ Changes made while building:
     limits the most (its Redis round trip; the budget's reservation on the
     same Redis adds less), and the whole stack of them stays within about
     1.5 ms of the fake provider's 21 ms. The semantic cache's miss costs
-    one embedding, about 36 ms on this CPU; the router on top of it is not
-    distinguishable from zero, and Ollama's CPU per request is the same in
-    both configs, so the shared embedding works. A CPU embedder, not the
+    one embedding, about 36 ms on this CPU; the router on top of it shows
+    no added cost at p50 (its step's interval lies below zero, which is
+    run-to-run variation the interval does not cover; at p99 a cost of up
+    to about 3 ms is not excluded), and Ollama's CPU per request is the
+    same in both configs, so the shared embedding works. A CPU embedder, not the
     gateway, caps the semantic cache and the router at its own rate.
   - Done-criteria evidence: `make chaos` completed on this 4-vCPU
     machine with its report (`eval/results/q6-chaos/summary.json`,
-    RESULTS.md Q6, at `bfd0dc3`); the admin page showed the live chaos
-    fleet with replica 2 down (`docs/admin.png`, and the saved
+    RESULTS.md Q6, at `bfd0dc3`); the admin page showed a live chaos
+    fleet with replica 2 down (`docs/admin.png`, taken during the
+    round-robin run before `bfd0dc3`, and the reported run's saved
     `overview-redis-down.json` and `overview-end.json`); `make ui-check`
     is the `ui` job in `.github/workflows/ci.yml`; `make bench` at
     `bfd0dc3` answers Q1 with the per-feature breakdown.

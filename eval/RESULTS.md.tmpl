@@ -732,10 +732,12 @@ means the first whole second after the event already met the rule.
   The rule's buckets are whole seconds and the kill lands at the start of
   one, so the kill's own second holds every error the kill caused and
   fails the 1% limit; the earliest steady start the rule can report is
-  the next second, one second after the kill. "Within a second" was
-  stated finer than the rule measures, and an earlier run that issued the
-  kill a few milliseconds later showed just under a second for the same
-  behaviour. It stays recorded as not held rather than being reworded
+  the next second, one second after the kill. Every recovery time here is
+  read on that grid of whole seconds from the start of the run, so it is
+  known only to within a second: an event issued just before a bucket
+  boundary reads near 0 s, one issued just after reads near 1 s, for the
+  same behaviour. "Within a second" was stated finer than the rule
+  measures; it stays recorded as not held rather than being reworded
   after the run.
 - The load balancer picks replicas at random. With strict round robin, an
   earlier run's fixed-rate streams aliased with the rotation and one key's
@@ -747,9 +749,12 @@ means the first whole second after the event already met the rule.
   requests that reached the replica just before it died fail with a 502;
   every later request goes to the other two.
 - While a replica is down, nginx keeps its last address after the name
-  stops resolving and, each time the server's `fail_timeout` (2 s)
-  expires, sends one live request there, which waits out the 250 ms
-  connect timeout before going to another replica. That is the
+  stops resolving and, every few seconds, once the server's
+  `fail_timeout` has lapsed, sends one live request there, which waits
+  out the 250 ms connect timeout before going to another replica. (The
+  slow requests in the log are further apart than the 2 s
+  `fail_timeout` alone would give; the exact period was not
+  investigated.) That is the
   "slower than" count in the replica-down phases: below the p99 at this
   rate, but a real cost. nginx open source has no active health checks;
   a shorter connect timeout or a longer `fail_timeout` trade it against
