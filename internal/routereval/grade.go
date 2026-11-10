@@ -18,19 +18,47 @@ func Grade(q Question, output string) (extracted string, correct bool) {
 	return got, got != "" && got == q.Answer
 }
 
-var boxed = regexp.MustCompile(`\\boxed\{([^{}]*)\}`)
+var (
+	boxed = regexp.MustCompile(`\\boxed\{([^{}]*)\}`)
+	// answerLine finds "Answer:" (any case) and what follows it on the
+	// line.
+	answerLine = regexp.MustCompile(`(?i)answer\s*:(.*)`)
+)
 
-// gsmAnswer is the number on the reply's last "Answer:" line, else the
-// last \boxed{...}, else the last number in the reply. Small models often
-// ignore the requested format and box their result instead.
+// gsmAnswer reads the final number of a GSM8K reply, in this order:
+//
+//   - the last line with "Answer:": the first number after its last "="
+//     if it has one ("Answer: 9 x 2 = 18"), else its first number
+//     ("Answer: $18 per day for 7 days"), else the first number on the
+//     next non-empty line (a bold "**Answer:**" on a line of its own);
+//   - else the last \boxed{...}: small models often box their result
+//     and ignore the requested format;
+//   - else the last number in the reply, the usual fallback for GSM8K.
+//
+// Markdown emphasis is removed first, so "**Answer**: 18" counts.
 func gsmAnswer(out string) string {
+	out = strings.ReplaceAll(out, "*", "")
 	lines := strings.Split(out, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		l := strings.ToLower(lines[i])
-		if k := strings.LastIndex(l, "answer:"); k >= 0 {
-			if ns := numbers(lines[i][k:]); len(ns) > 0 {
-				return ns[len(ns)-1]
+		m := answerLine.FindStringSubmatch(lines[i])
+		if m == nil {
+			continue
+		}
+		rest := m[1]
+		if k := strings.LastIndex(rest, "="); k >= 0 {
+			rest = rest[k+1:]
+		}
+		if ns := numbers(rest); len(ns) > 0 {
+			return ns[0]
+		}
+		for _, next := range lines[i+1:] {
+			if strings.TrimSpace(next) == "" {
+				continue
 			}
+			if ns := numbers(next); len(ns) > 0 {
+				return ns[0]
+			}
+			break
 		}
 	}
 	if m := boxed.FindAllStringSubmatch(out, -1); len(m) > 0 {
@@ -55,7 +83,8 @@ func numbers(s string) []string {
 			continue
 		}
 		var b strings.Builder
-		if i > 0 && rs[i-1] == '-' {
+		// A minus sign, not a hyphen as in "2023-05" or "7-day".
+		if i > 0 && rs[i-1] == '-' && (i < 2 || !unicode.IsLetter(rs[i-2]) && !unicode.IsDigit(rs[i-2])) {
 			b.WriteRune('-')
 		}
 		j := i
@@ -79,23 +108,41 @@ func sameNumber(a, b string) bool {
 }
 
 var (
-	// "Answer: B", "answer is (B)", "option B".
-	letterAfter = regexp.MustCompile(`(?i)(?:answer|option|choice)\s*(?:is|:)?\s*:?\s*\(?\s*([ABCD])\b`)
-	// A letter standing alone: "B", "B.", "(B)", "B) ...", but not the
-	// article in "A polynomial is ...".
-	letterAlone = regexp.MustCompile(`(?:^|[^A-Za-z])\(?([ABCD])(?:[).:]|\s*$)`)
+	// "the answer is C", "Answer: (B)": the keyword in any case, the
+	// letter a capital.
+	letterAnswer = regexp.MustCompile(`(?i:answer)\s*(?:(?i:is)\s*)?:?\s*\(?([ABCD])\b`)
+	// "option B", "choice (D)".
+	letterOption = regexp.MustCompile(`(?i:option|choice)\s*(?:(?i:is)\s*)?:?\s*\(?([ABCD])\b`)
+	// A reply that starts with its letter: "B", "B.", "(B)", "B) ...",
+	// "B, because", "B is correct", "B - ...", but not the article in
+	// "A polynomial is ...".
+	letterFirst = regexp.MustCompile(`^\s*\(?([ABCD])(?:[).:,]|\s+(?:is|-)\b|\s*$)`)
+	boxedLetter = regexp.MustCompile(`\\boxed\{\s*\(?([ABCD])\)?\s*\}`)
 )
 
-// mmluLetter is the option letter a reply chose: the letter after
-// "answer"/"option" if the reply names one, else the first capital A to D
-// standing alone. A reply with no such letter is graded wrong.
+// mmluLetter is the option letter a reply chose: the last letter named
+// after "answer", else the first line's leading letter, else a boxed
+// letter, else the last letter after "option" or "choice". Markdown
+// emphasis is removed first. A reply with none of these is graded wrong.
 func mmluLetter(out string) string {
-	s := strings.TrimSpace(out)
-	if m := letterAfter.FindStringSubmatch(s); m != nil {
-		return strings.ToUpper(m[1])
+	s := strings.ReplaceAll(out, "*", "")
+	if m := letterAnswer.FindAllStringSubmatch(s, -1); len(m) > 0 {
+		return m[len(m)-1][1]
 	}
-	if m := letterAlone.FindStringSubmatch(s); m != nil {
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if m := letterFirst.FindStringSubmatch(line); m != nil {
+			return m[1]
+		}
+		break
+	}
+	if m := boxedLetter.FindStringSubmatch(s); m != nil {
 		return m[1]
+	}
+	if m := letterOption.FindAllStringSubmatch(s, -1); len(m) > 0 {
+		return m[len(m)-1][1]
 	}
 	return ""
 }

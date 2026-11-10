@@ -18,6 +18,12 @@ func TestGradeGSM8K(t *testing.T) {
 		{"wrong", "Answer: 1100", "1100", false},
 		{"no number", "I cannot tell.", "", false},
 		{"negative kept", "Answer: -1200", "-1200", false},
+		{"first number on the answer line", "Answer: $1200 per day for 7 days", "1200", true},
+		{"after the last equals sign", "Answer: 3 x 400 = 1200", "1200", true},
+		{"answer line then a working note", "Answer: 1200 (from 3 x 400)", "1200", true},
+		{"bold answer heading on its own line", "**Answer:**\nJohn makes **$1200** if he works a full 7-day week", "1200", true},
+		{"bold answer keyword", "**Answer**: 1200\nThen 16 - 3 = 13", "1200", true},
+		{"a hyphen is not a minus", "It is the 2023-1200 season", "1200", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,6 +48,13 @@ func TestGradeMMLU(t *testing.T) {
 		{"parenthesised", "(C)", "C"},
 		{"answer is", "The answer is C because", "C"},
 		{"answer colon", "Answer: (B)", "B"},
+		{"letter then an explanation", "C\n\nExplanation: because", "C"},
+		{"bold letter", "**C**", "C"},
+		{"letter and comma", "C, because", "C"},
+		{"letter is correct", "C is correct", "C"},
+		{"boxed letter", "\\boxed{C}", "C"},
+		{"the last answer wins", "Option A is wrong; the answer is C", "C"},
+		{"lower-case article after answer is not a letter", "The answer is a bit unclear", ""},
 		{"article is not a letter", "A polynomial is irreducible when", ""},
 		{"lower case is not a letter", "c", ""},
 		{"nothing", "To determine whether", ""},
