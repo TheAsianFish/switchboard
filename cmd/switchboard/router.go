@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/TheAsianFish/switchboard/internal/config"
@@ -11,8 +12,9 @@ import (
 )
 
 // buildRouter loads the router's weights and checks that every model they
-// may choose is configured, so a gateway that cannot serve auto refuses to
-// start rather than failing auto requests. It returns nil when the router
+// may choose is configured and that every key allowed auto may use one of
+// them, so a gateway that cannot serve auto refuses to start rather than
+// failing auto requests. It returns nil when the router
 // is off.
 func buildRouter(cfg *config.Config, log *slog.Logger) (*router.Router, error) {
 	rc := cfg.Router
@@ -40,6 +42,17 @@ func buildRouter(cfg *config.Config, log *slog.Logger) (*router.Router, error) {
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("router: the weights choose between %s, but %s %s not configured under models",
 			strings.Join(names, ", "), strings.Join(missing, ", "), plural(len(missing), "is", "are"))
+	}
+	// A key that lists auto but none of its candidates would be refused
+	// on every auto request.
+	for _, k := range cfg.Keys {
+		if !slices.Contains(k.Models, config.AutoModel) {
+			continue
+		}
+		if !slices.ContainsFunc(names, func(m string) bool { return slices.Contains(k.Models, m) }) {
+			return nil, fmt.Errorf("key %q may use auto but none of the models it chooses between (%s); list them in the key's models",
+				k.Name, strings.Join(names, ", "))
+		}
 	}
 	var e embed.Embedder
 	if w.Embedding != "" {

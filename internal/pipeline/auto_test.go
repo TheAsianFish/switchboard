@@ -58,6 +58,7 @@ func newAutoPipeline(t *testing.T, e embed.Embedder, dims int) (*Pipeline, *fake
 	keys := auth.NewKeys([]config.Key{
 		{Name: "all", Key: "sk-all"},
 		{Name: "auto-only", Key: "sk-auto", Models: []string{AutoModel}},
+		{Name: "auto-big", Key: "sk-auto-big", Models: []string{AutoModel, "big"}},
 		{Name: "small", Key: "sk-small", Models: []string{"small"}},
 	})
 	return New(keys, []Route{
@@ -75,7 +76,7 @@ func TestAutoRoutes(t *testing.T) {
 		{"easy prompt to the cheap model", "sk-all", "say hello", "small", false},
 		{"numbers to the dear model", "sk-all", "what is 1234 * 5678 - 91?", "big", false},
 		{"streamed", "sk-all", "what is 1234 * 5678 - 91?", "big", true},
-		{"a key allowed only auto reaches the candidates", "sk-auto", "say hello", "small", false},
+		{"a key's model list caps the candidates", "sk-auto-big", "say hello", "big", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -113,7 +114,7 @@ func TestAutoRoutes(t *testing.T) {
 			if req.Model != AutoModel {
 				t.Errorf("caller's request was modified: %q", req.Model)
 			}
-			if n := sum(t, []*telemetry.Metrics{m}, "switchboard_router_decisions_total", map[string]string{"model": tt.want, "reason": router.ReasonTarget}); n != 1 {
+			if n := sum(t, []*telemetry.Metrics{m}, "switchboard_router_decisions_total", map[string]string{"model": tt.want}); n != 1 {
 				t.Errorf("router decisions for %s = %v, want 1", tt.want, n)
 			}
 		})
@@ -130,6 +131,11 @@ func TestAutoPermissionsAndModels(t *testing.T) {
 	}
 	if got := p.Models(ctx); slices.Contains(got, AutoModel) {
 		t.Errorf("models for a key without auto: %v", got)
+	}
+	ctx, _ = p.Authenticate(context.Background(), "sk-auto")
+	_, err = p.Complete(ctx, &core.Request{Model: AutoModel, Messages: []core.Message{{Role: core.RoleUser, Text: "hi"}}})
+	if core.AsError(err).Kind != core.KindPermission {
+		t.Errorf("a key allowed auto but none of its candidates got %v, want a permission error", err)
 	}
 	ctx, _ = p.Authenticate(context.Background(), "sk-all")
 	if got := p.Models(ctx); !slices.Contains(got, AutoModel) {

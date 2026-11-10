@@ -50,8 +50,8 @@ type Decision struct {
 // Choose picks a model for the raw (unscaled) feature vector x: the
 // cheapest allowed candidate whose P(correct) is at least target, else
 // the Fallback, else the allowed candidate with the highest P(correct).
-// So target 0 picks the cheapest allowed candidate and a target above 1
-// always picks the Fallback. allowed may be nil, meaning every candidate
+// So target 0 picks the cheapest allowed candidate and a target of 1 or
+// more always picks the Fallback. allowed may be nil, meaning every candidate
 // is allowed.
 //
 // It returns ErrNoCandidate when nothing is allowed, and an
@@ -68,8 +68,10 @@ func (w *Weights) Choose(x []float64, target float64, allowed func(model string)
 	for i, c := range w.Candidates {
 		probs[i] = c.Logistic.Prob(xs)
 	}
+	// A target of 1 or more always means the fallback: a probability can
+	// round to exactly 1, and "certain" should not pick a cheap model.
 	for i, c := range w.Candidates {
-		if isAllowed(allowed, c.Model) && probs[i] >= target {
+		if target < 1 && isAllowed(allowed, c.Model) && probs[i] >= target {
 			return Decision{Model: c.Model, Probs: probs, Reason: ReasonTarget}, nil
 		}
 	}

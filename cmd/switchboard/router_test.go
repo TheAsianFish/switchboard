@@ -59,6 +59,14 @@ func TestBuildRouter(t *testing.T) {
 		t.Errorf("target %v, want the file's 0.6", r.Target())
 	}
 
+	cfg.Keys = []config.Key{{Name: "k", Models: []string{"auto"}}}
+	if _, err := buildRouter(cfg, log); err == nil || !strings.Contains(err.Error(), `key "k" may use auto`) {
+		t.Errorf("a key with auto and no candidate: %v", err)
+	}
+	cfg.Keys = []config.Key{{Name: "k", Models: []string{"auto", "small"}}}
+	if _, err := buildRouter(cfg, log); err != nil {
+		t.Errorf("a key with auto and one candidate: %v", err)
+	}
 	cfg.Models = models[:1]
 	if _, err := buildRouter(cfg, log); err == nil || !strings.Contains(err.Error(), "big is not configured") {
 		t.Errorf("a missing candidate: %v", err)

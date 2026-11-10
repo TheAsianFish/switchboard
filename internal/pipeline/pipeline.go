@@ -103,12 +103,17 @@ func (p *Pipeline) Models(ctx context.Context) []string {
 }
 
 // resolve checks the caller may use the requested model and returns the
-// route and a copy of the request addressed to the upstream model.
-func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (Route, *core.Request, *admission, error) {
+// route and a copy of the request addressed to the upstream model. For an
+// auto request the returned context's log lines say so, since every
+// later line names the model the router chose.
+func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (context.Context, Route, *core.Request, *admission, error) {
 	pr := auth.FromContext(ctx)
 	rt, dec, err := p.route(ctx, pr, req)
 	if err != nil {
-		return Route{}, nil, nil, err
+		return ctx, Route{}, nil, nil, err
+	}
+	if req.Model != rt.Model {
+		ctx = telemetry.WithAttrs(ctx, "requested_model", req.Model)
 	}
 	adm, err := p.admit(ctx, pr, rt, req)
 	if err != nil {
@@ -120,7 +125,7 @@ func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (Route, *core
 		default:
 			p.policy.Metrics.Call(pr.Name, rt.Model, telemetry.OutcomeError)
 		}
-		return Route{}, nil, nil, err
+		return ctx, Route{}, nil, nil, err
 	}
 	adm.cache = dec
 	up := *req
@@ -131,7 +136,7 @@ func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (Route, *core
 		// it to the upstream's own default, or to no cap at all.
 		up.MaxTokens = adm.estimate.OutputTokens
 	}
-	return rt, &up, adm, nil
+	return ctx, rt, &up, adm, nil
 }
 
 // route finds the request's route, checks the key may use it and decides
@@ -155,7 +160,7 @@ func (p *Pipeline) route(ctx context.Context, pr *auth.Principal, req *core.Requ
 		return Route{}, dec, core.Errorf(core.KindPermission, "this API key may not use model %q", req.Model)
 	}
 	if req.Model == AutoModel && p.policy.Router != nil {
-		if rt, err = p.choose(ctx, req); err != nil {
+		if rt, err = p.choose(ctx, pr, req); err != nil {
 			return Route{}, dec, err
 		}
 	}
@@ -173,16 +178,16 @@ func (p *Pipeline) route(ctx context.Context, pr *auth.Principal, req *core.Requ
 }
 
 // choose runs the router for a request that asked for AutoModel, in the
-// "router" span. A key allowed to use AutoModel reaches the router's
-// candidates through it, whatever else its model list says: auto is the
-// product, and the candidates are the router's to pick. The router never
-// fails a request over its own trouble: when the prompt cannot be
-// embedded it sends the request to its fallback and the cause is logged.
-func (p *Pipeline) choose(ctx context.Context, req *core.Request) (Route, error) {
+// "router" span. The router picks only among candidates the key may use
+// on their own, so a key's model list caps what auto can spend; a key
+// with no list may use them all. The router never fails a request over
+// its own trouble: when the prompt cannot be embedded it sends the
+// request to its fallback and the cause is logged.
+func (p *Pipeline) choose(ctx context.Context, pr *auth.Principal, req *core.Request) (Route, error) {
 	_, span := telemetry.StartSpan(ctx, "router")
-	d, err := p.policy.Router.Route(ctx, req, func(m string) bool { _, ok := p.routes[m]; return ok })
+	d, err := p.policy.Router.Route(ctx, req, func(m string) bool { _, ok := p.routes[m]; return ok && pr.Allows(m) })
 	if err != nil {
-		err = core.Wrap(core.KindNotFound, err, "no model the router may choose is configured on this gateway")
+		err = core.Wrap(core.KindPermission, err, "this API key may not use any of the models auto chooses between")
 		telemetry.EndSpan(span, err)
 		return Route{}, err
 	}
@@ -207,7 +212,7 @@ func (p *Pipeline) choose(ctx context.Context, req *core.Request) (Route, error)
 
 // Complete implements core.Gateway.
 func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Response, error) {
-	rt, up, adm, err := p.resolve(ctx, req)
+	ctx, rt, up, adm, err := p.resolve(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +295,7 @@ func (p *Pipeline) serveHit(ctx context.Context, adm *admission, resp *core.Resp
 
 // Stream implements core.Gateway.
 func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
-	rt, up, adm, err := p.resolve(ctx, req)
+	ctx, rt, up, adm, err := p.resolve(ctx, req)
 	if err != nil {
 		return nil, err
 	}

@@ -247,6 +247,9 @@ func (p *Prediction) Route(target float64) []int {
 	out := make([]int, len(p.Prob))
 	for q := range p.Prob {
 		out[q] = p.Fallback[q]
+		if target >= 1 {
+			continue // as the router: 1 or more always means the fallback
+		}
 		for _, m := range p.Order[q] {
 			if p.Prob[q][m] >= target {
 				out[q] = m

@@ -52,6 +52,19 @@ func only(models ...string) func(string) bool {
 	return func(m string) bool { return slices.Contains(models, m) }
 }
 
+func TestChooseTargetOneIgnoresRoundedCertainty(t *testing.T) {
+	t.Parallel()
+	// small's score is so high its probability rounds to exactly 1.
+	w := testWeights(0, 50, logit(0.85), logit(0.9))
+	if p := w.Candidates[0].Logistic.Prob(make([]float64, len(CheapFeatureNames))); p != 1 {
+		t.Fatalf("setup: P = %v, want it rounded to 1", p)
+	}
+	d, err := w.Choose(make([]float64, len(CheapFeatureNames)), 1, nil)
+	if err != nil || d.Model != "large" {
+		t.Errorf("target 1 chose %s (%v), want the fallback", d.Model, err)
+	}
+}
+
 func TestChoose(t *testing.T) {
 	t.Parallel()
 	// P(correct): small 0.6, medium 0.85, large 0.9.
@@ -69,6 +82,7 @@ func TestChoose(t *testing.T) {
 		{"target 0 picks cheapest allowed", 0, only("medium", "large"), "medium", ReasonTarget},
 		{"none clears: fallback", 0.95, nil, "large", ReasonFallback},
 		{"target above 1: fallback", 1.5, nil, "large", ReasonFallback},
+		{"target 1: fallback", 1, nil, "large", ReasonFallback},
 		{"allowed filter skips cheaper", 0.5, only("large"), "large", ReasonTarget},
 		{"fallback not allowed: best allowed", 0.95, only("small", "medium"), "medium", ReasonBestAllowed},
 	}
