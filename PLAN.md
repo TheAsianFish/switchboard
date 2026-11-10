@@ -663,14 +663,29 @@ Changes made while building:
     container is dead, and the streams it cuts were scheduled before it,
     so phases start when an action is issued and requests count where
     their outcome was observed.
-  - Finding (RESULTS.md, Q6): every hypothesis held. Two things were not
-    predicted. While a replica is down, nginx keeps its last address and
-    every `fail_timeout` sends one live request there, which pays the
-    250 ms connect timeout (below the p99 at 200 rps). And a Redis restart
-    resets every budget, because Redis has no persistence: the outage
-    itself stayed inside the grace bound, but the key then spent about
-    a second full budget. Budgets that must survive a Redis restart need
-    AOF or a ledger outside Redis; M6 does not change that.
+  - Finding (RESULTS.md, Q6, `make chaos` at `bfd0dc3`): six of the seven
+    checks held. A replica kill cost only the requests in flight on it, a
+    Redis kill cost latency (the cache's store timeout) but no errors, the
+    limited key stayed within the local shares and the budget within the
+    grace bound during the outage, and both restarts were steady within
+    the next second. The one not held is "steady again within a second"
+    after the replica kill: the rule's buckets are whole seconds, the
+    kill's own second holds its errors, so one second is the earliest the
+    rule can report. The hypothesis was stated finer than the rule
+    measures; it stays recorded as not held. Not predicted: while a
+    replica is down nginx keeps its last address and every `fail_timeout`
+    sends one live request there, which waits out the 250 ms connect
+    timeout; and a Redis restart resets every budget, because Redis has
+    no persistence, so the key then spent a second full budget. Budgets
+    that must survive a Redis restart need AOF or a ledger outside Redis;
+    M6 does not change that.
+  - Found on the first full chaos run: nginx's strict round robin aliased
+    with the bench's fixed-rate streams, so one key's requests piled onto
+    one replica (the limited key's refusals 1,665 on one replica, 410 on
+    another, from the saved overview). The Redis-down check assumes each
+    replica sees a third of a key's traffic, so the chaos fleet's nginx
+    picks replicas at random (`random`), and the run was repeated; the
+    replicas' shares were then even.
   - Q1 breakdown: the bench sends no temperature, so without a directive
     no request is cacheable and the cache stays out of the path. Every Q1
     request therefore carries `X-Switchboard-Cache: semantic` (direct runs
@@ -709,11 +724,27 @@ Changes made while building:
     interval (fixed seed, so re-rendering is byte-stable). The interval
     covers sampling noise only; the drift is reported beside it. A step
     between configs at one rate shares the baseline, so it cancels.
+  - Finding (RESULTS.md, Q1, `make bench` at `bfd0dc3`): every feature
+    that does not embed adds a fraction of a millisecond at 200 req/s,
+    limits the most (its Redis round trip; the budget's reservation on the
+    same Redis adds less), and the whole stack of them stays within about
+    1.5 ms of the fake provider's 21 ms. The semantic cache's miss costs
+    one embedding, about 36 ms on this CPU; the router on top of it is not
+    distinguishable from zero, and Ollama's CPU per request is the same in
+    both configs, so the shared embedding works. A CPU embedder, not the
+    gateway, caps the semantic cache and the router at its own rate.
+  - Done-criteria evidence: `make chaos` completed on this 4-vCPU
+    machine with its report (`eval/results/q6-chaos/summary.json`,
+    RESULTS.md Q6, at `bfd0dc3`); the admin page showed the live chaos
+    fleet with replica 2 down (`docs/admin.png`, and the saved
+    `overview-redis-down.json` and `overview-end.json`); `make ui-check`
+    is the `ui` job in `.github/workflows/ci.yml`; `make bench` at
+    `bfd0dc3` answers Q1 with the per-feature breakdown.
 
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
 - [x] M3: Exact and semantic cache — canonical request hash cache; `embed` client for Ollama `/api/embed` with a fake; vector index interface with Redis HNSW/FLAT and in-memory FLAT implementations; cacheability rules (temperature, explicit header, context hash) and tenant namespacing; cached streams replayed in the client's wire format; `make eval-cache` with the PAWS-Wiki and GSM8K-perturbation pair sets, the threshold sweep and the FLAT vs HNSW latency check; RESULTS.md cache section answering Q3. Done when the cross-tenant and cross-context leak tests pass, the eval runs end to end on a laptop with Ollama, and the chosen threshold is the one the eval produced.
 - [x] M4: Resilience and observability — retries with backoff on retryable statuses, hedged requests bounded by time-to-first-token and a per-tenant hedge budget, per-provider circuit breaker and health; tool-call and `stop_reason` translation in both wire formats; OpenTelemetry spans per pipeline stage exported over OTLP to Jaeger in compose, trace id in the response headers; `make bench-hedge` answering Q4 on the synthetic tail and on a real provider where a key exists. Done when a trace shows every stage and the hedge, and the hedging numbers are in RESULTS.md with their cost.
 - [x] M5: Evaluated router — committed eval set (GSM8K + MMLU, 600 questions); `switchboard eval router label` runs every candidate through the gateway and records correctness, usage, dollars and latency (replays from recordings at $0); feature extraction and the per-candidate logistic models trained in Go; `model: "auto"` with a configurable quality target; `make eval-router` with 5-fold cross-validation, the four baselines and the random-mix line; RESULTS.md router section answering Q5 (live labels when a key exists, otherwise the Ollama candidate and "To measure"). Done when the router's held-out frontier is plotted against the line and the gateway serves `auto` from the trained weights.
-- [ ] M6: Admin page, chaos and the overhead breakdown — admin JSON API on the loopback listener (keys, limits, spend, cache stats, router decisions, recent requests with trace links); React + TypeScript page embedded in the binary with Vitest tests; `chaos/run.sh` with the phased kill schedule and per-phase report; `make bench` extended to the per-feature breakdown. RESULTS.md answers Q1 in full and Q6. Done when the chaos run completes on a laptop with a report, the admin page shows a live fleet, and `make ui-check` is in CI.
+- [x] M6: Admin page, chaos and the overhead breakdown — admin JSON API on the loopback listener (keys, limits, spend, cache stats, router decisions, recent requests with trace links); React + TypeScript page embedded in the binary with Vitest tests; `chaos/run.sh` with the phased kill schedule and per-phase report; `make bench` extended to the per-feature breakdown. RESULTS.md answers Q1 in full and Q6. Done when the chaos run completes on a laptop with a report, the admin page shows a live fleet, and `make ui-check` is in CI.
 - [ ] M7: Release readiness — `go install` path verified in a clean container, release archives, `release.yml` guarded by `v*` tags building the multi-arch image to GHCR, RELEASE.md with every maintainer step; README complete (what/why, demo GIF placeholder with capture instructions, quickstart for both SDKs, Mermaid architecture, design decisions and trade-offs, results table rendered from RESULTS.md, roadmap); RESULTS.md complete with every measured number, its method, cost and hardware, and every unmeasured one under "To measure" with its command. Done when a fresh clone runs the quickstart from the README alone and the release workflow dry-runs green.
