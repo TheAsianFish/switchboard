@@ -483,10 +483,91 @@ Changes made while building:
     holds the hedging numbers with extra requests and token spend
     (`make bench-hedge`).
 
+- **M5.**
+  - No key here, so the candidates are a local ladder instead of one
+    Ollama model beside three Claude models: `qwen2.5:0.5b`, `1.5b` and
+    `3b` on Ollama 0.40.16, all through the gateway. Three local models
+    give the router a real frontier at $0; the Claude candidates run from
+    the same command with a key (`MODELS=claude-... eval/router/label.sh`,
+    under "To measure" with a cost estimated from the local token counts).
+    Opus's `effort: low` is not sent: the gateway has no effort parameter
+    yet.
+  - Local models have no price, so their cost axis is compute: GFLOPs =
+    2 × parameters × (input + output tokens), the forward-pass
+    approximation, with parameter counts from the model cards (0.49, 1.54,
+    3.09 B). With priced candidates the axis is dollars.
+  - MMLU comes from the original release tarball (the Hugging Face rows
+    API rate-limits a full scan); 300 questions, five or six per subject
+    over all 57, drawn with a fixed seed.
+  - The grader reads GSM8K's number from the last "Answer:" line, else the
+    last `\boxed{}` (small Qwen models box their result and ignore the
+    requested format), else the last number; MMLU's letter after
+    "answer"/"option", else a capital A–D standing alone. Recordings keep
+    the raw reply and the eval re-grades on every run, so a grader fix
+    needs no relabelling.
+  - Features are nine cheap text features plus the prompt's
+    `nomic-embed-text` embedding (the cache's model, 768 dimensions). The
+    embeddings are committed, so `make eval-router` runs offline. A second
+    variant without the embedding is cross-validated beside it, and the
+    nine rules that send each dataset to one fixed candidate are reported
+    as a reference: they know the dataset, which the router has to infer.
+  - Everything the router learns is fitted on the training folds only:
+    feature scaling, the L2 strength (inner 5-fold cross-validation over a
+    grid, by log loss), the candidates' cost order and the fallback. With
+    768 dimensions and about 480 training rows, the Newton step is solved
+    in row space (Woodbury), so a fit takes a fraction of a second.
+  - The operating point is fixed by a rule stated before the run: the
+    lowest quality target whose held-out accuracy reaches 95% of the best
+    candidate's. Its gain over the line has a bootstrap interval that
+    re-applies the rule in every resample, so choosing the target on the
+    same questions is inside the interval.
+  - `model: "auto"`: the router picks only among candidates the key may
+    use on their own, so a key's model list caps what `auto` can spend (a
+    key that lists `auto` and no candidate is refused at startup). The
+    request then continues as a request to the chosen model (limits,
+    budget, price, cache entry), the reply's `model` names it and the log
+    line carries `requested_model: auto`. The router runs before admission, in its own span,
+    and counts its decisions by model and reason. An embedder that fails
+    or times out (1 s) sends the request to the fallback rather than
+    failing it. The weights `make eval-router` trains on all 600
+    questions are built into the binary; a test keeps them equal to the
+    eval's copy.
+  - The local labels ran as two streams at once (`0.5b` then `1.5b`, and
+    `3b`) on a 2-core machine, so the latency columns include queueing
+    behind the other stream; cost does not depend on it.
+  - Added after the first full run: with three candidates the middle one
+    (`1.5b`) sits above the line between the cheapest and the best on its
+    own, so the frontier is also compared with the candidates' upper hull
+    (the best random mix of any two), and each variant's mean gain over
+    the line and the hull gets a bootstrap interval. Also added after it,
+    as a diagnosis and not served: `router-cost`, the same cheap-feature
+    predictions routed by P(correct) minus a weighted per-question cost
+    estimate, because the threshold rule orders candidates by their mean
+    cost while a multiple-choice reply costs a few tokens and a worked
+    solution hundreds.
+  - Finding (RESULTS.md, Q5): on this ladder the threshold router does not
+    clearly beat the line and sits below the hull. Held-out AUROC of the
+    correctness models is weak, and the embedding ranks worse than the
+    cheap features alone at this sample size, though the oracle shows the
+    candidates do differ question by question. The cost-aware rule beats
+    the line with an interval above zero but not clearly the hull. Next:
+    confirm it on fresh questions, then serve a cost-aware rule, and run
+    the Claude candidates, whose price ratios differ from compute's.
+  - Done-criteria evidence: `eval/results/q5-router/frontier.svg` plots
+    the held-out frontiers of all three variants against the line and
+    the hull (`make eval-router` at `aea4a71`, byte-stable on a rerun);
+    the gateway serves `auto` from the built-in weights (live check
+    against Ollama in the M5 PR: a multiple-choice question went to
+    `1.5b`, a GSM8K problem to `3b`, a greeting to `0.5b`, and with the
+    embedder unreachable the request went to the fallback).
+  - Seen once under load while labels ran, not caused by M5:
+    `TestDegradingOverRedis` (M2's budget degrade test) failed in one
+    `make check` and passed 5 of 5 on rerun; it is timing-sensitive.
+
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
 - [x] M3: Exact and semantic cache — canonical request hash cache; `embed` client for Ollama `/api/embed` with a fake; vector index interface with Redis HNSW/FLAT and in-memory FLAT implementations; cacheability rules (temperature, explicit header, context hash) and tenant namespacing; cached streams replayed in the client's wire format; `make eval-cache` with the PAWS-Wiki and GSM8K-perturbation pair sets, the threshold sweep and the FLAT vs HNSW latency check; RESULTS.md cache section answering Q3. Done when the cross-tenant and cross-context leak tests pass, the eval runs end to end on a laptop with Ollama, and the chosen threshold is the one the eval produced.
 - [x] M4: Resilience and observability — retries with backoff on retryable statuses, hedged requests bounded by time-to-first-token and a per-tenant hedge budget, per-provider circuit breaker and health; tool-call and `stop_reason` translation in both wire formats; OpenTelemetry spans per pipeline stage exported over OTLP to Jaeger in compose, trace id in the response headers; `make bench-hedge` answering Q4 on the synthetic tail and on a real provider where a key exists. Done when a trace shows every stage and the hedge, and the hedging numbers are in RESULTS.md with their cost.
-- [ ] M5: Evaluated router — committed eval set (GSM8K + MMLU, 600 questions); `switchboard eval router label` runs every candidate through the gateway and records correctness, usage, dollars and latency (replays from recordings at $0); feature extraction and the per-candidate logistic models trained in Go; `model: "auto"` with a configurable quality target; `make eval-router` with 5-fold cross-validation, the four baselines and the random-mix line; RESULTS.md router section answering Q5 (live labels when a key exists, otherwise the Ollama candidate and "To measure"). Done when the router's held-out frontier is plotted against the line and the gateway serves `auto` from the trained weights.
+- [x] M5: Evaluated router — committed eval set (GSM8K + MMLU, 600 questions); `switchboard eval router label` runs every candidate through the gateway and records correctness, usage, dollars and latency (replays from recordings at $0); feature extraction and the per-candidate logistic models trained in Go; `model: "auto"` with a configurable quality target; `make eval-router` with 5-fold cross-validation, the four baselines and the random-mix line; RESULTS.md router section answering Q5 (live labels when a key exists, otherwise the Ollama candidate and "To measure"). Done when the router's held-out frontier is plotted against the line and the gateway serves `auto` from the trained weights.
 - [ ] M6: Admin page, chaos and the overhead breakdown — admin JSON API on the loopback listener (keys, limits, spend, cache stats, router decisions, recent requests with trace links); React + TypeScript page embedded in the binary with Vitest tests; `chaos/run.sh` with the phased kill schedule and per-phase report; `make bench` extended to the per-feature breakdown. RESULTS.md answers Q1 in full and Q6. Done when the chaos run completes on a laptop with a report, the admin page shows a live fleet, and `make ui-check` is in CI.
 - [ ] M7: Release readiness — `go install` path verified in a clean container, release archives, `release.yml` guarded by `v*` tags building the multi-arch image to GHCR, RELEASE.md with every maintainer step; README complete (what/why, demo GIF placeholder with capture instructions, quickstart for both SDKs, Mermaid architecture, design decisions and trade-offs, results table rendered from RESULTS.md, roadmap); RESULTS.md complete with every measured number, its method, cost and hardware, and every unmeasured one under "To measure" with its command. Done when a fresh clone runs the quickstart from the README alone and the release workflow dry-runs green.
