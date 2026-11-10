@@ -449,3 +449,29 @@ func TestRunPublishesUntilCancelled(t *testing.T) {
 		t.Fatalf("recent calls TTL = %v, want %v", ttl, recentTTL)
 	}
 }
+
+func TestRecorderBoundsTheRequestedModel(t *testing.T) {
+	t.Parallel()
+	clk := newClock()
+	tests := []struct {
+		name, model, want string
+	}{
+		{"short names are kept", "claude-opus-5-5", "claude-opus-5-5"},
+		{"exactly the cap is kept", strings.Repeat("a", maxModelLen), strings.Repeat("a", maxModelLen)},
+		{"long names are cut", strings.Repeat("a", 1<<20), strings.Repeat("a", maxModelLen) + "…"},
+		{"a cut never splits a rune", strings.Repeat("a", maxModelLen-1) + "é" + "tail", strings.Repeat("a", maxModelLen-1) + "…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := NewRecorder(RecorderOptions{Recent: 1, Now: clk.Now})
+			c := call(clk.Now(), "k", telemetry.OutcomeError, 0)
+			c.RequestedModel = tt.model
+			r.Observe(c)
+			_, recent := r.snapshot()
+			if got := recent[0].RequestedModel; got != tt.want {
+				t.Fatalf("requested model = %.40q (%d bytes), want %.40q (%d bytes)", got, len(got), tt.want, len(tt.want))
+			}
+		})
+	}
+}

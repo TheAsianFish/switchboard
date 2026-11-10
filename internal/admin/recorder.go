@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/cost"
@@ -146,7 +147,7 @@ func (r *Recorder) Observe(c pipeline.Call) {
 func (r *Recorder) call(c pipeline.Call) Call {
 	out := Call{
 		Time: c.Time.UTC(), RequestID: c.RequestID, TraceID: c.TraceID, Key: c.Key,
-		RequestedModel: c.RequestedModel, Model: c.Model, Provider: c.Provider, Stream: c.Stream,
+		RequestedModel: clip(c.RequestedModel, maxModelLen), Model: c.Model, Provider: c.Provider, Stream: c.Stream,
 		Outcome: c.Outcome, ErrorKind: c.ErrorKind, Cache: string(c.Cache),
 		DurationMS: ms(c.Duration), TTFTMS: ms(c.TTFT),
 		InputTokens: c.Usage.InputTokens, OutputTokens: c.Usage.OutputTokens,
@@ -164,6 +165,24 @@ func (r *Recorder) call(c pipeline.Call) Call {
 		}
 	}
 	return out
+}
+
+// maxModelLen bounds the requested model kept per call. A request for a
+// model that is not configured is refused before admission, so no limit
+// applies to it, and its name is the client's own text: unbounded, 200 of
+// them near the 10 MiB body cap would hold gigabytes in the ring and in
+// every report published to Redis.
+const maxModelLen = 128
+
+// clip shortens s to at most n bytes without splitting a UTF-8 sequence.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
 }
 
 // trim drops window samples older than the window before now, and the
