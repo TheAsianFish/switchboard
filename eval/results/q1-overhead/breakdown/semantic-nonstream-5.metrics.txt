@@ -1,0 +1,15 @@
+switchboard_cache_fills_total{result="ok"} 161
+switchboard_cache_lookup_seconds_sum{layer="exact"} 0.024997874999999992
+switchboard_cache_lookup_seconds_count{layer="exact"} 161
+switchboard_cache_lookup_seconds_sum{layer="semantic"} 5.720320930999997
+switchboard_cache_lookup_seconds_count{layer="semantic"} 161
+switchboard_cache_lookups_total{result="miss"} 161
+switchboard_cost_dollars_total{key="bench",model="fake"} 0.005635000000000011
+switchboard_provider_breaker_state{provider="fake"} 0
+switchboard_request_duration_seconds_sum{model="fake",stream="false"} 9.318569189
+switchboard_request_duration_seconds_count{model="fake",stream="false"} 161
+switchboard_requests_total{key="bench",model="fake",outcome="ok"} 161
+switchboard_store_degraded{component="budget"} 0
+switchboard_store_degraded{component="ratelimit"} 0
+switchboard_tokens_total{key="bench",model="fake",type="input"} 805
+switchboard_tokens_total{key="bench",model="fake",type="output"} 4830

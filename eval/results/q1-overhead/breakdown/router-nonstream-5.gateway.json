@@ -1,0 +1,15 @@
+{
+  "config": "router",
+  "window_seconds": 30.102,
+  "gateway_cpu_seconds": 0.45,
+  "gateway_peak_rss_kb": 35492,
+  "redis_cpu_seconds": 0.245,
+  "ollama_cpu_seconds": 22.810,
+  "probe": {
+    "http_status": 200,
+    "cache_status": "miss",
+    "trace_id": "f98856f26ff537bcfbfabf4389561833",
+    "trace_in_jaeger": true,
+    "model": "qwen2.5:3b"
+  }
+}
