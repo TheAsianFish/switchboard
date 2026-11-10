@@ -145,6 +145,19 @@ means the first whole second after the event already met the rule.
 
 **Reading the run.**
 
+- The replica-kill check reads "no" on its second half, not its first.
+  The rule's buckets are whole seconds and the kill lands at the start of
+  one, so the kill's own second holds every error the kill caused and
+  fails the 1% limit; the earliest steady start the rule can report is
+  the next second, one second after the kill. "Within a second" was
+  stated finer than the rule measures, and an earlier run that issued the
+  kill a few milliseconds later showed just under a second for the same
+  behaviour. It stays recorded as not held rather than being reworded
+  after the run.
+- The load balancer picks replicas at random. With strict round robin, an
+  earlier run's fixed-rate streams aliased with the rotation and one key's
+  requests piled onto one replica, which tests the Redis-down local
+  limits (a third of the rate each) on an uneven split.
 - A replica's death costs only the requests it holds. nginx does not retry
   a request it has already sent to a replica (`non_idempotent` stays off:
   the replica may have called the provider), so streams cut mid-way and
