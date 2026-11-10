@@ -20,9 +20,9 @@ func Grade(q Question, output string) (extracted string, correct bool) {
 
 var (
 	boxed = regexp.MustCompile(`\\boxed\{([^{}]*)\}`)
-	// answerLine finds "Answer:" (any case) and what follows it on the
-	// line.
-	answerLine = regexp.MustCompile(`(?i)answer\s*:(.*)`)
+	// answerLine finds the line's last "Answer:" (any case) and what
+	// follows it.
+	answerLine = regexp.MustCompile(`(?i).*answer\s*:(.*)`)
 )
 
 // gsmAnswer reads the final number of a GSM8K reply, in this order:
@@ -116,7 +116,7 @@ var (
 	// A reply that starts with its letter: "B", "B.", "(B)", "B) ...",
 	// "B, because", "B is correct", "B - ...", but not the article in
 	// "A polynomial is ...".
-	letterFirst = regexp.MustCompile(`^\s*\(?([ABCD])(?:[).:,]|\s+(?:is|-)\b|\s*$)`)
+	letterFirst = regexp.MustCompile(`^\s*\(?([ABCD])(?:[).:,]|\s+(?:is\b|-)|\s*$)`)
 	boxedLetter = regexp.MustCompile(`\\boxed\{\s*\(?([ABCD])\)?\s*\}`)
 )
 

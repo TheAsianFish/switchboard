@@ -23,6 +23,7 @@ func TestGradeGSM8K(t *testing.T) {
 		{"answer line then a working note", "Answer: 1200 (from 3 x 400)", "1200", true},
 		{"bold answer heading on its own line", "**Answer:**\nJohn makes **$1200** if he works a full 7-day week", "1200", true},
 		{"bold answer keyword", "**Answer**: 1200\nThen 16 - 3 = 13", "1200", true},
+		{"the line's last answer", "The answer: 3 boxes. Answer: 1200", "1200", true},
 		{"a hyphen is not a minus", "It is the 2023-1200 season", "1200", true},
 	}
 	for _, tt := range tests {
@@ -52,6 +53,7 @@ func TestGradeMMLU(t *testing.T) {
 		{"bold letter", "**C**", "C"},
 		{"letter and comma", "C, because", "C"},
 		{"letter is correct", "C is correct", "C"},
+		{"letter, dash and a reason", "C - because it is", "C"},
 		{"boxed letter", "\\boxed{C}", "C"},
 		{"the last answer wins", "Option A is wrong; the answer is C", "C"},
 		{"lower-case article after answer is not a letter", "The answer is a bit unclear", ""},
