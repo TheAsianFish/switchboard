@@ -183,10 +183,21 @@ sample size and dollars spent.
   drives it directly and through the gateway at 50, 200 and 500 requests per
   second for 60 s, with warm-up. Overhead is the difference in p50 and p99,
   and in time-to-first-token for streams. Repeated with features toggled: none,
-  + limits, + budget, + exact cache (miss path), + semantic cache (miss path),
-  + router, + tracing.
+  + limits, + budget, + exact cache (miss path), + tracing, + semantic cache
+  (miss path), + router. (Tracing was last until M6; it moved ahead of the
+  embedding configs, before the full run, so that it runs at 200 rps where
+  its cost can be resolved; see the M6 notes.)
 - **Numbers.** Added ms at p50 and p99 per configuration; CPU and RSS per
   replica at 500 rps. Hardware recorded.
+- **Hypothesis** (stated before the M6 run). Passthrough adds a few tenths
+  of a millisecond. Limits and budget each add about one Redis round trip
+  on loopback, 0.1 to 0.3 ms; the exact-cache miss adds one GET of the same
+  size, its fill happening after the reply. The semantic-cache miss and the
+  router need one embedding call per request between them (the gateway
+  shares it), tens of milliseconds on a laptop CPU, and dominate everything
+  else: the semantic step costs about one embedding and the router step on
+  top of it little beyond its cheap features. Tracing adds tens of
+  microseconds at 200 rps.
 
 ### Q2: shared limits (`make test-limits`)
 
@@ -261,14 +272,58 @@ sample size and dollars spent.
 
 ### Q6: chaos (`make chaos`)
 
-- **Method.** `chaos/run.sh` starts the compose stack (3 replicas, Redis,
-  fake provider, Ollama embeddings), runs `switchboard bench` at 200 rps for
-  120 s with a 30% repeat workload so the cache matters, kills replica 2 at
-  30 s, kills Redis at 60 s, restarts Redis at 75 s, restarts the replica at
-  90 s. Every request's outcome and latency is logged with its phase.
-- **Numbers.** Per phase: error rate, p50/p99, cache hit rate, over-admissions
-  (from the fake provider's ledger), budget overshoot in dollars; seconds from
-  each restart to steady state.
+- **Method.** `chaos/run.sh` starts its own compose project (3 replicas
+  behind nginx, Redis, the fake provider), runs `switchboard bench` at 200
+  rps for 120 s with a 30% repeat workload so the cache matters, kills
+  replica 2 at 30 s, kills Redis at 60 s, restarts Redis at 75 s, restarts
+  the replica at 90 s (SIGKILL; Redis has no persistence, so it comes back
+  empty). Every request's outcome and latency is logged with its scheduled
+  time, every docker action with when it ran.
+- **Streams.** Three at once, so the numbers come from one run: the main
+  key (200 streamed requests per second, 30% of them repeats of 50 prompts,
+  exact cache, no limit or budget); a key limited to 10 requests per second
+  offered 30 (fixed window, the limiter that ships); a key with a $0.20
+  total budget offered 10 requests per second at $0.000465 a reply, which
+  spends it in about 43 s, before Redis is killed. Grace is $0.01 per
+  replica and key.
+- **Numbers.** Per phase: error rate (by kind), p50/p99, cache hit rate,
+  over-admissions (from the fake provider's ledger), budget overshoot in
+  dollars; seconds from each event to steady state.
+- **Phases.** Bounded by when each docker action was issued; a request
+  belongs to the phase in which its outcome was observed (scheduled time
+  plus latency), so a stream cut by a kill counts against the kill. A
+  limiter window belongs to the phase that holds its midpoint.
+- **Steady-state rule** (fixed before the full run): 1 s buckets of the
+  main stream; after an event the fleet is steady from the start of the
+  first whole bucket from which 5 consecutive buckets each have an error
+  rate ≤ max(1%, 2 × the steady phase's) and a p99 ≤ 2 × the steady phase's
+  p99. The 5 buckets must end before the next event or the run's end,
+  otherwise "not recovered". Recovery time = that bucket's start minus the
+  event, so the resolution is 1 s.
+- **Hypotheses.**
+  - Replica kill: the only errors are the streams in flight on replica 2
+    (about a third of 200 rps × 0.18 s ≈ 12, cut mid-stream or 502); nginx
+    routes around it at once (a new connection to the dead address costs
+    one 250 ms connect timeout, then the server is marked failed and drops
+    out when its name stops resolving). Recovery under 1 s; hit rate and
+    limits unchanged.
+  - Redis kill: no errors. The cache is bypassed, so the hit rate falls to
+    0; the first requests wait out a Redis timeout, so p99 rises for a
+    second or two. The limited key falls back to rate ÷ 3 per replica: with
+    two replicas up at most 2 × 3 = 6 per window, so no over-admission
+    beyond the transition window. The budgeted key, already spent, gets
+    each live replica's grace again: outage spend ≤ 2 × $0.01 (bound
+    3 × $0.01).
+  - Redis restart: no errors. The cache is empty, so the hit rate climbs
+    back as the 50 pool prompts are asked again (a second or two at 60
+    repeats per second). The limit counters restart empty, so the
+    transition windows may admit up to the rate plus the local share.
+    The budget ledger restarts empty too: the outage's pending spend is
+    charged to it and the key gets the rest of a fresh $0.20, so the
+    overshoot at the end is about one whole budget. That is the cost of a
+    Redis without persistence, not of the degrade policy.
+  - Replica restart: no errors; nginx re-resolves the name within a second
+    and the replica takes its share again.
 
 ### Unit and integration tests
 
@@ -563,6 +618,97 @@ Changes made while building:
   - Seen once under load while labels ran, not caused by M5:
     `TestDegradingOverRedis` (M2's budget degrade test) failed in one
     `make check` and passed 5 of 5 on rerun; it is timing-sensitive.
+
+- **M6.**
+  - Admin API: each replica records its own calls in memory through a
+    pipeline hook (`Policy.OnCall`, one mutex-guarded append per request)
+    and publishes a report to Redis every 2 s: a hash of replica reports
+    and a key per replica with its last 200 calls (5 min TTL). Any
+    replica's `GET /api/overview` reads them back in two round trips, so
+    whichever replica an operator opens shows the fleet. A replica is
+    stale after three missed reports (6 s), down after 15 s and forgotten
+    after 10 min, so a killed replica stays visible. Publishing on a timer
+    rather than per request keeps Redis off the request path: the fleet
+    view is up to 2 s old, which a page polled every 2 s does not notice.
+  - While Redis is down the overview shows only the answering replica and
+    says why (`fleet_error`); budgeted keys show the ledger's error
+    instead of a balance. Totals are per replica since it started, so a
+    restarted replica's counters begin again at zero.
+  - The admin listener stays on loopback, and the API and page also check
+    the Host header (loopback names, IP literals, `admin.allowed_hosts`):
+    a listener on 127.0.0.1 is still readable by any web page whose DNS
+    name rebinds to 127.0.0.1. `/metrics` is not checked, since
+    Prometheus scrapes it by container name.
+  - The built page is committed under `internal/admin/ui/dist` (about
+    240 KB of JS, unhashed file names) and embedded, so `go install` and
+    `go build` need no Node; `make ui-check` (typecheck, ESLint, Vitest,
+    rebuild, `git diff --exit-code` on the build) runs in CI. `web/` has
+    its own `go.mod` so that npm packages that ship Go sources stay out of
+    `./...`.
+  - Q6 (chaos): the fleet uses the exact cache only, not Ollama
+    embeddings: the semantic layer ships off (M3's finding), so the chaos
+    run needs no embedding model. The run is its own compose project
+    (`chaos/compose.yaml`, ports 28080, 29091-29093 and 29101) so it does
+    not collide with `make dev`, `make fleet` or Q1. nginx re-resolves the
+    replicas' names every second (`resolve`), so a restarted replica with
+    a new address comes back, retries a request on the next replica only
+    when the connection fails or does not connect in 250 ms, and never
+    retries a request already sent to a replica: that replica may have
+    called the provider, and a retry could pay for the completion twice.
+    The bench gained a repeat workload (`--repeat`, `--repeat-pool`,
+    `--seed`), a cache directive (`--cache`) and a per-request log
+    (`--log`); results without them are unchanged.
+  - Q6 phase attribution was settled on a scaled smoke run, before the
+    full run: `docker kill` returns a few hundred milliseconds after the
+    container is dead, and the streams it cuts were scheduled before it,
+    so phases start when an action is issued and requests count where
+    their outcome was observed.
+  - Finding (RESULTS.md, Q6): every hypothesis held. Two things were not
+    predicted. While a replica is down, nginx keeps its last address and
+    every `fail_timeout` sends one live request there, which pays the
+    250 ms connect timeout (below the p99 at 200 rps). And a Redis restart
+    resets every budget, because Redis has no persistence: the outage
+    itself stayed inside the grace bound, but the key then spent about
+    a second full budget. Budgets that must survive a Redis restart need
+    AOF or a ledger outside Redis; M6 does not change that.
+  - Q1 breakdown: the bench sends no temperature, so without a directive
+    no request is cacheable and the cache stays out of the path. Every Q1
+    request therefore carries `X-Switchboard-Cache: semantic` (direct runs
+    too, so all runs send the same bytes); the key's mode is the ceiling,
+    so the cache is on only in the configs whose key turns it on. Each
+    gateway run gets a fresh process (peak RSS is that run's, no entry or
+    counter carries over) and a flushed Redis, and saves the gateway's
+    metrics afterwards: the cache configs must show misses only, the
+    router config real candidates.
+  - Q1 breakdown order and rates: none, limits, budget, exact cache and
+    tracing at 200 req/s; semantic cache and router (both with tracing on)
+    at 5 req/s. Tracing was first stacked last, on top of the router at
+    5 req/s, where embedding variance is milliseconds and its own cost
+    (expected tens of microseconds) could not be resolved; it was moved
+    ahead of the embedding configs before the full run. Ollama on a 4-core
+    CPU served 15 to 27 `nomic-embed-text` embeddings a second in the
+    smoke runs, using one to one and a half cores. At 200 req/s the queue
+    grows until the cache's 250 ms timeout fires, after which the gateway
+    bypasses the semantic layer for a while: in a 200 req/s smoke only 230
+    of 1201 lookups ran it, p50 looked like the exact config's and p99 was
+    the timeout. The renderer flags a semantic config whose layer did not
+    run on every lookup. q1.sh measures the embedder's capacity before the
+    breakdown and records it.
+  - The first smokes showed the semantic cache and the router embedding the
+    same prompt in two separate calls (10 req/s with both on saw embedding
+    timeouts and TTFT in the hundreds of milliseconds). A per-request memo
+    (`internal/embed/memo.go`) now gives them one call; the renderer prints
+    Ollama's CPU per request for each embedding config, so the data shows
+    whether the router config costs one embedding or two.
+  - Q1 baseline: per rate and mode, one direct run before the configs and
+    one after, pooled, rather than a direct run next to every config. That
+    keeps `make bench` near 26 minutes (passthrough at 50, 200 and 500 req/s
+    for 60 s is half of it) and shows the baseline's drift across the group
+    as the spread between its two runs. Breakdown runs keep their samples,
+    and each overhead and each step gets a 1000-resample bootstrap 95%
+    interval (fixed seed, so re-rendering is byte-stable). The interval
+    covers sampling noise only; the drift is reported beside it. A step
+    between configs at one rate shares the baseline, so it cancels.
 
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
