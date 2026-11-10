@@ -35,6 +35,7 @@ type Recorder struct {
 	now        func() time.Time
 	candidates []string
 	window     time.Duration
+	started    time.Time
 
 	mu     sync.Mutex
 	recent []Call // ring buffer of the last cap(recent) calls
@@ -43,6 +44,9 @@ type Recorder struct {
 	// samples are the window's calls, oldest first, from samples[head:].
 	samples []sample
 	head    int
+	// dropped is the newest sample the cap dropped while still inside the
+	// window; the window's figures cover only the time after it.
+	dropped time.Time
 
 	requests  int64
 	outcomes  map[string]int64
@@ -95,7 +99,7 @@ func NewRecorder(o RecorderOptions) *Recorder {
 		o.Now = time.Now
 	}
 	return &Recorder{
-		now: o.Now, candidates: slices.Clone(o.Candidates), window: o.Window,
+		now: o.Now, candidates: slices.Clone(o.Candidates), window: o.Window, started: o.Now(),
 		recent:    make([]Call, o.Recent),
 		outcomes:  map[string]int64{},
 		keys:      map[string]*keyTotals{},
@@ -190,6 +194,9 @@ func clip(s string, n int) string {
 func (r *Recorder) trim(now time.Time) {
 	cutoff := now.Add(-r.window)
 	for r.head < len(r.samples) && (r.samples[r.head].at.Before(cutoff) || len(r.samples)-r.head > maxWindowSamples) {
+		if at := r.samples[r.head].at; !at.Before(cutoff) {
+			r.dropped = at
+		}
 		r.head++
 	}
 	if r.head > len(r.samples)/2 && r.head > 1024 {
@@ -266,10 +273,20 @@ func (r *Recorder) snapshot() (report, []Call) {
 	for i := 1; i <= n; i++ {
 		recent = append(recent, r.recent[(r.next-i+len(r.recent))%len(r.recent)])
 	}
+	dropped := r.dropped
 	r.mu.Unlock()
 
 	sortDecisions(rep.Decisions)
-	w.Seconds = r.window.Seconds()
+	// The window covers the last Window, or less on a replica that
+	// started more recently or whose sample cap dropped part of it.
+	from := now.Add(-r.window)
+	if r.started.After(from) {
+		from = r.started
+	}
+	if dropped.After(from) {
+		from = dropped
+	}
+	w.Seconds = max(now.Sub(from), time.Second).Seconds()
 	w.RPS = float64(w.Requests) / w.Seconds
 	if w.Requests > 0 {
 		w.ErrorRate = float64(w.Errors) / float64(w.Requests)

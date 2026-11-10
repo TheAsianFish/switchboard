@@ -475,3 +475,48 @@ func TestRecorderBoundsTheRequestedModel(t *testing.T) {
 		})
 	}
 }
+
+// Every replica publishes its own report too; the answering replica's
+// live snapshot replaces it, so nothing of its own is counted twice.
+func TestOverviewCountsItsOwnReportOnce(t *testing.T) {
+	t.Parallel()
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	clk := newClock()
+	a := newReplica(t, "a", rdb, clk, Options{CacheEnabled: true})
+	b := newReplica(t, "b", rdb, clk, Options{CacheEnabled: true})
+
+	hit := call(clk.Now(), "k", telemetry.OutcomeCacheHit, time.Millisecond)
+	hit.Cache, hit.RequestID = cache.StatusExact, "a1"
+	a.rec.Observe(hit)
+	a.publish(t)
+	b.publish(t)
+
+	ov := a.srv.Overview(context.Background())
+	if len(ov.Replicas) != 2 {
+		t.Fatalf("replicas = %+v, want a and b once each", ov.Replicas)
+	}
+	if ov.Cache.Lookups["hit-exact"] != 1 {
+		t.Fatalf("fleet lookups = %+v, want a's one hit counted once", ov.Cache.Lookups)
+	}
+	if len(ov.Recent) != 1 || ov.Recent[0].RequestID != "a1" {
+		t.Fatalf("recent = %+v, want a1 once", ov.Recent)
+	}
+}
+
+// A replica up for less than the window divides by the time it has been
+// up, not by the whole window.
+func TestRecorderRateOfAYoungReplica(t *testing.T) {
+	t.Parallel()
+	clk := newClock()
+	r := NewRecorder(RecorderOptions{Window: 10 * time.Second, Now: clk.Now})
+	for range 40 {
+		clk.Add(50 * time.Millisecond)
+		r.Observe(call(clk.Now(), "k", telemetry.OutcomeOK, time.Millisecond))
+	}
+	rep, _ := r.snapshot()
+	if rep.Window.Seconds != 2 || rep.Window.RPS != 20 {
+		t.Fatalf("after 2 s at 20 req/s: window %v s, %v req/s; want 2 s, 20 req/s", rep.Window.Seconds, rep.Window.RPS)
+	}
+}
