@@ -41,6 +41,10 @@ type Policy struct {
 	// Router chooses a model for requests that ask for AutoModel; nil
 	// means the gateway has no auto model.
 	Router *router.Router
+	// OnCall, when set, is told about every request once it ends,
+	// refused ones included, after its log line. It runs on the request's
+	// goroutine and must not block.
+	OnCall func(Call)
 }
 
 // DefaultSettleTimeout bounds settlement after a reply.
@@ -59,6 +63,8 @@ type admission struct {
 	start       time.Time
 	// cache is the cache mode the request gets.
 	cache cache.Decision
+	// decision is the router's choice for an auto request.
+	decision *router.Decision
 }
 
 // charged reports whether the admission was charged on its output
@@ -213,9 +219,9 @@ func (p *Pipeline) refundTokens(ctx context.Context, a *admission) {
 // prompt estimate, see Complete); one that streamed and then failed or was abandoned is
 // charged for what it produced, estimated from its text when the provider
 // never reported usage.
-func (p *Pipeline) settle(ctx context.Context, a *admission, u core.Usage, outChars int, stream bool, outcome string) {
+func (p *Pipeline) settle(ctx context.Context, a *admission, u core.Usage, outChars int, stream bool, outcome string) (core.Usage, cost.Nanos) {
 	if a == nil {
-		return
+		return u, 0
 	}
 	ctx, span := telemetry.StartSpan(context.WithoutCancel(ctx), "settle", attribute.String("switchboard.outcome", outcome))
 	defer span.End()
@@ -259,6 +265,7 @@ func (p *Pipeline) settle(ctx context.Context, a *admission, u core.Usage, outCh
 	if estimated {
 		telemetry.Logger(ctx).Info("usage estimated", slog.Int("input_tokens", u.InputTokens), slog.Int("output_tokens", u.OutputTokens))
 	}
+	return u, spent
 }
 
 // fillUsage completes usage the provider never reported (a stream
