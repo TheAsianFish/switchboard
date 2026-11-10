@@ -11,6 +11,7 @@
 //	switchboard eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
 //	switchboard eval router      Q5: build, label and cross-validate the router
 //	switchboard eval hedge-ledger Q4: summarise the fake provider's ledger (stdin)
+//	switchboard chaos report      Q6: per-phase report of a chaos run
 //	switchboard version           print the build version
 package main
 
@@ -32,6 +33,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/auth"
 	"github.com/TheAsianFish/switchboard/internal/bench"
 	"github.com/TheAsianFish/switchboard/internal/cacheeval"
+	"github.com/TheAsianFish/switchboard/internal/chaos"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/hedge"
@@ -59,6 +61,7 @@ commands:
   eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
   eval router       Q5: data | label | embed | run (the router eval)
   eval hedge-ledger Q4: summarise the fake provider's ledger read on stdin
+  chaos report      Q6: per-phase report of a chaos run (chaos/run.sh)
   version           print the build version
 `
 
@@ -81,6 +84,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return exit(stderr, fakeProvider(ctx, args[1:], stderr))
 	case "bench":
 		return bench.Main(ctx, args[1:], stdout, stderr)
+	case "chaos":
+		return chaos.Main(ctx, args[1:], stdout, stderr)
 	case "eval":
 		if len(args) > 1 && args[1] == "results" {
 			return results.Main(args[2:], stdout, stderr)

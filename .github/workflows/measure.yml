@@ -9,7 +9,7 @@ on:
       target:
         description: make target to run
         type: choice
-        options: [test-limits, bench, eval-cache]
+        options: [test-limits, bench, eval-cache, chaos]
         default: test-limits
 
 permissions:
