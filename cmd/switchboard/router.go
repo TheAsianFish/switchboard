@@ -21,10 +21,12 @@ func buildRouter(cfg *config.Config, log *slog.Logger) (*router.Router, error) {
 	if !rc.Enabled {
 		return nil, nil
 	}
-	if rc.Weights == "" {
-		return nil, fmt.Errorf("router.weights is required: the path of a weights file from make eval-router")
+	w, err := router.Default()
+	source := "built in"
+	if rc.Weights != "" {
+		w, err = router.Load(rc.Weights)
+		source = rc.Weights
 	}
-	w, err := router.Load(rc.Weights)
 	if err != nil {
 		return nil, fmt.Errorf("router.weights: %w", err)
 	}
@@ -66,7 +68,7 @@ func buildRouter(cfg *config.Config, log *slog.Logger) (*router.Router, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Info("router on", slog.String("weights", rc.Weights), slog.String("candidates", strings.Join(names, ",")),
+	log.Info("router on", slog.String("weights", source), slog.String("candidates", strings.Join(names, ",")),
 		slog.String("fallback", w.Fallback), slog.Float64("quality_target", r.Target()),
 		slog.String("embedding", w.Embedding), slog.String("embed_url", rc.EmbedURL))
 	return r, nil

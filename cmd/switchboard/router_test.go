@@ -72,6 +72,10 @@ func TestBuildRouter(t *testing.T) {
 		t.Errorf("a missing candidate: %v", err)
 	}
 	cfg.Models = models
+	cfg.Router.Weights = ""
+	if _, err := buildRouter(cfg, log); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("the built-in weights' candidates are not configured here, got %v", err)
+	}
 	cfg.Router.Weights = filepath.Join(t.TempDir(), "missing.json")
 	if _, err := buildRouter(cfg, log); err == nil {
 		t.Error("a missing weights file was accepted")
