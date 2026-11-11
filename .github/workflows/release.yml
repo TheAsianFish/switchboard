@@ -64,7 +64,10 @@ jobs:
           got=$("$RUNNER_TEMP/switchboard_${v#v}_linux_amd64/switchboard" version)
           echo "$got"
           test "$got" = "$v"
+      # Skipped under act (a local runner for workflow dry runs), whose
+      # artifact server does not speak upload-artifact v7's protocol.
       - uses: actions/upload-artifact@v7
+        if: ${{ !env.ACT }}
         with:
           name: archives-${{ steps.version.outputs.version }}
           path: dist/
@@ -115,5 +118,6 @@ jobs:
             org.opencontainers.image.version=${{ steps.meta.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # The layer cache lives in the Actions cache service; act has none.
+          cache-from: ${{ !env.ACT && 'type=gha' || '' }}
+          cache-to: ${{ !env.ACT && 'type=gha,mode=max' || '' }}
