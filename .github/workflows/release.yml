@@ -1,0 +1,119 @@
+name: release
+
+# Publishes a release when a v* tag is pushed: the four archives and their
+# SHA256SUMS on a GitHub release, and a linux/amd64 + linux/arm64 image at
+# ghcr.io/<owner>/switchboard:<version> and :latest. Run by hand
+# (workflow_dispatch) it is a dry run: the same builds, nothing published,
+# the archives kept as a workflow artifact. Never runs on pull requests or
+# branch pushes. RELEASE.md has the maintainer's steps.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PUBLISH: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+
+jobs:
+  # The tagged commit passes the same tests as a pull request before
+  # anything is built from it.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go vet and go test -race
+        run: make vet test
+
+  archives:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # git describe and the commit time for the archives
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: version
+        id: version
+        run: |
+          if [ "$PUBLISH" = true ]; then v="$GITHUB_REF_NAME"; else v="$(git describe --tags --always)-dryrun"; fi
+          echo "version=$v" >>"$GITHUB_OUTPUT"
+      - name: build archives
+        run: VERSION="${{ steps.version.outputs.version }}" scripts/dist.sh
+      - name: check the linux/amd64 archive runs
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          tar -xzf "dist/switchboard_${v#v}_linux_amd64.tar.gz" -C "$RUNNER_TEMP"
+          got=$("$RUNNER_TEMP/switchboard_${v#v}_linux_amd64/switchboard" version)
+          echo "$got"
+          test "$got" = "$v"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: archives-${{ steps.version.outputs.version }}
+          path: dist/
+          retention-days: 7
+      - name: publish the GitHub release
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS \
+            --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: image name and version
+        id: meta
+        run: |
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/switchboard" >>"$GITHUB_OUTPUT"
+          if [ "$PUBLISH" = true ]; then v="$GITHUB_REF_NAME"; else v="dryrun-${GITHUB_SHA::12}"; fi
+          echo "version=$v" >>"$GITHUB_OUTPUT"
+      - uses: docker/login-action@v4
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      # The Dockerfile cross-compiles in a build stage on the runner's own
+      # platform, so the arm64 image needs no QEMU.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ steps.meta.outputs.version }}
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
