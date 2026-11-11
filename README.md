@@ -255,7 +255,7 @@ flowchart LR
   A --> LB
   LB --> FO
   LB --> FA
-  P <-->|Lua: fixed window or GCRA,<br/>reserve / settle,<br/>exact keys, vector index| R[(Redis 8)]
+  P <-->|Lua: fixed window,<br/>reserve / settle,<br/>exact keys, vector index| R[(Redis 8)]
   M <-->|fleet reports every 2 s| R
   P -->|/api/embed<br/>last user turn<br/>cache and router| E[Ollama embeddings]
   P -->|OTLP spans| J[Jaeger]
