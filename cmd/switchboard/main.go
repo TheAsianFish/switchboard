@@ -3,7 +3,7 @@
 //	switchboard serve             run the gateway
 //	switchboard fake-provider     run the deterministic fake backend
 //	switchboard bench             drive load at a target and record latency
-//	switchboard eval results      render RESULTS.md from eval/results/
+//	switchboard eval results      render RESULTS.md and the README table from eval/results/
 //	switchboard eval limits       Q2: over-admission from the fake provider's ledger
 //	switchboard eval budget       Q2: shared budget spend against the ledger
 //	switchboard eval cache-data   Q3: build the cache pair sets (needs Ollama)
@@ -53,7 +53,7 @@ commands:
   serve             run the gateway (config: --config or SWITCHBOARD_CONFIG)
   fake-provider     run the deterministic fake backend
   bench             drive load at a target and record latency
-  eval results      render RESULTS.md from eval/results/
+  eval results      render RESULTS.md and the README table from eval/results/
   eval limits       Q2: over-admission from the fake provider's ledger
   eval budget       Q2: shared budget spend against the ledger
   eval cache-data   Q3: build the cache pair sets (needs Ollama)

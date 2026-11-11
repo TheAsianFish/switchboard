@@ -24,9 +24,9 @@ func q4Arm(n int, tail float64) bench.Result {
 	return r
 }
 
-func TestRenderQ4(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
+// writeQ4 writes a made-up Q4 run under dir.
+func writeQ4(t *testing.T, dir string) {
+	t.Helper()
 	q4 := filepath.Join(dir, Q4Dir)
 	if err := os.Mkdir(q4, 0o755); err != nil {
 		t.Fatal(err)
@@ -50,6 +50,12 @@ func TestRenderQ4(t *testing.T) {
 	}
 	writeJSON(t, filepath.Join(q4, "off-providers.json"), map[string]any{"providers": []any{map[string]any{"provider": "fake"}}})
 	writeJSON(t, filepath.Join(q4, "on-providers.json"), map[string]any{"providers": []any{map[string]any{"provider": "fake", "hedge_delay_ms": map[string]float64{"fake/stream": 101.25}}}})
+}
+
+func TestRenderQ4(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeQ4(t, dir)
 
 	var first, second bytes.Buffer
 	if err := Render(dir, tmplPath, &first); err != nil {

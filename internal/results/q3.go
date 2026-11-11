@@ -54,6 +54,9 @@ type Q3Sweep struct {
 	// threshold, and ExactPerSet what the exact layer alone serves, both
 	// "`set` rate; ...".
 	ChosenPerSet, ExactPerSet string
+	// ChosenHitFalse is, per pair set, the hit rate and the false-hit
+	// rate at the chosen threshold without intervals: "`set` 5.6% / 0.1%".
+	ChosenHitFalse string
 	// ChosenWrong is, per pair set, the share of the hits served at the
 	// chosen threshold that were negatives: "`set` 12.4% (28 of 225)".
 	ChosenWrong string
@@ -203,6 +206,7 @@ func buildQ3Sweep(s cacheeval.Summary) *Q3Sweep {
 		if j.Found && j.Guard && j.Model == s.Chosen.Model && j.Threshold == s.Chosen.Threshold {
 			q.ChosenPerSet = perSet(s.Sets, j.PerSet)
 			q.ChosenWrong = wrongServed(s.Sets, j.PerSet)
+			q.ChosenHitFalse = hitFalse(s.Sets, j.PerSet)
 		}
 	}
 	var exact []string
@@ -388,6 +392,26 @@ func perSet(sets []string, points []cacheeval.SweepPoint) string {
 		parts = append(parts, "`"+name+"` "+rate(p.HitRate))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// hitFalse is, per pair set, "`set` hit rate / false-hit rate", each
+// without its interval; "n/a" for a rate with nothing to count.
+func hitFalse(sets []string, points []cacheeval.SweepPoint) string {
+	short := func(r cacheeval.Rate) string {
+		if r.N == 0 {
+			return "n/a"
+		}
+		return pct1(r.P)
+	}
+	var out []string
+	for i, p := range points {
+		name := strconv.Itoa(i)
+		if i < len(sets) {
+			name = sets[i]
+		}
+		out = append(out, fmt.Sprintf("`%s` %s / %s", name, short(p.HitRate), short(p.FalseHitRate)))
+	}
+	return strings.Join(out, "; ")
 }
 
 // wrongServed is, per pair set, how many of the hits served at one

@@ -94,7 +94,7 @@ bench-hedge: ## Q4: hedging off and on through the fake provider's slow tail (ab
 chaos: ## Q6: replica and Redis kills under load in a 3-replica compose fleet (about 3 minutes)
 	chaos/run.sh
 
-results: ## render RESULTS.md from eval/results/
+results: ## render RESULTS.md and the README results table from eval/results/
 	go run ./cmd/switchboard eval results
 
 docker: ## build the container image

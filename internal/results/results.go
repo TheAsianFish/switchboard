@@ -109,53 +109,129 @@ type Q1Row struct {
 // Render loads the raw results under resultsDir and executes the template
 // at templatePath into w. Nothing is written to w if anything fails.
 func Render(resultsDir, templatePath string, w io.Writer) error {
-	q1, err := loadQ1(filepath.Join(resultsDir, Q1Dir))
+	d, err := Load(resultsDir)
 	if err != nil {
 		return err
+	}
+	b, err := Execute(templatePath, d)
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(b); err != nil {
+		return fmt.Errorf("results: write: %w", err)
+	}
+	return nil
+}
+
+// Load reads every section's raw files under resultsDir.
+func Load(resultsDir string) (Data, error) {
+	q1, err := loadQ1(filepath.Join(resultsDir, Q1Dir))
+	if err != nil {
+		return Data{}, err
 	}
 	sdk, err := loadSDK(filepath.Join(resultsDir, SDKDir))
 	if err != nil {
-		return err
+		return Data{}, err
 	}
 	q2, err := loadQ2(filepath.Join(resultsDir, Q2Dir))
 	if err != nil {
-		return err
+		return Data{}, err
 	}
 	q3, err := loadQ3(filepath.Join(resultsDir, Q3Dir))
 	if err != nil {
-		return err
+		return Data{}, err
 	}
 	q4, err := loadQ4(filepath.Join(resultsDir, Q4Dir))
 	if err != nil {
-		return err
+		return Data{}, err
 	}
 	q4o, err := loadQ4Ollama(filepath.Join(resultsDir, Q4OllamaDir))
 	if err != nil {
-		return err
+		return Data{}, err
 	}
 	q5, err := loadQ5(filepath.Join(resultsDir, Q5Dir))
 	if err != nil {
-		return err
+		return Data{}, err
 	}
 	q6, err := loadQ6(filepath.Join(resultsDir, Q6Dir))
 	if err != nil {
-		return err
+		return Data{}, err
 	}
 	if q4 != nil && q4o != nil {
 		q4o.SyntheticTailRatio = ratio(q4.Rows[0].ttftP99, q4.Rows[0].ttftP50)
 	}
+	return Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q5: q5, Q6: q6, SDK: sdk}, nil
+}
+
+// Execute runs the template at templatePath on d.
+func Execute(templatePath string, d Data) ([]byte, error) {
 	tmpl, err := template.New(filepath.Base(templatePath)).Option("missingkey=error").ParseFiles(templatePath)
 	if err != nil {
-		return fmt.Errorf("results: parse template: %w", err)
+		return nil, fmt.Errorf("results: parse template: %w", err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q5: q5, Q6: q6, SDK: sdk}); err != nil {
-		return fmt.Errorf("results: render template: %w", err)
+	if err := tmpl.Execute(&buf, d); err != nil {
+		return nil, fmt.Errorf("results: render template %s: %w", templatePath, err)
 	}
-	if _, err := w.Write(buf.Bytes()); err != nil {
-		return fmt.Errorf("results: write: %w", err)
+	return buf.Bytes(), nil
+}
+
+// The README's generated block lies between these two lines.
+const (
+	ReadmeStart = "<!-- results:start -->"
+	ReadmeEnd   = "<!-- results:end -->"
+)
+
+// Splice replaces everything between the ReadmeStart and ReadmeEnd lines
+// of doc with body, surrounded by one blank line on each side. Each marker
+// must be a line of its own (surrounding spaces aside), appear exactly
+// once, and the start must come before the end; a marker quoted inside
+// other text does not count.
+func Splice(doc, body []byte) ([]byte, error) {
+	lines := bytes.SplitAfter(doc, []byte("\n"))
+	find := func(marker string) (int, error) {
+		at := -1
+		for i, l := range lines {
+			if string(bytes.TrimSpace(l)) != marker {
+				continue
+			}
+			if at >= 0 {
+				return 0, fmt.Errorf("results: README marker %q appears more than once (lines %d and %d)", marker, at+1, i+1)
+			}
+			at = i
+		}
+		if at < 0 {
+			return 0, fmt.Errorf("results: README has no %q line", marker)
+		}
+		return at, nil
 	}
-	return nil
+	start, err := find(ReadmeStart)
+	if err != nil {
+		return nil, err
+	}
+	end, err := find(ReadmeEnd)
+	if err != nil {
+		return nil, err
+	}
+	if end < start {
+		return nil, fmt.Errorf("results: README marker %q (line %d) comes before %q (line %d)", ReadmeEnd, end+1, ReadmeStart, start+1)
+	}
+	var out bytes.Buffer
+	for _, l := range lines[:start+1] {
+		out.Write(l)
+	}
+	if !bytes.HasSuffix(lines[start], []byte("\n")) {
+		out.WriteByte('\n')
+	}
+	out.WriteByte('\n')
+	if b := bytes.Trim(body, "\n"); len(b) > 0 {
+		out.Write(b)
+		out.WriteString("\n\n")
+	}
+	for _, l := range lines[end:] {
+		out.Write(l)
+	}
+	return out.Bytes(), nil
 }
 
 // run is one parsed result file.
@@ -414,13 +490,16 @@ func prose(d string) string {
 func num(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
 
 // Main implements `switchboard eval results`. args excludes the subcommand
-// names. It returns the process exit code.
+// names. It returns the process exit code. Both outputs are rendered from
+// one load of the raw files, and nothing is written unless both rendered.
 func Main(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("results", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("results", "eval/results", "directory of raw result files")
 	tmpl := fs.String("template", "eval/RESULTS.md.tmpl", "template to render")
 	out := fs.String("out", "RESULTS.md", `file to write ("-" for stdout)`)
+	readme := fs.String("readme", "README.md", `README whose block between the results markers is rewritten ("" to skip)`)
+	readmeTmpl := fs.String("readme-template", "eval/README-results.md.tmpl", "template for the README block")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -431,22 +510,51 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "results: unexpected arguments: %s\n", strings.Join(fs.Args(), " "))
 		return 2
 	}
-	var buf bytes.Buffer
-	if err := Render(*dir, *tmpl, &buf); err != nil {
+	d, err := Load(*dir)
+	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if *out == "-" {
-		if _, err := stdout.Write(buf.Bytes()); err != nil {
+	doc, err := Execute(*tmpl, d)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	var readmeDoc []byte
+	if *readme != "" {
+		body, err := Execute(*readmeTmpl, d)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		old, err := os.ReadFile(*readme)
+		if err != nil {
 			fmt.Fprintf(stderr, "results: %v\n", err)
 			return 1
 		}
-		return 0
+		if readmeDoc, err = Splice(old, body); err != nil {
+			fmt.Fprintf(stderr, "%v (in %s)\n", err, *readme)
+			return 1
+		}
 	}
-	if err := os.WriteFile(*out, buf.Bytes(), 0o644); err != nil {
-		fmt.Fprintf(stderr, "results: %v\n", err)
-		return 1
+	if *out == "-" {
+		if _, err := stdout.Write(doc); err != nil {
+			fmt.Fprintf(stderr, "results: %v\n", err)
+			return 1
+		}
+	} else {
+		if err := os.WriteFile(*out, doc, 0o644); err != nil {
+			fmt.Fprintf(stderr, "results: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stderr, "wrote %s\n", *out)
 	}
-	fmt.Fprintf(stderr, "wrote %s\n", *out)
+	if readmeDoc != nil {
+		if err := os.WriteFile(*readme, readmeDoc, 0o644); err != nil {
+			fmt.Fprintf(stderr, "results: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stderr, "wrote %s\n", *readme)
+	}
 	return 0
 }

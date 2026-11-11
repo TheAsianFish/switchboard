@@ -135,12 +135,22 @@ func (e Est) String() string {
 	return fmt.Sprintf("%s [%s, %s]", added(e.v), added(e.lo), added(e.hi))
 }
 
+// Point is the difference alone with its sign, "+0.52", or "n/a".
+func (e Est) Point() string {
+	if !e.ok {
+		return "n/a"
+	}
+	return added(e.v)
+}
+
 // BreakdownRow is one configuration's overhead against the direct baseline
 // at its rate: total latency for non-streamed requests, TTFT for streamed.
 type BreakdownRow struct {
 	Config, Features, Rate, Model string
 	TotalP50, TotalP99            Est
 	TTFTP50, TTFTP99              Est
+
+	embeds bool
 }
 
 // StepRow is what one configuration adds over the one before it.
@@ -151,6 +161,51 @@ type StepRow struct {
 	Across             string
 	TotalP50, TotalP99 Est
 	TTFTP50, TTFTP99   Est
+
+	embeds bool
+}
+
+// embeds reports whether a configuration embeds the prompt: the semantic
+// cache or the router is on.
+func embeds(name string, features []string) bool {
+	for _, f := range []string{"semantic", "router"} {
+		if name == f || slices.Contains(features, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// Row returns the overhead row of config, nil if it was not run.
+func (q *Q1Breakdown) Row(config string) *BreakdownRow {
+	for i := range q.Rows {
+		if q.Rows[i].Config == config {
+			return &q.Rows[i]
+		}
+	}
+	return nil
+}
+
+// Stack returns the last configuration run that does not embed: every
+// feature that does not call the embedder, stacked. Nil if none ran.
+func (q *Q1Breakdown) Stack() *BreakdownRow {
+	for i := len(q.Rows) - 1; i >= 0; i-- {
+		if !q.Rows[i].embeds {
+			return &q.Rows[i]
+		}
+	}
+	return nil
+}
+
+// EmbedStep returns the step of the first configuration that embeds: what
+// a cache miss's embedding adds over the stack before it. Nil if none ran.
+func (q *Q1Breakdown) EmbedStep() *StepRow {
+	for i := range q.Steps {
+		if q.Steps[i].embeds {
+			return &q.Steps[i]
+		}
+	}
+	return nil
 }
 
 // BaselineRow shows the direct runs at one rate and mode.
@@ -632,7 +687,8 @@ func buildBreakdown(meta BreakdownMeta, runs []*bkRun) (*Q1Breakdown, error) {
 		if st != nil {
 			o.ttft = sub(newBoot(st.name, pick(st)), pooled[groupKey{rate, true}])
 		}
-		row := BreakdownRow{Config: name, Features: strings.Join(cm.Features, ", "), Rate: num(rate), Model: cm.Model}
+		emb := embeds(name, cm.Features)
+		row := BreakdownRow{Config: name, Features: strings.Join(cm.Features, ", "), Rate: num(rate), Model: cm.Model, embeds: emb}
 		if row.Features == "" {
 			row.Features = "none (passthrough)"
 		}
@@ -640,7 +696,7 @@ func buildBreakdown(meta BreakdownMeta, runs []*bkRun) (*Q1Breakdown, error) {
 		row.TTFTP50, row.TTFTP99 = o.ttft.ests()
 		q.Rows = append(q.Rows, row)
 
-		step := StepRow{Stage: "+ " + name, Rate: num(rate)}
+		step := StepRow{Stage: "+ " + name, Rate: num(rate), embeds: emb}
 		s := o
 		if prev == "" {
 			step.Stage = name + " (against direct)"

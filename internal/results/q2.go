@@ -88,6 +88,32 @@ type Q2Budget struct {
 	OutPerRequest string
 }
 
+// Scenario returns the row of the named scenario, nil if it was not run.
+func (q *Q2) Scenario(name string) *Q2Row {
+	for i := range q.Rows {
+		if q.Rows[i].Scenario == name {
+			return &q.Rows[i]
+		}
+	}
+	return nil
+}
+
+// Phase returns the named phase of an outage scenario, nil if there is
+// none.
+func (q *Q2) Phase(scenario, name string) *Q2Phase {
+	for _, o := range q.Outages {
+		if o.Scenario != scenario {
+			continue
+		}
+		for i := range o.Phases {
+			if o.Phases[i].Name == name {
+				return &o.Phases[i]
+			}
+		}
+	}
+	return nil
+}
+
 // scenarioOrder is the order of the full run, which is also the table's.
 var scenarioOrder = []string{"fixed-window", "fixed-window-redis-outage", "gcra", "gcra-redis-outage", "no-shared-store"}
 
