@@ -125,8 +125,13 @@ keys:
 YAML
 }
 
+# The run is written to a staging directory and moved into place only when
+# both arms finished, so an interrupted (or paid) run never leaves a half
+# result that breaks `make results`, and never deletes the previous one.
+final=$out
+out="$final.partial"
+rm -rf "$out"
 mkdir -p "$out"
-rm -f "$out"/*.json "$out"/*.prom
 if [[ $provider == ollama ]]; then
 	# One untimed request loads the model, so neither arm pays for it.
 	curl -fsS "$ollama/api/generate" -d "{\"model\":\"$model\",\"prompt\":\"hi\",\"stream\":false,\"options\":{\"num_predict\":1}}" >/dev/null
@@ -173,9 +178,15 @@ for arm in off on; do
 	bin/switchboard bench --url "http://$gateway_addr" --format openai --model local --key sk-bench \
 		--stream --samples --rate "$rate" --duration "$duration" --warmup "$warmup" \
 		--max-tokens "$max_tokens" --timeout 120s --label "$provider-hedge-$arm" --out "$out/$arm.json"
-	curl -fsS "http://$admin_addr/metrics" | grep -E "$series" >"$out/$arm-metrics.prom" || true
+	# A failed scrape must fail the run: an empty file would render as "cost
+	# not recorded". grep finding no series is fine (no hedges yet).
+	metrics=$(curl -fsS "http://$admin_addr/metrics")
+	grep -E "$series" <<<"$metrics" >"$out/$arm-metrics.prom" || true
 	curl -fsS "http://$admin_addr/providers" >"$out/$arm-providers.json"
 	stop_gateway
 done
 
+rm -rf "$final"
+mv "$out" "$final"
+out=$final
 echo "$tag: results in $out; logs in $logs. Run 'make results' to render RESULTS.md." >&2

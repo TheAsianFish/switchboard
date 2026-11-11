@@ -30,3 +30,4 @@ AGENTS.md
 
 # Local gateway config (copy of switchboard.example.yaml)
 /switchboard.yaml
+eval/results/*.partial/
