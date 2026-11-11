@@ -456,6 +456,54 @@ What the numbers and the code say:
   `make chaos` and its Q6 numbers stay as they are. The first commit fixes
   the flaky hedge test above at its cause (not by widening its deadline
   alone), so the gate this milestone is judged by is trustworthy.
+- *Phases (fixed before the full run).* The Q6 fleet and its three
+  streams, for 150 s. The budgeted key spends its $0.20 in about 43 s, so
+  every outage starts with the budget already spent:
+
+  | Offset | Action | Phase it starts |
+  |--------|--------|-----------------|
+  | 0 s | load starts | steady |
+  | 50 + 12k s (k = 0..7) | disconnect Redis | outage k + 1 |
+  | 58 + 12k s (k ≠ 4) | connect Redis | back k + 1 |
+  | 101 s | kill replica 2 (SIGKILL), 3 s into outage 5 | outage 5, replica 2 down |
+  | 106 s | connect Redis | back 5, replica 2 down |
+  | 108 s | start replica 2 | back 5 |
+  | 150 s | load ends | |
+
+  Each outage is 8 s and each reachable stretch 4 s (8 s after the last),
+  so T, from the first disconnect to the last connect, is 92 s. Redis is
+  reconnected with its service name as the network alias, so the replicas
+  find it again by name. Half a second before every action, and once after
+  the run, the script reads the budgeted key's balance (`spent`,
+  `reserved`) with `redis-cli` inside the Redis container, which works
+  while it is off the network; a phase's reconciliation is the fake
+  provider's ledger, priced, up to that read minus Redis's `spent`. An
+  outage is a run of phases with Redis down; its spend is what the
+  provider served the key during it, and "linear in outages" is read from
+  a least-squares line through the overshoot after each outage (slope and
+  R²). The processes in the bound are the three replicas up at the first
+  disconnect plus the start at 108 s: four. The control for the
+  reconciliation is every reachable phase before the kill (gap expected
+  0 within one in-flight reply, $0.000465); the killed replica's loss is
+  the gap at the end of the run. Per-phase error rate and p99 of the main
+  stream are reported, not judged: Q6's steady-state rule needs 5 s and a
+  reachable stretch is 4 s.
+- *How each hypothesis is judged (fixed with the phases).* Before the
+  fix: the overshoot hypothesis holds at $0.06 or more (the stated
+  falsifier), and the report sets it beside the $0.24 prediction;
+  "linear in outages" holds if the fit's R² is at least 0.95 and its
+  slope is within a quarter of three replicas' grace ($0.0225 to
+  $0.0375 per outage). After the fix: the bound holds if the overshoot
+  at the end is at most processes × grace × (1 + T / refill), and
+  "whatever the outage count" holds if outages 2 to 8 together add at
+  most the restarted process's grace plus the refill (one grace plus
+  four × grace × T / refill) to what outage 1 spent. In both runs the
+  killed replica's loss (the gap at the end) holds against its bound if
+  it is between 0 and one replica's grace, and the control holds if no
+  reachable phase before the kill shows a gap above one in-flight reply.
+  A negative gap anywhere after the first outage is a double charge and
+  is reported as observed; Redis's `reserved` at the end is the
+  expired-hold case (holds whose replica died, waiting out their TTL).
 
 **M9. What does it cost to make a budget survive a Redis restart?**
 
