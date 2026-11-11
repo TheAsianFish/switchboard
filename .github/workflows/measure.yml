@@ -9,7 +9,7 @@ on:
       target:
         description: make target to run
         type: choice
-        options: [test-limits, bench, eval-cache, chaos]
+        options: [test-limits, bench, eval-cache, chaos, chaos-flap]
         default: test-limits
 
 permissions:
@@ -34,8 +34,10 @@ jobs:
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/version && break; sleep 1; done
           docker exec ollama ollama pull all-minilm
           docker exec ollama ollama pull nomic-embed-text
+      # RUN names chaos-flap's output directory; on the current code that
+      # is the run after the grace fix. Other targets ignore it.
       - name: make ${{ inputs.target }}
-        run: make ${{ inputs.target }}
+        run: make ${{ inputs.target }} RUN=after
       - uses: actions/upload-artifact@v7
         with:
           name: results-${{ inputs.target }}
