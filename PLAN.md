@@ -371,6 +371,186 @@ or the compose stack is a `make` target or a `workflow_dispatch` job.
 | CI minutes. | PR workflow: lint, types, unit tests, Redis integration job, UI check; all with `timeout-minutes`; benches, evals and chaos are `make` targets or manual workflows. |
 | Semantic cache answers leaking across tenants or conversations. | Namespace by tenant; match only within an identical context hash; a test that asserts a cross-tenant lookup never hits. |
 
+## Evolution round 1
+
+v1 answered Q1 to Q6. Before calling the project finished I re-ran what the
+repository can run without a model and read the results for the places
+where the Goal's own claim, shared state that stays correct when replicas
+and the store die, is still weaker than it sounds.
+
+### Evidence (re-run on 2026-11-11, 4 vCPU, $0)
+
+| Command | Result |
+|---------|--------|
+| `make check` | green; lint 0 issues; 2 min 47 s on a cold module and build cache (the guide says under 2 minutes). Re-run at review: lint clean, but `TestAbandonedHedgedRequestIsChargedForEveryAttempt` failed in 2 of 2 full runs and in 2 of 5 runs of `./internal/pipeline` (it counts one attempt's tokens where two were sent; it passes 50 of 50 run alone), so the gate is flaky under parallel tests |
+| `make test-integration` | green against `redis:8`, 1 min 2 s |
+| `make eval-router` | `summary.json` and `frontier.svg` byte-identical; only the commit and date stamps move. The served router is still -0.8 points against the line and -1.4 against the hull at its operating point |
+| `make bench-hedge` | TTFT p99 637.2 → 214.5 ms (committed 638.3 → 224.4), +5.3% upstream requests, hedges 689 sent / 613 won / **0 refused** |
+| `make chaos` | reproduces Q6: 0.12% errors after the replica kill, p99 432 ms with Redis down, $0.0186 spent in the outage against a $0.02 grace bound, **overshoot $0.1980 on a $0.20 budget** after the Redis restart |
+
+Not re-run: `make bench` (26 minutes, no code changed since `bfd0dc3`),
+`make test-limits` (12 minutes, same), and the evals that need Ollama
+(`eval-cache`, the Q4 local run, the router labels), whose raw files are
+committed.
+
+What the numbers and the code say:
+
+- **A budget is only as durable as the store's memory.** Both compose
+  files start Redis with `--save "" --appendonly no`, so the restart in Q6
+  hands the spent key a second whole budget. Q6 records this as a
+  hypothesis that held; it is also the largest correctness failure in
+  RESULTS.md.
+- **The outage bound in Q6 is per outage, not per budget.**
+  `budget.Degrading` swaps in a fresh grace ledger each time its pending
+  charges have been flushed to Redis, so every outage gets the full grace
+  again: a store that flaps F times lets a spent key through F × replicas ×
+  grace. Q6 has one outage, so it could not see this. Pending charges also
+  live only in the replica's memory (a replica killed while degraded takes
+  its unreported spend with it), and a settle that timed out after it was
+  applied is charged again. None of the three is measured.
+- **A provider that accepts a connection and never answers is invisible.**
+  Both providers default to a 10 minute timeout that covers the whole
+  stream, and the breaker counts returned errors only, so a stalled
+  upstream holds every request open and the breaker never opens. The
+  README roadmap has carried "a first-token timeout" since M4.
+- **Hedging's budget has never refused a hedge**, and the Q4 tail is
+  independent per request. **The router** is not above the hull, and
+  `router-cost` (+1.4 over the hull, -0.5 to +3.2) was designed after the
+  first run. **The semantic cache** serves 5.6% of PAWS paraphrases at the
+  shipped threshold, and its per-pair false-hit rate is a floor for a
+  populated cache.
+
+### New milestones
+
+**M8. Does the outage bound survive a store that flaps?**
+
+- *Question.* Q6 showed one Redis outage costs at most the live replicas'
+  grace. What does a spent budget cost when Redis is cut off and comes back
+  eight times, keeping its state, and what is lost when a replica dies while
+  it is degraded?
+- *Hypothesis (before the fix).* With the chaos key's numbers ($0.20
+  budget, $0.01 grace, 10 requests per second at $0.000465, three replicas)
+  the fleet burns its $0.03 of grace in about 6.5 s. Eight outages of 8 s,
+  each followed by 4 s of Redis reachable, should therefore overshoot by
+  about 8 × $0.03 = $0.24, more than the budget itself, and grow linearly
+  with the number of outages; falsified if the overshoot stays under $0.06.
+  Killing one replica 3 s into an outage should leave Redis's ledger short
+  of the fake provider's by that replica's pending spend (about a third of
+  3 s of traffic, $0.004 to $0.005), and by nothing in a run without the
+  kill.
+- *Fix and its hypothesis.* Grace becomes an allowance that refills with
+  time (a token bucket per replica and key: capacity `grace_usd`, refill
+  `grace_usd` per `grace_refill`, default one hour) and is not reset when
+  an outage ends. Overshoot over any stretch of length T is then at most
+  replicas × grace × (1 + T / refill) however often the store flaps: for
+  the 96 s run, $0.031. The allowance lives in the replica's memory, so
+  a replica that restarts starts full: the bound counts replica processes
+  started during T, not replicas. The pending loss on a replica kill is
+  not fixed here; it is measured and bounded (at most one replica's
+  grace) and written down.
+- *Method.* `make chaos-flap` (about 4 minutes): the Q6 fleet, the store
+  cut off with `docker network disconnect` so it keeps its state, the
+  phases fixed in this file before the full run, and a reconciliation
+  column (provider ledger minus Redis `spent`) per phase. Run at the
+  commit before the fix and at the one after; both raw results committed.
+  `make chaos` and its Q6 numbers stay as they are. The first commit fixes
+  the flaky hedge test above at its cause (not by widening its deadline
+  alone), so the gate this milestone is judged by is trustworthy.
+
+**M9. What does it cost to make a budget survive a Redis restart?**
+
+- *Question.* With an append-only file, how much of the $0.198 overshoot
+  remains after a SIGKILL and restart, how long is the gateway degraded
+  while Redis replays the file, and what does each fsync policy add to a
+  request?
+- *Hypothesis.* `appendfsync everysec` loses at most the last second of
+  writes, so the overshoot at the end of the Q6 schedule is at most the
+  outage's grace (two live replicas, $0.02) plus one second of spend
+  ($0.0047), about $0.025 (against $0.198),
+  with no client-visible errors while Redis answers `LOADING`, and the hit
+  rate of repeats in the phase after the restart back at 95% or more
+  (against 84.6%). `everysec` adds under 0.1 ms to the p50 and p99 of the
+  limits-and-budget configuration at 200 requests per second. `always`
+  brings the overshoot down to the grace alone and adds under 0.2 ms at
+  p99; I expect that last part to fail on a container's overlay disk, and
+  the size of the failure is the number worth having.
+- *Method.* `REDIS_PERSIST=none|everysec|always` in `chaos/run.sh` (one Q6
+  row set per mode, about 3 minutes each) and a `make bench-persist` that
+  runs Q1's limits-and-budget configuration against each mode (about 8
+  minutes), with M8's reconciliation column; a `LOADING` reply covered by
+  an integration test against `redis:8`; the replicas' logs kept with the
+  run, which also settles Q6's "likely, not measured" cause of the slow
+  stretch after the Redis kill. The shipped compose default follows the
+  numbers, by a rule written here before the run: the cheapest mode whose
+  overshoot is within the grace bound plus one second of spend and whose
+  added p99 is under 0.5 ms.
+
+**M10. Does a provider that stops answering ever open the breaker?**
+
+- *Question.* When the upstream accepts connections and sends nothing, how
+  long do clients wait, and does the fleet shed the load?
+- *Hypothesis.* Today: in 60 s of a stalled provider at 20 requests per
+  second the breaker opens 0 times and no request finishes before the
+  client gives up. With a per-attempt `first_token_timeout` of 2 s (off by
+  default, since a cold local model legitimately takes longer), counted by
+  the breaker as a timeout: the gateway's breaker is open within
+  3 s of the stall plus its five failures, refusals after that have a p99
+  under 5 ms and carry `Retry-After`, the breaker closes within one
+  cooldown plus 1 s of the provider answering again, and the timeout fires
+  0 times in Q4's hedging-off arm, whose legitimate tail reaches 953 ms at
+  p99.9 and 1,459 ms at its maximum. That check has 0.5 s of margin by
+  construction of the fake's tail, so it is a sanity check, not a test of
+  the setting. The setting's real blind spot is a provider that sends its
+  first event and then stalls, which a first-token timeout cannot see; it
+  is written down, not fixed here.
+- *Method.* A stall switch on `switchboard fake-provider` (an admin
+  endpoint, so a run can turn it on and off), the timer in the provider
+  wrapper cancelled by the first event, and `make bench-stall` (about 3
+  minutes): steady, stalled, recovered, through one gateway, before and
+  after, per-phase latency, error kinds and breaker state from
+  `/providers`.
+
+### Considered and not chosen
+
+- **GCRA rows for Q2 and Q6.** The limiter's slot, contract tests and
+  commands are in; it is the one piece deliberately left to be written by
+  hand, and no milestone here depends on it.
+- **A correlated-slowdown arm for Q4.** The cap on extra requests is the
+  hedge budget's invariant and the lost p99 gain is set by the episode
+  length I would choose, so the result is decided by the harness.
+- **Retry storms under overload.** With a provider that rejects at once the
+  load settles (offered × (1 + f + f²) converges with f → 0), and
+  `overloaded` already counts towards the breaker; a storm appears only if
+  the fake provider is built to waste work, which measures the fake.
+- **Confirming `router-cost` on 600 fresh questions.** About 3 h of local
+  labelling for a test with roughly one chance in three of resolving a
+  +1.4 point gain (standard error about 0.9 at n = 600). It waits for the
+  Claude candidates, whose price ratios change the question.
+- **Semantic-cache false hits as the cache fills.** Needs correctness
+  labels for thousands of new pairs, and it leaves the real weakness (5.6%
+  of paraphrases served) where it is; the fix is a reranker, on the
+  roadmap.
+- **Coalescing identical concurrent misses.** Real (nothing coalesces
+  today), but it is a new distributed mechanism rather than a harder look
+  at the ones already shipped; streamed followers alone would outgrow one
+  PR. Runner-up for a later round.
+
+### Changes after re-running the evidence
+
+- `make chaos` and `make bench-hedge` reproduced (overshoot $0.1971 on
+  the $0.20 budget, $0.0186 spent in the outage, 84.6% of repeats served
+  after the restart; TTFT p99 637.9 → 215.1 ms, 0 hedges refused).
+  `make check` did not: one hedge test is flaky under parallel tests, so
+  M8 now fixes it first.
+- M8's bound counts replica processes, since the refilled allowance is in
+  memory and a restarted replica starts full; its question says eight
+  outages, as its method does.
+- M9's `everysec` prediction uses Q6's two live replicas ($0.025, not
+  $0.03), and a gap inside Q1's drift is reported as unresolved.
+- M10's breaker check is on the one gateway the bench drives. Its
+  hedging-off check is kept as a sanity check, with the margin stated, and
+  a stall after the first event goes under known problems.
+
 ## Milestones
 
 Changes made while building:
@@ -796,3 +976,6 @@ Changes made while building:
 - [x] M5: Evaluated router — committed eval set (GSM8K + MMLU, 600 questions); `switchboard eval router label` runs every candidate through the gateway and records correctness, usage, dollars and latency (replays from recordings at $0); feature extraction and the per-candidate logistic models trained in Go; `model: "auto"` with a configurable quality target; `make eval-router` with 5-fold cross-validation, the four baselines and the random-mix line; RESULTS.md router section answering Q5 (live labels when a key exists, otherwise the Ollama candidate and "To measure"). Done when the router's held-out frontier is plotted against the line and the gateway serves `auto` from the trained weights.
 - [x] M6: Admin page, chaos and the overhead breakdown — admin JSON API on the loopback listener (keys, limits, spend, cache stats, router decisions, recent requests with trace links); React + TypeScript page embedded in the binary with Vitest tests; `chaos/run.sh` with the phased kill schedule and per-phase report; `make bench` extended to the per-feature breakdown. RESULTS.md answers Q1 in full and Q6. Done when the chaos run completes on a laptop with a report, the admin page shows a live fleet, and `make ui-check` is in CI.
 - [x] M7: Release readiness — `go install` path verified in a clean container, release archives, `release.yml` guarded by `v*` tags building the multi-arch image to GHCR, RELEASE.md with every maintainer step; README complete (what/why, demo GIF placeholder with capture instructions, quickstart for both SDKs, Mermaid architecture, design decisions and trade-offs, results table rendered from RESULTS.md, roadmap); RESULTS.md complete with every measured number, its method, cost and hardware, and every unmeasured one under "To measure" with its command. Done when a fresh clone runs the quickstart from the README alone and the release workflow dry-runs green.
+- [ ] M8: Budget grace under a flapping store — `make chaos-flap` on the Q6 fleet: Redis cut off and reconnected eight times with its state kept (`docker network disconnect`), one replica killed while degraded, phases fixed in PLAN.md before the full run, the flaky `TestAbandonedHedgedRequestIsChargedForEveryAttempt` fixed at its cause first (five consecutive `make check` runs green), and a per-phase reconciliation of the fake provider's ledger against Redis's `spent`; run once at the commit before the fix; then grace as a time-refilled allowance per replica and key (`grace_refill`, fake-clock unit tests, the doc comments in `budget/degrade.go` corrected) and the same run again. Done when RESULTS.md holds both runs side by side with each hypothesis answered (overshoot about $0.24 and linear in outages before; at most replica processes × grace × (1 + T / refill) after, whatever the outage count, a restarted replica counted as a new process; the killed replica's lost pending spend measured against its bound), both raw results are committed, the double-charge and expired-hold cases are listed under known problems with what was observed, and `make chaos` still reproduces Q6.
+- [ ] M9: Budgets that survive a Redis restart, and what the fsync costs — `REDIS_PERSIST=none|everysec|always` arms of `make chaos` with M8's reconciliation column and the replicas' logs kept; `make bench-persist` (Q1's limits-and-budget configuration at 200 requests per second against each mode, bootstrap intervals as in Q1); an integration test that a `LOADING` reply degrades like an unreachable store and recovers. Done when RESULTS.md holds overshoot, error rate, degraded seconds after the restart and hit rate of repeats per mode beside the added p50 and p99 per mode, each hypothesis is answered (`everysec` at most the live replicas' grace plus one second of spend, about $0.025, and under 0.1 ms, a difference inside Q1's run-to-run drift reported as unresolved rather than as held; `always` at most grace and under 0.2 ms p99, or by how much not), the cause of Q6's slow stretch after the Redis kill is read from the kept logs, the compose default is the mode the pre-stated rule picks, and the README's roadmap line on budgets is replaced by the finding.
+- [ ] M10: First-token timeout and a stalled provider — a stall switch on `switchboard fake-provider`; `resilience.first_token_timeout` per provider (off by default), per attempt, cancelled by the first event, counted by the breaker and retried like a timeout; `make bench-stall` with steady, stalled and recovered phases, run before and after. Done when RESULTS.md holds both runs with per-phase latency, error kinds, time until the breaker is open on the replica and until it closes, each hypothesis answered (0 opens and no completed request today; open within 3 s plus five failures, refusals p99 under 5 ms with `Retry-After`, closed within a cooldown plus 1 s, and 0 timeouts fired on Q4's hedging-off arm, reported with its largest TTFT beside the timeout), a stall after the first event listed under known problems as not covered, a trace of a timed-out attempt is committed beside M4's, and the README documents the setting and when not to use it.

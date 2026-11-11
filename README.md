@@ -492,12 +492,16 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   tests and Lua slot are in; the implementation is not).
 - A reranking stage for semantic hits: Q3 shows embeddings alone cannot
   keep false hits under 1% at a useful hit rate on adversarial pairs.
-- Budgets that survive a Redis restart (AOF, or settling spend to a
-  durable ledger); Q6 shows a restart resets them.
+- Planned next (PLAN.md, evolution round 1):
+  - M8: budget grace under a store that flaps. Each outage hands every
+    replica its grace again today; measure it, then make grace a
+    time-refilled allowance.
+  - M9: budgets that survive a Redis restart (Q6 shows a restart resets
+    them), with what each fsync policy costs a request.
+  - M10: a first-token timeout per attempt, so a provider that accepts
+    connections and never answers opens the breaker.
 - Q4 against Claude, and the router's Claude candidates (both need an API
   key; RESULTS.md lists the commands and the estimated cost).
-- A first-token timeout per attempt, so a provider that accepts
-  connections and never answers opens the breaker.
 - Pass `traceparent` on to providers.
 - Accept tool-call arguments that are not JSON in OpenAI-format history (a
   cut-off call echoed back is refused today).
