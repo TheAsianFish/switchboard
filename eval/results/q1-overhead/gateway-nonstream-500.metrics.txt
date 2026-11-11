@@ -1,0 +1,9 @@
+switchboard_provider_breaker_state{provider="fake"} 0
+switchboard_request_duration_seconds_sum{model="fake",stream="false"} 668.5747262519988
+switchboard_request_duration_seconds_count{model="fake",stream="false"} 32501
+switchboard_requests_total{key="bench",model="fake",outcome="ok"} 32501
+switchboard_store_degraded{component="budget"} 0
+switchboard_store_degraded{component="ratelimit"} 0
+switchboard_tokens_total{key="bench",model="fake",type="input"} 162505
+switchboard_tokens_total{key="bench",model="fake",type="output"} 975030
+switchboard_unpriced_requests_total{key="bench",model="fake"} 32501

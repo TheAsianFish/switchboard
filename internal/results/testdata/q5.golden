@@ -213,6 +213,14 @@ L2 strength the inner cross-validation chose (the mode over folds).
 - 5 replies were cut off by the output cap (`qwen2.5:0.5b` 4, `qwen2.5:1.5b` 1) and are graded
   on what they contain.
 
+## Q6: chaos
+
+What does a replica kill and a Redis kill cost a fleet under load?
+Command: `make chaos` (`chaos/run.sh`), raw files in `eval/results/q6-chaos/`
+(`summary.json` is written from the others by `switchboard chaos report`).
+
+Not measured yet. Run `make chaos`, then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire

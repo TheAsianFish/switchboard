@@ -12,11 +12,12 @@ What does putting the gateway in front of a provider add to a request?
 Command: `make bench` (`eval/bench/q1.sh`), raw files in
 `eval/results/q1-overhead/`.
 
-**Method.** `switchboard fake-provider` serves a fixed-latency backend:
+**Passthrough.** `switchboard fake-provider` serves a fixed-latency backend:
 first byte after 20 ms, then 30 tokens 5 ms apart
 when streaming. `switchboard bench` sends the same load to it directly
-and through `switchboard serve` (OpenAI format, one API key, model `fake`),
-the two runs back to back with the order alternating per rate. Arrivals are
+and through `switchboard serve` (OpenAI format, one API key, model `fake`,
+every feature off), the two runs back to back with the order alternating per
+rate. Arrivals are
 open-loop at a constant rate: each request is sent at its scheduled time
 whether or not earlier ones have finished, and latency is measured from that
 scheduled time, so a slow target cannot hide its queueing. Each run measures
@@ -25,7 +26,7 @@ Non-streaming rows compare total latency;
 streaming rows compare time to first token (TTFT). Percentiles are
 nearest-rank over every request in the window. The generator's own lag (the
 worst p99 delay between a request's scheduled and actual send time across
-all runs) was 1.755 ms.
+all runs) was 1.286 ms.
 
 Added = gateway minus direct. The two sides are independent runs, not paired
 requests, and each cell is a single run per side, so the difference carries
@@ -35,20 +36,127 @@ cost of the gateway. The generator, the gateway and the fake provider share
 one machine, and latency includes the generator's own lag, so part of an
 added figure can be the gateway's CPU use slowing the generator rather than
 time spent in the gateway (compare the send delays in the raw files).
+Since M6 every gateway run starts a fresh gateway process and records its
+CPU, user plus system time (`/proc/<pid>/stat`) over the measured window
+divided by the window's length, in cores, and its peak resident set
+(`VmHWM`) over the process's life; "n/a" for runs from before that.
 
-| Mode | Rate (req/s) | Metric | Direct p50 (ms) | Direct p99 (ms) | Gateway p50 (ms) | Gateway p99 (ms) | Added p50 (ms) | Added p99 (ms) | Requests (direct / gateway) | Errors (direct / gateway) |
-|------|-------------:|--------|----------------:|----------------:|-----------------:|-----------------:|---------------:|---------------:|----------------------------:|--------------------------:|
-| non-streaming | 50 | total | 21.25 | 22.00 | 21.72 | 22.52 | +0.47 | +0.52 | 3000 / 3000 | 0 / 0 |
-| non-streaming | 200 | total | 21.32 | 22.22 | 21.53 | 22.57 | +0.21 | +0.36 | 12000 / 12000 | 0 / 0 |
-| non-streaming | 500 | total | 21.05 | 22.16 | 21.42 | 22.52 | +0.37 | +0.35 | 30000 / 30000 | 0 / 0 |
-| streaming | 50 | TTFT | 21.33 | 22.39 | 21.36 | 22.18 | +0.03 | -0.21 | 3000 / 3000 | 0 / 0 |
-| streaming | 200 | TTFT | 21.07 | 22.33 | 21.58 | 22.97 | +0.51 | +0.64 | 12000 / 12000 | 0 / 0 |
-| streaming | 500 | TTFT | 21.10 | 22.48 | 21.70 | 23.97 | +0.61 | +1.50 | 30000 / 30000 | 0 / 0 |
+| Mode | Rate (req/s) | Metric | Direct p50 (ms) | Direct p99 (ms) | Gateway p50 (ms) | Gateway p99 (ms) | Added p50 (ms) | Added p99 (ms) | Requests (direct / gateway) | Errors (direct / gateway) | Gateway CPU (cores) | Gateway peak RSS (MB) |
+|------|-------------:|--------|----------------:|----------------:|-----------------:|-----------------:|---------------:|---------------:|----------------------------:|--------------------------:|--------------------:|----------------------:|
+| non-streaming | 50 | total | 21.27 | 22.09 | 21.81 | 22.71 | +0.54 | +0.62 | 3000 / 3000 | 0 / 0 | 0.02 | 32.2 |
+| non-streaming | 200 | total | 21.08 | 22.07 | 21.45 | 22.52 | +0.38 | +0.45 | 12000 / 12000 | 0 / 0 | 0.08 | 32.6 |
+| non-streaming | 500 | total | 20.99 | 22.19 | 21.31 | 22.45 | +0.32 | +0.26 | 30000 / 30000 | 0 / 0 | 0.17 | 34.0 |
+| streaming | 50 | TTFT | 21.33 | 22.38 | 21.23 | 22.17 | -0.10 | -0.21 | 3000 / 3000 | 0 / 0 | 0.10 | 33.1 |
+| streaming | 200 | TTFT | 21.50 | 22.28 | 21.32 | 22.54 | -0.18 | +0.26 | 12000 / 12000 | 0 / 0 | 0.24 | 40.0 |
+| streaming | 500 | TTFT | 21.07 | 22.31 | 21.43 | 22.99 | +0.36 | +0.68 | 30000 / 30000 | 0 / 0 | 0.50 | 53.3 |
 
-- Hardware: AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 6.17.0-1022-azure, go1.27.0.
-- Commit: `1bca260`, run 2026-10-27T00:21:44Z.
-- Command: `RATES='50 200 500' DURATION=60s WARMUP=5s eval/bench/q1.sh`.
-- Cost: $0 (no paid API; the fake provider only).
+**Per-feature breakdown.** The same load through gateways with features switched on
+one at a time on top of each other, in this order: limits (a request and a
+token rate limit on the bench key, set high enough never to refuse, shared
+through a throwaway `redis:8` container), budget (a budget large enough never to
+refuse, on a model priced at $1 per million tokens each way), exact cache,
+tracing (OTLP to a `jaegertracing/jaeger:2.23.0` container, sample ratio 1), semantic cache
+(`nomic-embed-text` embeddings, the shipped threshold, the number guard on)
+and the router (`model: auto` with the built-in weights, its three
+`qwen2.5` candidates all served by the fake provider). Tracing comes before
+the configs that embed so that it runs at the higher rate, where a cost of
+tens of microseconds can be told from noise. Every request carries
+`X-Switchboard-Cache: semantic`; the key's cache mode is the ceiling, so the
+header switches the cache on only where the key has it on, and there it
+makes the request cacheable. Every prompt is unique, so every lookup should
+take the miss path and store the reply; the table of what ran below counts
+the lookups from the gateway's own metrics. Each config runs once per mode
+in a fresh gateway, Redis flushed before it starts, for
+30 s after 2 s warm-up.
+The worst p99 send delay of any breakdown run was 1.308 ms.
+
+The configs that embed run at 5 req/s, the others at 200 req/s.
+Ollama (docker ollama/ollama:0.40.11, version 0.40.11) served 22 embeddings per second
+in a probe before the breakdown (120 short prompts, 16 at a time);
+the semantic cache and the router share one embedding of the last user turn
+per request, so the embedding configs ask for about 5 embeddings a second.
+At 200 req/s the embedding queue grows without bound and the cache's and the
+router's timeouts decide the latency instead of the features.
+
+Overheads are against a pooled direct baseline: per rate and mode, one
+direct run before that rate's configs and one after, their samples
+combined. Each interval is a 1000-resample bootstrap 95% percentile
+interval over the requests of the gateway run and of the pooled baseline,
+resampled independently with a fixed seed. It covers request-to-request
+sampling noise only, not drift between runs; the baseline table shows that
+drift as the spread between its two direct runs.
+
+| Config | Features on | Rate (req/s) | Model | Added total p50 (ms) | Added total p99 (ms) | Added TTFT p50 (ms) | Added TTFT p99 (ms) |
+|--------|-------------|-------------:|-------|---------------------:|---------------------:|--------------------:|--------------------:|
+| none | none (passthrough) | 200 | `fake` | +0.37 [+0.34, +0.39] | +0.41 [+0.38, +0.44] | -0.16 [-0.20, -0.12] | +0.32 [+0.26, +0.39] |
+| limits | limits | 200 | `fake` | +1.04 [+1.02, +1.06] | +0.95 [+0.92, +0.99] | +0.45 [+0.43, +0.47] | +0.72 [+0.68, +0.79] |
+| budget | limits, budget | 200 | `fake` | +1.13 [+1.10, +1.15] | +1.19 [+1.16, +1.22] | +0.37 [+0.35, +0.39] | +0.81 [+0.76, +0.86] |
+| exact | limits, budget, exact | 200 | `fake` | +1.23 [+1.20, +1.25] | +1.34 [+1.31, +1.38] | +0.78 [+0.76, +0.79] | +1.08 [+1.01, +1.18] |
+| tracing | limits, budget, exact, tracing | 200 | `fake` | +1.34 [+1.32, +1.37] | +1.50 [+1.45, +1.56] | +0.75 [+0.72, +0.77] | +1.16 [+1.08, +1.25] |
+| semantic | limits, budget, exact, tracing, semantic | 5 | `fake` | +37.31 [+37.11, +37.43] | +40.23 [+40.01, +41.10] | +37.06 [+36.94, +37.25] | +43.82 [+41.15, +44.04] |
+| router | limits, budget, exact, tracing, semantic, router | 5 | `auto` | +36.85 [+36.67, +37.07] | +42.12 [+39.79, +43.51] | +36.51 [+36.36, +36.74] | +40.41 [+39.71, +40.67] |
+
+Per stage: what each config adds over the one before it (the first, over
+direct). Both runs of a step at one rate share the pooled baseline, so it
+cancels; a step marked "across" subtracts overheads measured against
+baselines at two rates.
+
+| Stage | Rate (req/s) | Total p50 (ms) | Total p99 (ms) | TTFT p50 (ms) | TTFT p99 (ms) |
+|-------|-------------:|---------------:|---------------:|--------------:|--------------:|
+| none (against direct) | 200 | +0.37 [+0.34, +0.39] | +0.41 [+0.38, +0.44] | -0.16 [-0.20, -0.12] | +0.32 [+0.26, +0.39] |
+| + limits | 200 | +0.67 [+0.65, +0.70] | +0.55 [+0.51, +0.58] | +0.62 [+0.57, +0.66] | +0.41 [+0.32, +0.49] |
+| + budget | 200 | +0.09 [+0.06, +0.11] | +0.23 [+0.20, +0.27] | -0.08 [-0.11, -0.06] | +0.09 [+0.01, +0.15] |
+| + exact | 200 | +0.10 [+0.07, +0.13] | +0.15 [+0.12, +0.20] | +0.41 [+0.39, +0.43] | +0.27 [+0.18, +0.38] |
+| + tracing | 200 | +0.11 [+0.09, +0.14] | +0.16 [+0.11, +0.21] | -0.03 [-0.05, -0.01] | +0.08 [-0.06, +0.19] |
+| + semantic (across: tracing at 200 req/s) | 5 | +35.97 [+35.77, +36.09] | +38.73 [+38.49, +39.62] | +36.31 [+36.19, +36.50] | +42.65 [+39.98, +42.94] |
+| + router | 5 | -0.46 [-0.65, -0.15] | +1.89 [-0.82, +3.28] | -0.55 [-0.81, -0.29] | -3.41 [-4.20, -1.05] |
+
+- Between the two direct runs at one rate and mode, p50 moved by up to 0.09 ms and p99 by up to 0.12 ms; a step smaller than that is within the baseline's own drift, whatever its interval says.
+- The largest step at p50 (non-streaming total) is + semantic: +35.97 ms.
+- Steps whose 95% interval at p50 (non-streaming total) lies above zero and that are larger than the direct runs' drift: none (against direct) (+0.37 ms), + limits (+0.67 ms), + exact (+0.10 ms), + tracing (+0.11 ms), + semantic (+35.97 ms).
+- Steps whose interval excludes zero but that are no larger than the direct runs' drift, so not resolved by one run: + budget (+0.09 ms).
+- Steps whose interval at p50 (non-streaming total) includes zero or lies below it, so no added cost is resolved: + router (-0.46 ms).
+- Ollama CPU per request (container CPU over the window divided by rate times window): `semantic` nonstream 152 ms, `semantic` stream 156 ms, `router` nonstream 152 ms, `router` stream 155 ms.
+
+Direct baselines (p50 / p99 in ms per run, in run order):
+
+| Rate (req/s) | Mode | Metric | Runs | Spread p50 (ms) | Spread p99 (ms) | Pooled p50 (ms) | Pooled p99 (ms) | Pooled requests |
+|-------------:|------|--------|------|----------------:|----------------:|----------------:|----------------:|----------------:|
+| 200 | non-streaming | total | 21.15 / 22.12; 21.23 / 22.22 | 0.09 | 0.11 | 21.19 | 22.20 | 12000 |
+| 200 | streaming | TTFT | 21.48 / 22.24; 21.49 / 22.28 | 0.01 | 0.04 | 21.49 | 22.26 | 12000 |
+| 5 | non-streaming | total | 21.52 / 22.13; 21.54 / 22.26 | 0.02 | 0.12 | 21.53 | 22.22 | 300 |
+| 5 | streaming | TTFT | 21.41 / 21.98; 21.37 / 21.94 | 0.04 | 0.04 | 21.39 | 21.94 | 300 |
+
+What ran, per gateway run: CPU and peak RSS as in the passthrough table,
+Redis and Ollama CPU from their containers' cgroups over the same window
+("n/a": not running, or not a container q1.sh started); requests served by
+outcome, cache lookups, the mean time per lookup in each cache layer
+(measured inside the gateway, with the number of lookups) and router
+choices from the gateway's metrics afterwards, warm-up and the probe
+included; and what the gateway's headers and reply said about one probe
+request sent before the load.
+
+| Config | Mode | Rate (req/s) | Gateway CPU (cores) | Peak RSS (MB) | Redis CPU (cores) | Ollama CPU (cores) | Measured requests | Errors | Served | Cache lookups | Cache layer time | Router choices | Probe cache status | Probe model | Probe trace |
+|--------|------|-------------:|--------------------:|--------------:|------------------:|-------------------:|------------------:|-------:|--------|---------------|------------------|----------------|--------------------|-------------|-------------|
+| none | non-streaming | 200 | 0.08 | 32.5 | n/a | n/a | 6000 | 0 | ok 6401 | - | - | - | - | `fake` | - |
+| none | streaming | 200 | 0.23 | 39.9 | n/a | n/a | 6000 | 0 | ok 6401 | - | - | - | - | `fake` | - |
+| limits | non-streaming | 200 | 0.13 | 34.2 | 0.03 | n/a | 6000 | 0 | ok 6401 | - | - | - | - | `fake` | - |
+| limits | streaming | 200 | 0.29 | 41.9 | 0.04 | n/a | 6000 | 0 | ok 6401 | - | - | - | - | `fake` | - |
+| budget | non-streaming | 200 | 0.14 | 34.5 | 0.05 | n/a | 6000 | 0 | ok 6401 | - | - | - | - | `fake` | - |
+| budget | streaming | 200 | 0.32 | 42.5 | 0.06 | n/a | 6000 | 0 | ok 6401 | - | - | - | - | `fake` | - |
+| exact | non-streaming | 200 | 0.17 | 34.8 | 0.06 | n/a | 6000 | 0 | ok 6401 | miss 6401 | exact 0.12 ms (6401) | - | `miss` | `fake` | - |
+| exact | streaming | 200 | 0.35 | 42.5 | 0.07 | n/a | 6000 | 0 | ok 6401 | miss 6401 | exact 0.12 ms (6401) | - | `miss` | `fake` | - |
+| tracing | non-streaming | 200 | 0.21 | 37.4 | 0.06 | n/a | 6000 | 0 | ok 6401 | miss 6401 | exact 0.13 ms (6401) | - | `miss` | `fake` | in Jaeger |
+| tracing | streaming | 200 | 0.39 | 44.7 | 0.07 | n/a | 6000 | 0 | ok 6401 | miss 6401 | exact 0.12 ms (6401) | - | `miss` | `fake` | in Jaeger |
+| semantic | non-streaming | 5 | 0.02 | 33.7 | 0.01 | 0.76 | 150 | 0 | ok 161 | miss 161 | exact 0.16 ms (161), semantic 35.53 ms (161) | - | `miss` | `fake` | in Jaeger |
+| semantic | streaming | 5 | 0.03 | 34.1 | 0.01 | 0.78 | 150 | 0 | ok 161 | miss 161 | exact 0.15 ms (161), semantic 36.28 ms (161) | - | `miss` | `fake` | in Jaeger |
+| router | non-streaming | 5 | 0.01 | 34.7 | 0.01 | 0.76 | 150 | 0 | ok 161 | miss 161 | exact 0.14 ms (161), semantic 0.45 ms (161) | qwen2.5:1.5b 98, qwen2.5:0.5b 41, qwen2.5:3b 22 | `miss` | `qwen2.5:3b` | in Jaeger |
+| router | streaming | 5 | 0.03 | 34.7 | 0.01 | 0.77 | 150 | 0 | ok 161 | miss 161 | exact 0.15 ms (161), semantic 0.43 ms (161) | qwen2.5:1.5b 99, qwen2.5:0.5b 41, qwen2.5:3b 21 | `miss` | `qwen2.5:1.5b` | in Jaeger |
+
+- Hardware: Intel(R) Xeon(R) 6973P-C, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Commit: `bfd0dc3`, run 2026-11-10T19:36:44Z.
+- Command: `RATES='50 200 500' DURATION=60s WARMUP=5s FEATURES='none limits budget exact tracing semantic router' BREAKDOWN_RATE=200 EMBED_RATE=5 BREAKDOWN_DURATION=30s BREAKDOWN_WARMUP=2s eval/bench/q1.sh`.
+- Cost: $0 (no paid API; the fake provider and local Ollama only).
 
 ## Q2: shared limits and budgets across three replicas
 
@@ -616,6 +724,143 @@ L2 strength the inner cross-validation chose (the mode over folds).
 - 112 replies were cut off by the output cap (`qwen2.5:0.5b` 73, `qwen2.5:1.5b` 29, `qwen2.5:3b` 10) and are graded
   on what they contain.
 
+## Q6: chaos
+
+What does a replica kill and a Redis kill cost a fleet under load?
+Command: `make chaos` (`chaos/run.sh`), raw files in `eval/results/q6-chaos/`
+(`summary.json` is written from the others by `switchboard chaos report`).
+
+**Method.** A compose project of its own (`chaos/compose.yaml`) runs three
+`switchboard serve` replicas behind nginx, Redis 8 without persistence and
+the fake provider (first byte after 20 ms, then 30 tokens 5 ms apart), on one
+machine. Three `switchboard bench` streams run at once through the load
+balancer, open loop, for 120 s:
+
+| Stream | Model (key) | Rate (req/s) | Requests | Shape |
+|--------|-------------|-------------:|---------:|-------|
+| main | `fake-chaos` | 200 | 24000 | streaming, 30.0% repeats of 50 prompts |
+| limited | `fake-limited` | 30 | 3600 | non-streaming |
+| budget | `fake-budget` | 10 | 1200 | non-streaming |
+
+The main key has no limit or budget and the exact cache; the limited key
+is held to 10 per 1 s (fixed window, through Redis; 3 replicas, so
+rate ÷ 3 each while Redis is down); the budgeted key has $0.2000 in total, on a
+model priced at $3 in and $15 out per million tokens, which its stream
+spends before Redis is killed, and each replica may let it spend $0.0100
+more while Redis is unreachable. The script kills and restarts containers
+(SIGKILL) on the schedule below. Phases start when each docker action
+was issued; a request belongs to the phase in which its outcome was
+observed (scheduled time plus latency), so a stream cut by a kill counts
+against the kill. Latency is from the scheduled time, over successful
+requests; an error is any non-200 status, a transport error or a stream
+cut short. Admissions and spend come from the fake provider's ledger of
+what reached it, not from the gateway. A limiter window (aligned to the
+clock, as the fixed window counts) belongs to the phase that holds its
+midpoint; over-admissions sum each window's admissions beyond the rate.
+The generator's worst lag behind its schedule was 2.62 ms.
+
+**Main stream per phase.**
+
+| Phase | From (s) | To (s) | Replicas | Redis | Requests | Error rate | Errors by kind | p50 (ms) | p99 (ms) | TTFT p99 (ms) | Slower than 363.52 ms | Cache hit rate | Hit rate of repeats |
+|-------|---------:|-------:|----------|-------|---------:|-----------:|----------------|---------:|---------:|--------------:|-----:|---------------:|--------------------:|
+| steady | 0.0 | 30.0 | 3 of 3 | up | 5972 | 0.00% | none | 177.08 | 181.76 | 23.05 | 0 | 29.6% | 96.6% |
+| replica down | 30.0 | 60.0 | 2 of 3 | up | 6000 | 0.10% | malformed_stream 4, http_502 2 | 176.52 | 182.56 | 23.07 | 7 | 29.7% | 100.0% |
+| replica and Redis down | 60.0 | 75.0 | 2 of 3 | down | 2993 | 0.00% | none | 175.80 | 431.05 | 272.51 | 64 | 0.1% | 0.4% |
+| replica down, Redis back | 75.0 | 90.0 | 2 of 3 | up | 3009 | 0.00% | none | 176.69 | 182.09 | 23.15 | 3 | 25.5% | 84.6% |
+| all back | 90.0 | 120.0 | 3 of 3 | up | 6026 | 0.00% | none | 177.06 | 183.08 | 23.03 | 0 | 29.8% | 100.0% |
+
+**Limits and budget per phase.**
+
+| Phase | Limited: offered | refused (429) | admitted (ledger) | most in a window | bound per window | over-admissions | Budget: offered | refused | admitted (ledger) | spent | spent since start | overshoot | grace bound |
+|-------|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|
+| steady | 900 | 590 | 310 | 10 | 10 | 0 | 300 | 0 | 301 | $0.1400 | $0.1400 | $0.0000 | – |
+| replica down | 900 | 600 | 300 | 10 | 10 | 0 | 300 | 172 | 127 | $0.0591 | $0.1990 | $0.0000 | – |
+| replica and Redis down | 450 | 354 | 96 | 16 | 6 | 6 | 150 | 110 | 40 | $0.0186 | $0.2176 | $0.0176 | $0.0200 |
+| replica down, Redis back | 451 | 295 | 156 | 16 | 10 | 6 | 150 | 9 | 142 | $0.0660 | $0.2837 | $0.0837 | – |
+| all back | 899 | 599 | 300 | 10 | 10 | 0 | 300 | 53 | 246 | $0.1144 | $0.3980 | $0.1980 | – |
+
+The bound per window is the rate with Redis up, and the live replicas'
+local shares with it down. The grace bound is the live replicas' grace.
+
+**Recovery.** Rule, fixed in PLAN.md before the full run: the fleet is steady from the start of the first whole 1 s bucket after the event from which 5 consecutive buckets each have an error rate at most max(1.0%, 2 × the steady phase's) and a p99 latency at most 2 × the steady phase's, all before the next event or the end of the run; otherwise "not recovered".
+Here the steady phase's error rate was 0.0% and its p99 181.76 ms, so a bucket is good
+at an error rate of at most 1.0% and a p99 of at most 363.52 ms. Buckets are
+whole seconds from the main stream's start, so a recovery time under 1 s
+means the first whole second after the event already met the rule.
+
+| Event | At (s) | Docker command took (s) | Steady again after | Errors before | Window to the next event (s) | Worst second after the event |
+|-------|-------:|------------------------:|--------------------|--------------:|-----------------------------:|------------------------------|
+| kill switchboard-2 | 30.00 | 0.17 | 1.000 s (from 31 s) | 6 | 30.0 | 6 errors of 207, p99 183.72 ms (30–31 s) |
+| kill redis | 60.00 | 0.15 | 3.002 s (from 63 s) | 0 | 15.0 | 0 errors of 193, p99 433.01 ms (60–61 s) |
+| start redis | 75.00 | 0.21 | 0.002 s (from 75 s) | 0 | 15.0 | 0 errors of 201, p99 184.38 ms (75–76 s) |
+| start switchboard-2 | 90.00 | 0.21 | 0.000 s (from 90 s) | 0 | 30.0 | 0 errors of 198, p99 186.65 ms (90–91 s) |
+
+**Hypotheses (PLAN.md, Q6) against the run.**
+
+| Hypothesis | Observed | Held |
+|------------|----------|------|
+| Replica kill: errors only from the streams in flight on the killed replica; steady again within a second | 6 errors in `replica down` (malformed_stream 4, http_502 2); steady after 1.000 s (from 31 s) | no |
+| Redis kill: no errors, and the cache is bypassed (hit rate 0) | 0 errors, hit rate 0.1%, p99 431.05 ms against 181.76 ms steady; steady after 3.002 s (from 63 s) | yes |
+| Redis kill: the limited key falls back to rate ÷ replicas per replica, so over-admissions stay within one window's local share | 6 over-admissions, at most 16 in a window (local bound 6 per window) | yes |
+| Redis kill: the spent budget lets through at most the live replicas' grace | $0.0186 spent while Redis was down, bound $0.0200 | yes |
+| Redis restart: no errors; the empty cache refills, so the hit rate climbs back | 0 errors; hit rate 25.5% (84.6% of repeats) against 29.6% (96.6%) steady; steady after 0.002 s (from 75 s) | yes |
+| Redis restart: the budget ledger comes back empty, so the overshoot at the end is about one whole budget | overshoot $0.1980 at the end against a budget of $0.2000 | yes |
+| Replica restart: no errors; the replica takes its share again within a second | 0 errors in `all back`; steady after 0.000 s (from 90 s) | yes |
+
+**Reading the run.**
+
+- The replica-kill check reads "no" on its second half, not its first.
+  The rule's buckets are whole seconds and the kill lands at the start of
+  one, so the kill's own second holds every error the kill caused and
+  fails the 1% limit; the earliest steady start the rule can report is
+  the next second, one second after the kill. Every recovery time here is
+  read on that grid of whole seconds from the start of the run, so it is
+  known only to within a second: an event issued just before a bucket
+  boundary reads near 0 s, one issued just after reads near 1 s, for the
+  same behaviour. "Within a second" was stated finer than the rule
+  measures; it stays recorded as not held rather than being reworded
+  after the run.
+- The load balancer picks replicas at random. With strict round robin, an
+  earlier run's fixed-rate streams aliased with the rotation and one key's
+  requests piled onto one replica, which tests the Redis-down local
+  limits (a third of the rate each) on an uneven split.
+- A replica's death costs only the requests it holds. nginx does not retry
+  a request it has already sent to a replica (`non_idempotent` stays off:
+  the replica may have called the provider), so streams cut mid-way and
+  requests that reached the replica just before it died fail with a 502;
+  every later request goes to the other two.
+- While a replica is down, nginx keeps its last address after the name
+  stops resolving and, every few seconds, once the server's
+  `fail_timeout` has lapsed, sends one live request there, which waits
+  out the 250 ms connect timeout before going to another replica. (The
+  slow requests in the log are further apart than the 2 s
+  `fail_timeout` alone would give; the exact period was not
+  investigated.) That is the
+  "slower than" count in the replica-down phases: below the p99 at this
+  rate, but a real cost. nginx open source has no active health checks;
+  a shorter connect timeout or a longer `fail_timeout` trade it against
+  how fast a returning replica is used again.
+- A Redis kill costs latency, not errors. The slow requests' extra time
+  is the cache's 250 ms store timeout: each replica's lookups in flight
+  when its cache comes out of a one-second bypass wait it out, then the
+  cache is bypassed again. That the slow stretch ends while Redis is still
+  down suggests the calls then fail at once instead of timing out (Docker
+  removes the dead container's name and address); the replicas' logs are
+  not kept, so this is the likely cause rather than a measured one.
+- A Redis restart is a reset. Redis has no persistence here (as in
+  `deploy/compose.yaml`), so the cache, the limit counters and the budget
+  ledger all come back empty: the hit rate climbs back as the pool prompts
+  are asked again, the limited key sees transition windows in which the
+  local and the fresh shared counter both admit, and the budgeted key gets
+  a whole new budget. The degrade policy bounds the outage itself; the
+  overshoot after it comes from losing Redis's state, and a budget that
+  must survive a Redis restart needs persistence (AOF) or a ledger
+  outside Redis.
+
+- Hardware: Intel(R) Xeon(R) 6973P-C, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0 (generator, nginx, the three replicas, Redis and the fake provider on one machine).
+- Commit: `bfd0dc3`, run 2026-11-10T19:34:37Z. Cost: $0 (fake provider; the budget's dollars are its made-up price).
+- Command: `make chaos`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -640,9 +885,6 @@ Recorded 2026-10-27 on the machine in Q1. Cost: $0 (local Ollama only).
 
 ## To measure
 
-- Q1 per-feature breakdown (limits, budget, exact and semantic cache miss
-  paths, router, tracing toggled one at a time; CPU and RSS per replica at
-  500 req/s): M6, `make bench`.
 - Q2 with GCRA: `ALGORITHMS=gcra make test-limits` once the GCRA limiter
   is implemented (`internal/ratelimit/gcra.go`; its contract tests skip
   until then).
@@ -654,7 +896,6 @@ Recorded 2026-10-27 on the machine in Q1. Cost: $0 (local Ollama only).
   then the same `MODELS=... make eval-router` (estimated $2.90: `claude-haiku-5-5` $0.05, `claude-sonnet-5-5` $0.95, `claude-opus-5-5` $1.90;
   estimated from `qwen2.5:3b`'s token counts at list prices; Claude's own
   replies will differ).
-- Q6 replica and Redis kills under load: `make chaos`.
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with
   `claude-haiku-5-5`).

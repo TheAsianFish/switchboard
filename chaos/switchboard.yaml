@@ -1,0 +1,63 @@
+# Gateway config for the chaos run (`make chaos`, PLAN.md Q6). Every
+# replica runs this file; chaos/compose.yaml sets the Redis URL, the admin
+# listener and the replica id. The fake provider is reached over HTTP the
+# way Q2 reaches it, so every request that gets past the gateway lands in
+# its ledger. Each key has its own upstream model name, so the ledger
+# attributes every request to the key that sent it.
+listen: 0.0.0.0:8080
+log:
+  format: json
+  level: warn
+providers:
+  - name: fake
+    type: openaicompat
+    base_url: http://fake-provider:9101/v1
+    timeout: 30s
+models:
+  - name: fake-chaos
+    provider: fake
+  - name: fake-limited
+    provider: fake
+  - name: fake-budget
+    provider: fake
+    # A made-up price so spend is not zero: $3 in, $15 out per MTok, as in
+    # Q2. A fake reply (5 tokens in, 30 out) costs $0.000465.
+    price: {input: 3, output: 15}
+redis:
+  url: redis://redis:6379/0
+  timeout: 100ms
+ratelimit:
+  # GCRA is not implemented yet (Q2); the fixed window is what ships.
+  algorithm: fixed_window
+  # While Redis is down each replica enforces a third of every limit.
+  replicas: 3
+budget:
+  # Per replica and key while Redis is down: about 20 fake replies.
+  grace_usd: 0.01
+cache:
+  # Exact only: the semantic layer ships off (RESULTS.md, Q3), so the run
+  # needs no embedding model. The main key's requests send
+  # X-Switchboard-Cache: exact, which makes them cacheable.
+  mode: off
+keys:
+  # The main workload: about 200 requests per second, 30% of them repeats,
+  # no limit and no budget, so its errors and latency are the fleet's.
+  - name: main
+    key: sk-chaos-main
+    models: [fake-chaos]
+    cache: exact
+  # Offered three times its limit, so the ledger shows whether the
+  # replicas hold one limit together through each fault.
+  - name: limited
+    key: sk-chaos-limited
+    models: [fake-limited]
+    cache: "off"
+    limits:
+      requests: {rate: 10, per: 1s, burst: 10}
+  # Runs out of budget before Redis is killed, so whatever it spends after
+  # that is overshoot.
+  - name: budget
+    key: sk-chaos-budget
+    models: [fake-budget]
+    cache: "off"
+    budget: {usd: "0.20", period: total}

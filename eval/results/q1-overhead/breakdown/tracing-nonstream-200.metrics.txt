@@ -1,0 +1,13 @@
+switchboard_cache_fills_total{result="ok"} 6401
+switchboard_cache_lookup_seconds_sum{layer="exact"} 0.8166498740000012
+switchboard_cache_lookup_seconds_count{layer="exact"} 6401
+switchboard_cache_lookups_total{result="miss"} 6401
+switchboard_cost_dollars_total{key="bench",model="fake"} 0.22403500000000917
+switchboard_provider_breaker_state{provider="fake"} 0
+switchboard_request_duration_seconds_sum{model="fake",stream="false"} 138.75290413000045
+switchboard_request_duration_seconds_count{model="fake",stream="false"} 6401
+switchboard_requests_total{key="bench",model="fake",outcome="ok"} 6401
+switchboard_store_degraded{component="budget"} 0
+switchboard_store_degraded{component="ratelimit"} 0
+switchboard_tokens_total{key="bench",model="fake",type="input"} 32005
+switchboard_tokens_total{key="bench",model="fake",type="output"} 192030

@@ -12,11 +12,12 @@ What does putting the gateway in front of a provider add to a request?
 Command: `make bench` (`eval/bench/q1.sh`), raw files in
 `eval/results/q1-overhead/`.
 
-**Method.** `switchboard fake-provider` serves a fixed-latency backend:
+**Passthrough.** `switchboard fake-provider` serves a fixed-latency backend:
 first byte after 20 ms, then 30 tokens 5 ms apart
 when streaming. `switchboard bench` sends the same load to it directly
-and through `switchboard serve` (OpenAI format, one API key, model `fake`),
-the two runs back to back with the order alternating per rate. Arrivals are
+and through `switchboard serve` (OpenAI format, one API key, model `fake`,
+every feature off), the two runs back to back with the order alternating per
+rate. Arrivals are
 open-loop at a constant rate: each request is sent at its scheduled time
 whether or not earlier ones have finished, and latency is measured from that
 scheduled time, so a slow target cannot hide its queueing. Each run measures
@@ -35,13 +36,19 @@ cost of the gateway. The generator, the gateway and the fake provider share
 one machine, and latency includes the generator's own lag, so part of an
 added figure can be the gateway's CPU use slowing the generator rather than
 time spent in the gateway (compare the send delays in the raw files).
+Since M6 every gateway run starts a fresh gateway process and records its
+CPU, user plus system time (`/proc/<pid>/stat`) over the measured window
+divided by the window's length, in cores, and its peak resident set
+(`VmHWM`) over the process's life; "n/a" for runs from before that.
 
-| Mode | Rate (req/s) | Metric | Direct p50 (ms) | Direct p99 (ms) | Gateway p50 (ms) | Gateway p99 (ms) | Added p50 (ms) | Added p99 (ms) | Requests (direct / gateway) | Errors (direct / gateway) |
-|------|-------------:|--------|----------------:|----------------:|-----------------:|-----------------:|---------------:|---------------:|----------------------------:|--------------------------:|
-| non-streaming | 50 | total | 20.25 | 21.00 | 20.75 | 21.00 | +0.50 | +0.00 | 3000 / 3000 | 0 / 0 |
-| non-streaming | 200 | total | 20.50 | 22.75 | 21.00 | 22.50 | +0.50 | -0.25 | 12000 / 12000 | 0 / 2 |
-| streaming | 50 | TTFT | 20.10 | 20.90 | n/a | n/a | n/a | n/a | 3000 / n/a | 1 / n/a |
-| streaming | 200 | TTFT | 20.20 | 21.50 | n/a | n/a | n/a | n/a | 12000 / 12000 | 0 / 12000 |
+| Mode | Rate (req/s) | Metric | Direct p50 (ms) | Direct p99 (ms) | Gateway p50 (ms) | Gateway p99 (ms) | Added p50 (ms) | Added p99 (ms) | Requests (direct / gateway) | Errors (direct / gateway) | Gateway CPU (cores) | Gateway peak RSS (MB) |
+|------|-------------:|--------|----------------:|----------------:|-----------------:|-----------------:|---------------:|---------------:|----------------------------:|--------------------------:|--------------------:|----------------------:|
+| non-streaming | 50 | total | 20.25 | 21.00 | 20.75 | 21.00 | +0.50 | +0.00 | 3000 / 3000 | 0 / 0 | n/a | n/a |
+| non-streaming | 200 | total | 20.50 | 22.75 | 21.00 | 22.50 | +0.50 | -0.25 | 12000 / 12000 | 0 / 2 | n/a | n/a |
+| streaming | 50 | TTFT | 20.10 | 20.90 | n/a | n/a | n/a | n/a | 3000 / n/a | 1 / n/a | n/a | n/a |
+| streaming | 200 | TTFT | 20.20 | 21.50 | n/a | n/a | n/a | n/a | 12000 / 12000 | 0 / 12000 | n/a | n/a |
+
+**Per-feature breakdown.** Not measured yet. Run `make bench`, then `make results`.
 
 - Hardware: Test CPU @ 3.00GHz, 8 logical CPUs (GOMAXPROCS 8), linux/amd64, kernel 6.17.0, go1.27.2.
 - Commit: `abc1234-dirty`, run 2026-10-26T12:00:00Z.
@@ -93,6 +100,14 @@ between the cheapest and the best model? Command: `make eval-router`, raw
 files in `eval/results/q5-router/`.
 
 Not measured yet. Run `make eval-router`, then `make results`.
+
+## Q6: chaos
+
+What does a replica kill and a Redis kill cost a fleet under load?
+Command: `make chaos` (`chaos/run.sh`), raw files in `eval/results/q6-chaos/`
+(`summary.json` is written from the others by `switchboard chaos report`).
+
+Not measured yet. Run `make chaos`, then `make results`.
 
 ## Unmodified SDKs through the gateway
 

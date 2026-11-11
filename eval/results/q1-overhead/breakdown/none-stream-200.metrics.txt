@@ -1,0 +1,11 @@
+switchboard_provider_breaker_state{provider="fake"} 0
+switchboard_request_duration_seconds_sum{model="fake",stream="false"} 0.020981459
+switchboard_request_duration_seconds_count{model="fake",stream="false"} 1
+switchboard_request_duration_seconds_sum{model="fake",stream="true"} 1191.4194699349985
+switchboard_request_duration_seconds_count{model="fake",stream="true"} 6400
+switchboard_requests_total{key="bench",model="fake",outcome="ok"} 6401
+switchboard_store_degraded{component="budget"} 0
+switchboard_store_degraded{component="ratelimit"} 0
+switchboard_tokens_total{key="bench",model="fake",type="input"} 32005
+switchboard_tokens_total{key="bench",model="fake",type="output"} 192030
+switchboard_unpriced_requests_total{key="bench",model="fake"} 6401

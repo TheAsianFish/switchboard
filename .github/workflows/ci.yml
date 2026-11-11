@@ -74,3 +74,16 @@ jobs:
           cache: true
       - name: go test -tags integration (real redis:8)
         run: make test-integration
+
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: typecheck, lint, test, build, check the committed build
+        run: make ui-check

@@ -1,0 +1,515 @@
+{
+  "meta": {
+    "commit": "abc1234",
+    "date": "2026-11-09T12:00:00Z",
+    "command": "make chaos",
+    "replicas": 3,
+    "duration_seconds": 120,
+    "time_scale": 1,
+    "limit": {
+      "model": "fake-limited",
+      "rate": 10,
+      "period_seconds": 1
+    },
+    "budget": {
+      "model": "fake-budget",
+      "usd": "0.20",
+      "grace_usd": "0.01",
+      "input_price": "3",
+      "output_price": "15"
+    },
+    "fake_provider": {
+      "latency": "20ms",
+      "tokens": 30,
+      "token_interval": "5ms"
+    }
+  },
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "Test CPU"
+  },
+  "rule": {
+    "bucket_seconds": 1,
+    "consecutive": 5,
+    "min_error_rate": 0.01,
+    "error_factor": 2,
+    "p99_factor": 2
+  },
+  "reference": {
+    "error_rate": 0,
+    "p99_ms": 197.022,
+    "error_limit": 0.01,
+    "p99_limit_ms": 394.044
+  },
+  "streams": [
+    {
+      "name": "main",
+      "model": "fake-chaos",
+      "rate": 200,
+      "stream": true,
+      "repeat": 0.3,
+      "repeat_pool": 50,
+      "requests": 24000,
+      "start_offset_seconds": 0,
+      "max_send_delay_ms": 22.416
+    },
+    {
+      "name": "limited",
+      "model": "fake-limited",
+      "rate": 30,
+      "stream": false,
+      "requests": 3600,
+      "start_offset_seconds": 0.001,
+      "max_send_delay_ms": 11.221
+    },
+    {
+      "name": "budget",
+      "model": "fake-budget",
+      "rate": 10,
+      "stream": false,
+      "requests": 1200,
+      "start_offset_seconds": 0.001,
+      "max_send_delay_ms": 8.586
+    }
+  ],
+  "events": [
+    {
+      "name": "kill switchboard-2",
+      "action": "kill",
+      "target": "switchboard-2",
+      "phase": "replica down",
+      "planned_seconds": 30,
+      "issued_unix": 1794336398.1637125,
+      "done_unix": 1794336399.7289522,
+      "at_seconds": 30.004,
+      "done_seconds": 31.57,
+      "recovered": true,
+      "recovery_seconds": 0.996,
+      "window_seconds": 29.988,
+      "errors_before_recovery": 12,
+      "worst_bucket": {
+        "start_seconds": 30,
+        "requests": 208,
+        "errors": 12,
+        "error_rate": 0.057692,
+        "ok": 196,
+        "p99_ms": 209.871,
+        "cache_hits": 65,
+        "good": false
+      }
+    },
+    {
+      "name": "kill redis",
+      "action": "kill",
+      "target": "redis",
+      "phase": "replica and Redis down",
+      "planned_seconds": 60,
+      "issued_unix": 1794336428.151336,
+      "done_unix": 1794336428.944609,
+      "at_seconds": 59.992,
+      "done_seconds": 60.785,
+      "recovered": true,
+      "recovery_seconds": 3.008,
+      "window_seconds": 15.018,
+      "errors_before_recovery": 0,
+      "worst_bucket": {
+        "start_seconds": 60,
+        "requests": 193,
+        "errors": 0,
+        "error_rate": 0,
+        "ok": 193,
+        "p99_ms": 433.645,
+        "cache_hits": 4,
+        "good": false
+      }
+    },
+    {
+      "name": "start redis",
+      "action": "start",
+      "target": "redis",
+      "phase": "replica down, Redis back",
+      "planned_seconds": 75,
+      "issued_unix": 1794336443.16917,
+      "done_unix": 1794336443.6977026,
+      "at_seconds": 75.01,
+      "done_seconds": 75.538,
+      "recovered": true,
+      "recovery_seconds": 0.99,
+      "window_seconds": 15.002,
+      "errors_before_recovery": 0,
+      "worst_bucket": {
+        "start_seconds": 79,
+        "requests": 204,
+        "errors": 0,
+        "error_rate": 0,
+        "ok": 204,
+        "p99_ms": 201.267,
+        "cache_hits": 54,
+        "good": true
+      }
+    },
+    {
+      "name": "start switchboard-2",
+      "action": "start",
+      "target": "switchboard-2",
+      "phase": "all back",
+      "planned_seconds": 90,
+      "issued_unix": 1794336458.1711476,
+      "done_unix": 1794336458.6484106,
+      "at_seconds": 90.012,
+      "done_seconds": 90.489,
+      "recovered": false,
+      "window_seconds": 29.988,
+      "errors_before_recovery": 0,
+      "worst_bucket": {
+        "start_seconds": 96,
+        "requests": 200,
+        "errors": 0,
+        "error_rate": 0,
+        "ok": 200,
+        "p99_ms": 208.339,
+        "cache_hits": 52,
+        "good": true
+      }
+    }
+  ],
+  "phases": [
+    {
+      "name": "steady",
+      "from_seconds": 0,
+      "to_seconds": 30.004,
+      "replicas_up": 3,
+      "redis_up": true,
+      "main": {
+        "requests": 5970,
+        "ok": 5970,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 5970,
+          "mean_ms": 129.922,
+          "p50_ms": 179.137,
+          "p90_ms": 190.237,
+          "p95_ms": 192.5,
+          "p99_ms": 197.022,
+          "p999_ms": 203.812,
+          "max_ms": 209.253
+        },
+        "ttft": {
+          "count": 5970,
+          "mean_ms": 16.318,
+          "p50_ms": 21.769,
+          "p90_ms": 23.577,
+          "p95_ms": 24.625,
+          "p99_ms": 27.191,
+          "p999_ms": 33.858,
+          "max_ms": 36.2
+        },
+        "cache_statuses": {
+          "hit-exact": 1765,
+          "miss": 4205
+        },
+        "slow": 0,
+        "cache_hits": 1765,
+        "cache_hit_rate": 0.295645,
+        "repeat_ok": 1828,
+        "repeat_hits": 1765,
+        "repeat_hit_rate": 0.965536
+      },
+      "limited": {
+        "offered": 900,
+        "refused": 596,
+        "other_errors": 0,
+        "admitted": 305,
+        "windows": 30,
+        "most_in_window": 10,
+        "over_admissions": 0,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 300,
+        "ok": 300,
+        "refused": 0,
+        "other_errors": 0,
+        "admitted": 300,
+        "spent_nanodollars": 139500000,
+        "cumulative_nanodollars": 139500000,
+        "overshoot_nanodollars": 0,
+        "grace_bound_nanodollars": 0
+      }
+    },
+    {
+      "name": "replica down",
+      "from_seconds": 30.004,
+      "to_seconds": 59.992,
+      "replicas_up": 2,
+      "redis_up": true,
+      "main": {
+        "requests": 6002,
+        "ok": 5990,
+        "errors": 12,
+        "error_rate": 0.001999,
+        "errors_by_kind": {
+          "http_502": 2,
+          "malformed_stream": 10
+        },
+        "latency": {
+          "count": 5990,
+          "mean_ms": 129.446,
+          "p50_ms": 178.895,
+          "p90_ms": 188.929,
+          "p95_ms": 191.153,
+          "p99_ms": 195.856,
+          "p999_ms": 430.294,
+          "max_ms": 441.17
+        },
+        "ttft": {
+          "count": 5990,
+          "mean_ms": 16.564,
+          "p50_ms": 21.762,
+          "p90_ms": 23.28,
+          "p95_ms": 24.134,
+          "p99_ms": 26.596,
+          "p999_ms": 271.621,
+          "max_ms": 273.593
+        },
+        "cache_statuses": {
+          "hit-exact": 1781,
+          "miss": 4209
+        },
+        "slow": 8,
+        "cache_hits": 1781,
+        "cache_hit_rate": 0.297329,
+        "repeat_ok": 1781,
+        "repeat_hits": 1781,
+        "repeat_hit_rate": 1
+      },
+      "limited": {
+        "offered": 900,
+        "refused": 600,
+        "other_errors": 0,
+        "admitted": 299,
+        "windows": 30,
+        "most_in_window": 10,
+        "over_admissions": 0,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 300,
+        "ok": 128,
+        "refused": 172,
+        "other_errors": 0,
+        "admitted": 128,
+        "spent_nanodollars": 59520000,
+        "cumulative_nanodollars": 199020000,
+        "overshoot_nanodollars": 0,
+        "grace_bound_nanodollars": 0
+      }
+    },
+    {
+      "name": "replica and Redis down",
+      "from_seconds": 59.992,
+      "to_seconds": 75.01,
+      "replicas_up": 2,
+      "redis_up": false,
+      "main": {
+        "requests": 2992,
+        "ok": 2992,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 2992,
+          "mean_ms": 188.278,
+          "p50_ms": 185.089,
+          "p90_ms": 192.89,
+          "p95_ms": 195.632,
+          "p99_ms": 430.722,
+          "p999_ms": 435.603,
+          "max_ms": 680.536
+        },
+        "ttft": {
+          "count": 2992,
+          "mean_ms": 27.369,
+          "p50_ms": 22.313,
+          "p90_ms": 25.594,
+          "p95_ms": 27.582,
+          "p99_ms": 272.477,
+          "p999_ms": 274.479,
+          "max_ms": 521.725
+        },
+        "cache_statuses": {
+          "error": 80,
+          "hit-exact": 4,
+          "miss": 38,
+          "skip": 2870
+        },
+        "slow": 51,
+        "cache_hits": 4,
+        "cache_hit_rate": 0.001337,
+        "repeat_ok": 929,
+        "repeat_hits": 4,
+        "repeat_hit_rate": 0.004306
+      },
+      "limited": {
+        "offered": 450,
+        "refused": 353,
+        "other_errors": 0,
+        "admitted": 98,
+        "windows": 15,
+        "most_in_window": 13,
+        "over_admissions": 3,
+        "local_bound": 6
+      },
+      "budget": {
+        "offered": 151,
+        "ok": 40,
+        "refused": 111,
+        "other_errors": 0,
+        "admitted": 40,
+        "spent_nanodollars": 18600000,
+        "cumulative_nanodollars": 217620000,
+        "overshoot_nanodollars": 17620000,
+        "grace_bound_nanodollars": 20000000
+      }
+    },
+    {
+      "name": "replica down, Redis back",
+      "from_seconds": 75.01,
+      "to_seconds": 90.012,
+      "replicas_up": 2,
+      "redis_up": true,
+      "main": {
+        "requests": 3010,
+        "ok": 3010,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 3010,
+          "mean_ms": 140.457,
+          "p50_ms": 182.849,
+          "p90_ms": 191.188,
+          "p95_ms": 193.285,
+          "p99_ms": 198.151,
+          "p999_ms": 251.072,
+          "max_ms": 438.096
+        },
+        "ttft": {
+          "count": 3010,
+          "mean_ms": 18.012,
+          "p50_ms": 22.093,
+          "p90_ms": 24.507,
+          "p95_ms": 25.651,
+          "p99_ms": 29.071,
+          "p999_ms": 105.249,
+          "max_ms": 276.018
+        },
+        "cache_statuses": {
+          "error": 3,
+          "hit-exact": 745,
+          "miss": 1860,
+          "skip": 402
+        },
+        "slow": 2,
+        "cache_hits": 745,
+        "cache_hit_rate": 0.247508,
+        "repeat_ok": 908,
+        "repeat_hits": 745,
+        "repeat_hit_rate": 0.820485
+      },
+      "limited": {
+        "offered": 450,
+        "refused": 297,
+        "other_errors": 0,
+        "admitted": 153,
+        "windows": 15,
+        "most_in_window": 14,
+        "over_admissions": 7,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 149,
+        "ok": 134,
+        "refused": 15,
+        "other_errors": 0,
+        "admitted": 135,
+        "spent_nanodollars": 62775000,
+        "cumulative_nanodollars": 280395000,
+        "overshoot_nanodollars": 80395000,
+        "grace_bound_nanodollars": 0
+      }
+    },
+    {
+      "name": "all back",
+      "from_seconds": 90.012,
+      "to_seconds": 120,
+      "replicas_up": 3,
+      "redis_up": true,
+      "main": {
+        "requests": 6026,
+        "ok": 6026,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 6026,
+          "mean_ms": 129.631,
+          "p50_ms": 178.845,
+          "p90_ms": 190.741,
+          "p95_ms": 192.796,
+          "p99_ms": 197.41,
+          "p999_ms": 204.324,
+          "max_ms": 281.825
+        },
+        "ttft": {
+          "count": 6026,
+          "mean_ms": 16.379,
+          "p50_ms": 21.808,
+          "p90_ms": 23.859,
+          "p95_ms": 24.843,
+          "p99_ms": 27.265,
+          "p999_ms": 33.267,
+          "max_ms": 118.202
+        },
+        "cache_statuses": {
+          "hit-exact": 1795,
+          "miss": 4231
+        },
+        "slow": 0,
+        "cache_hits": 1795,
+        "cache_hit_rate": 0.297876,
+        "repeat_ok": 1795,
+        "repeat_hits": 1795,
+        "repeat_hit_rate": 1
+      },
+      "limited": {
+        "offered": 900,
+        "refused": 600,
+        "other_errors": 0,
+        "admitted": 299,
+        "windows": 31,
+        "most_in_window": 10,
+        "over_admissions": 0,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 300,
+        "ok": 254,
+        "refused": 46,
+        "other_errors": 0,
+        "admitted": 253,
+        "spent_nanodollars": 117645000,
+        "cumulative_nanodollars": 398040000,
+        "overshoot_nanodollars": 198040000,
+        "grace_bound_nanodollars": 0
+      }
+    }
+  ],
+  "buckets": []
+}

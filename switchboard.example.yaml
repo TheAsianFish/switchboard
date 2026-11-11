@@ -3,7 +3,9 @@
 # secrets are only ever read from the environment variable named here.
 
 listen: 127.0.0.1:8080
-admin_listen: 127.0.0.1:9090   # /metrics; keep it off the public interface
+admin_listen: 127.0.0.1:9090   # admin page, /api/overview and /metrics; keep it off the public interface
+admin:
+  trace_url: ""                # e.g. http://localhost:16686/trace/{trace_id}
 log:
   format: text   # json in production
   level: info

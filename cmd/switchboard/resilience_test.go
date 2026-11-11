@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TheAsianFish/switchboard/internal/admin"
 	"github.com/TheAsianFish/switchboard/internal/config"
 	"github.com/TheAsianFish/switchboard/internal/hedge"
 	"github.com/TheAsianFish/switchboard/internal/provider/fake"
@@ -34,7 +35,7 @@ func TestResilienceConfig(t *testing.T) {
 func TestAdminReportsProviderHealth(t *testing.T) {
 	t.Parallel()
 	h := hedge.New("up", fake.New(fake.DefaultConfig), hedge.DefaultConfig)
-	srv := httptest.NewServer(adminHandler(telemetry.NewMetrics(false), []*hedge.Provider{h}))
+	srv := httptest.NewServer(adminHandler(telemetry.NewMetrics(false), []*hedge.Provider{h}, admin.NewServer(admin.Options{Recorder: admin.NewRecorder(admin.RecorderOptions{})})))
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/providers")
 	if err != nil {

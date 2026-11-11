@@ -1,6 +1,7 @@
 package bench
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,6 +41,12 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&cfg.Label, "label", "", "name recorded in the result")
 	fs.BoolVar(&cfg.KeepSamples, "samples", false, "record every measured request's latency and TTFT in the result")
 	fs.StringVar(&out, "out", "", "write the result JSON to this file instead of stdout")
+	fs.Float64Var(&cfg.Repeat, "repeat", 0, "share of requests in [0, 1] that reuse a prompt from a fixed pool (the rest are unique)")
+	fs.IntVar(&cfg.RepeatPool, "repeat-pool", DefaultRepeatPool, "number of distinct prompts in the repeat pool")
+	fs.Uint64Var(&cfg.Seed, "seed", 1, "seed for which requests repeat and which pool prompt they use")
+	fs.StringVar(&cfg.CacheDirective, "cache", "", "send this "+CacheDirectiveHeader+" directive (off, exact or semantic) on every request")
+	var logPath string
+	fs.StringVar(&logPath, "log", "", "write one JSON line per request to this file (gzipped if it ends in .gz)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -54,7 +61,17 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	closeLog := func() error { return nil }
+	if logPath != "" {
+		w, c, err := createLog(logPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "bench: %v\n", err)
+			return 2
+		}
+		cfg.Log, closeLog = w, c
+	}
 	res, err := Run(ctx, cfg)
+	err = errors.Join(err, closeLog())
 	if res == nil {
 		fmt.Fprintln(stderr, err)
 		return 2 // only configuration errors return no result
@@ -81,6 +98,20 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stderr, Summary(res))
 	return code
+}
+
+// createLog opens path for the per-request log, through gzip if its name
+// ends in .gz. The returned function flushes and closes it.
+func createLog(path string) (io.Writer, func() error, error) {
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !strings.HasSuffix(path, ".gz") {
+		return f, f.Close, nil
+	}
+	z := gzip.NewWriter(f)
+	return z, func() error { return errors.Join(z.Close(), f.Close()) }, nil
 }
 
 // Summary is a one-line human description of r.

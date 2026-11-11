@@ -4,6 +4,12 @@
 
 listen: 0.0.0.0:8080
 admin_listen: 127.0.0.1:9090   # compose sets SWITCHBOARD_ADMIN_LISTEN for the replicas
+# The admin page (http://<admin_listen>/) and its API answer only requests
+# addressed to a loopback name or an IP literal, plus allowed_hosts.
+admin:
+  replica_id: ""            # name in the fleet view; default the host name (SWITCHBOARD_REPLICA_ID)
+  trace_url: ""             # e.g. http://localhost:16686/trace/{trace_id} (SWITCHBOARD_ADMIN_TRACE_URL)
+  allowed_hosts: []
 log:
   format: json
   level: info

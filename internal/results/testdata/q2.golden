@@ -133,6 +133,14 @@ files in `eval/results/q5-router/`.
 
 Not measured yet. Run `make eval-router`, then `make results`.
 
+## Q6: chaos
+
+What does a replica kill and a Redis kill cost a fleet under load?
+Command: `make chaos` (`chaos/run.sh`), raw files in `eval/results/q6-chaos/`
+(`summary.json` is written from the others by `switchboard chaos report`).
+
+Not measured yet. Run `make chaos`, then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire

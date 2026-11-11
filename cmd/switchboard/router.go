@@ -58,7 +58,7 @@ func buildRouter(cfg *config.Config, log *slog.Logger) (*router.Router, error) {
 	}
 	var e embed.Embedder
 	if w.Embedding != "" {
-		e = &embed.Ollama{BaseURL: rc.EmbedURL, Name: w.Embedding, Timeout: rc.Timeout}
+		e = embed.Memoized(&embed.Ollama{BaseURL: rc.EmbedURL, Name: w.Embedding, Timeout: rc.Timeout})
 	}
 	target := -1.0
 	if rc.QualityTarget != nil {

@@ -7,11 +7,15 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/TheAsianFish/switchboard/internal/admin"
+	"github.com/TheAsianFish/switchboard/internal/admin/ui"
+	"github.com/TheAsianFish/switchboard/internal/auth"
 	"github.com/TheAsianFish/switchboard/internal/budget"
 	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/config"
@@ -20,22 +24,25 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/hedge"
 	"github.com/TheAsianFish/switchboard/internal/pipeline"
 	"github.com/TheAsianFish/switchboard/internal/ratelimit"
+	"github.com/TheAsianFish/switchboard/internal/router"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
 
 // buildPolicy builds the limiter and the budget ledger the config asks
 // for: shared through Redis with a per-replica fallback when redis.url is
-// set, per process otherwise. close releases the Redis client.
-func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, log *slog.Logger) (pol pipeline.Policy, closeFn func(), err error) {
+// set, per process otherwise. close releases the Redis client. rdb is the
+// client, nil without redis.url, for the admin fleet view; onDegraded is
+// told when a component moves to or from its fallback.
+func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, onDegraded func(string, bool), log *slog.Logger) (pol pipeline.Policy, closeFn func(), rdb *redis.Client, err error) {
 	alg := cfg.RateLimit.Algorithm
 	// Refuse to start on an algorithm that cannot admit anything, rather
 	// than failing every request later.
 	probe, err := ratelimit.NewMemory(alg, time.Now)
 	if err != nil {
-		return pol, nil, err
+		return pol, nil, nil, err
 	}
 	if _, err := probe.Allow(ctx, "startup-probe", ratelimit.Limit{Rate: 1, Period: time.Second, Burst: 1}, 1); errors.Is(err, ratelimit.ErrNotImplemented) {
-		return pol, nil, fmt.Errorf("ratelimit.algorithm %q is not implemented yet; use %q", alg, ratelimit.AlgorithmFixedWindow)
+		return pol, nil, nil, fmt.Errorf("ratelimit.algorithm %q is not implemented yet; use %q", alg, ratelimit.AlgorithmFixedWindow)
 	}
 	pol.Metrics = m
 	ttl := cfg.Budget.ReservationTTL
@@ -47,12 +54,12 @@ func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, 
 			log.Warn("redis.url is not set: every replica enforces the full limits and budgets on its own",
 				slog.Int("replicas", cfg.RateLimit.Replicas))
 		}
-		return pol, waitFills(pol.Cache), nil
+		return pol, waitFills(pol.Cache), nil, nil
 	}
 
 	opts, err := redis.ParseURL(cfg.Redis.URL)
 	if err != nil {
-		return pol, nil, fmt.Errorf("redis.url: %w", err)
+		return pol, nil, nil, fmt.Errorf("redis.url: %w", err)
 	}
 	// Fail fast and let the degrade policy answer: a request should not
 	// wait out dial retries against a store that is down.
@@ -61,18 +68,18 @@ func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, 
 	opts.WriteTimeout = cfg.Redis.Timeout
 	opts.PoolTimeout = cfg.Redis.Timeout
 	opts.MaxRetries = -1
-	rdb := redis.NewClient(opts)
+	rdb = redis.NewClient(opts)
 
 	primary, err := ratelimit.New(alg, rdb, cfg.Redis.KeyPrefix)
 	if err != nil {
 		_ = rdb.Close()
-		return pol, nil, err
+		return pol, nil, nil, err
 	}
 	local, _ := ratelimit.NewMemory(alg, time.Now)
 	lim := ratelimit.NewDegrading(primary, local, cfg.RateLimit.Replicas)
 	lim.RetryInterval = cfg.RateLimit.RetryInterval
 	lim.Timeout = cfg.Redis.Timeout
-	lim.OnState = func(d bool) { m.Degraded("ratelimit", d) }
+	lim.OnState = func(d bool) { m.Degraded("ratelimit", d); onDegraded("ratelimit", d) }
 	pol.Limiter = lim
 
 	grace, _ := cost.ParseUSD(string(cfg.Budget.GraceUSD)) // validated
@@ -80,7 +87,7 @@ func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, 
 		Grace:         grace,
 		RetryInterval: cfg.RateLimit.RetryInterval,
 		Timeout:       cfg.Redis.Timeout,
-		OnState:       func(d bool) { m.Degraded("budget", d) },
+		OnState:       func(d bool) { m.Degraded("budget", d); onDegraded("budget", d) },
 	})
 
 	pol.Cache, pol.CacheMaxTemperature = buildCache(cfg, rdb, m, log), cfg.Cache.MaxTemperature
@@ -97,7 +104,7 @@ func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, 
 	log.Info("shared limits and budgets", slog.String("algorithm", alg), slog.Int("replicas", cfg.RateLimit.Replicas),
 		slog.String("grace", grace.String()))
 	wait := waitFills(pol.Cache)
-	return pol, func() { wait(); _ = rdb.Close() }, nil
+	return pol, func() { wait(); _ = rdb.Close() }, rdb, nil
 }
 
 // waitFills stops new cache writes at shutdown and lets those in flight
@@ -139,7 +146,7 @@ func buildCache(cfg *config.Config, rdb *redis.Client, m *telemetry.Metrics, log
 		opts.KV = cache.NewMemoryKV(c.MaxEntries, time.Now)
 	}
 	if semantic {
-		opts.Embedder = &embed.Ollama{BaseURL: c.Semantic.EmbedURL, Name: c.Semantic.Model, Timeout: c.Timeout}
+		opts.Embedder = embed.Memoized(&embed.Ollama{BaseURL: c.Semantic.EmbedURL, Name: c.Semantic.Model, Timeout: c.Timeout})
 		opts.NewIndex = func(dims int) (cache.Index, error) {
 			if rdb == nil {
 				return cache.NewMemoryIndex(dims, c.MaxEntries, time.Now), nil
@@ -168,10 +175,11 @@ func slug(s string) string {
 }
 
 // adminHandler serves the loopback admin listener: /metrics, /providers
-// (each provider's breaker state and hedge delays), and the admin API in a
-// later milestone.
-func adminHandler(m *telemetry.Metrics, providers []*hedge.Provider) http.Handler {
+// (each provider's breaker state and hedge delays), and the admin API and
+// page.
+func adminHandler(m *telemetry.Metrics, providers []*hedge.Provider, adm *admin.Server) http.Handler {
 	mux := http.NewServeMux()
+	mux.Handle("/", adm.Handler())
 	mux.Handle("GET /metrics", m.Handler())
 	mux.HandleFunc("GET /providers", func(w http.ResponseWriter, _ *http.Request) {
 		out := make([]hedge.Health, 0, len(providers))
@@ -247,4 +255,49 @@ func resilienceConfig(r config.Resilience) hedge.Config {
 	// A window smaller than the default sample floor must still hedge.
 	c.Hedge.MinSamples = min(c.Hedge.MinSamples, c.Hedge.Window)
 	return c
+}
+
+// buildAdmin builds the admin API: this replica's recorder, the fleet
+// view through Redis when there is one, and the page.
+func buildAdmin(cfg *config.Config, rec *admin.Recorder, rdb *redis.Client, keys *auth.Keys, pol pipeline.Policy, providers []*hedge.Provider, log *slog.Logger) *admin.Server {
+	id := cfg.Admin.ReplicaID
+	if id == "" {
+		id, _ = os.Hostname()
+	}
+	if id == "" {
+		id = "switchboard"
+	}
+	o := admin.Options{
+		ID: id, Version: version(), Started: time.Now(), Recorder: rec,
+		Keys: keys.Principals(), Ledger: pol.Ledger, CacheEnabled: pol.Cache != nil,
+		TraceURL: cfg.Admin.TraceURL, AllowedHosts: cfg.Admin.AllowedHosts, UI: ui.FS(), Log: log,
+		Providers: func() []admin.ProviderHealth {
+			out := make([]admin.ProviderHealth, 0, len(providers))
+			for _, p := range providers {
+				h := p.Health()
+				out = append(out, admin.ProviderHealth{Provider: h.Provider, Breaker: h.Breaker, RetryAfterMS: h.RetryAfterMS, Hedging: h.Hedging, HedgeDelayMS: h.HedgeDelayMS})
+			}
+			return out
+		},
+	}
+	if rdb != nil {
+		o.Fleet = admin.NewFleet(rdb, cfg.Redis.KeyPrefix, log)
+	}
+	if r := pol.Router; r != nil {
+		o.Router = admin.Router{Enabled: true, Target: r.Target(), Candidates: routerCandidates(r), Fallback: r.Weights().Fallback}
+	}
+	log.Info("admin page", slog.String("listen", cfg.AdminListen), slog.String("replica", id), slog.Bool("fleet", rdb != nil))
+	return admin.NewServer(o)
+}
+
+// routerCandidates names the router's candidates in its weights' order.
+func routerCandidates(r *router.Router) []string {
+	if r == nil {
+		return nil
+	}
+	var out []string
+	for _, c := range r.Weights().Candidates {
+		out = append(out, c.Model)
+	}
+	return out
 }

@@ -39,6 +39,9 @@ type Meta struct {
 	FakeProvider FakeSettings `json:"fake_provider"`
 	// Command is the command line that produced the run.
 	Command string `json:"command"`
+	// Breakdown describes the per-feature runs; nil in runs from before
+	// the breakdown existed, or when none was selected.
+	Breakdown *BreakdownMeta `json:"breakdown,omitempty"`
 }
 
 // FakeSettings are the fake provider's flags for the run.
@@ -58,6 +61,7 @@ type Data struct {
 	// Q4Ollama is Q4's check against a local model.
 	Q4Ollama *Q4Ollama
 	Q5       *Q5
+	Q6       *Q6
 	SDK      *SDK
 }
 
@@ -76,6 +80,11 @@ type Q1 struct {
 	// MaxSendDelayP99 is the worst p99 send delay of any run, in ms: how far
 	// the generator itself fell behind its schedule.
 	MaxSendDelayP99 string
+	// Breakdown is the per-feature part; nil if it was not run.
+	Breakdown *Q1Breakdown
+	// Pending lists the breakdown configs that were skipped or not
+	// selected, for "To measure".
+	Pending []ConfigMeta
 }
 
 // Q1Row compares the direct and gateway runs for one mode and rate. Latency
@@ -92,6 +101,9 @@ type Q1Row struct {
 	AddedP50, AddedP99 string
 	// Requests and Errors are "direct / gateway" over the measured window.
 	Requests, Errors string
+	// GatewayCores and GatewayRSS are the gateway process's CPU (cores)
+	// and peak RSS (MB) in the gateway run, "n/a" if not recorded.
+	GatewayCores, GatewayRSS string
 }
 
 // Render loads the raw results under resultsDir and executes the template
@@ -125,6 +137,10 @@ func Render(resultsDir, templatePath string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	q6, err := loadQ6(filepath.Join(resultsDir, Q6Dir))
+	if err != nil {
+		return err
+	}
 	if q4 != nil && q4o != nil {
 		q4o.SyntheticTailRatio = ratio(q4.Rows[0].ttftP99, q4.Rows[0].ttftP50)
 	}
@@ -133,7 +149,7 @@ func Render(resultsDir, templatePath string, w io.Writer) error {
 		return fmt.Errorf("results: parse template: %w", err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q5: q5, SDK: sdk}); err != nil {
+	if err := tmpl.Execute(&buf, Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q5: q5, Q6: q6, SDK: sdk}); err != nil {
 		return fmt.Errorf("results: render template: %w", err)
 	}
 	if _, err := w.Write(buf.Bytes()); err != nil {
@@ -148,6 +164,7 @@ type run struct {
 	stream bool
 	rate   string
 	res    bench.Result
+	gw     *GatewayRun // gateway runs: the .gateway.json beside it, if any
 }
 
 // loadQ1 reads dir. A missing directory, or one without result files, gives
@@ -163,23 +180,51 @@ func loadQ1(dir string) (*Q1, error) {
 	var runs []run
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".json") || name == "meta.json" {
+		if e.IsDir() || !strings.HasSuffix(name, ".json") || name == "meta.json" || strings.HasSuffix(name, ".gateway.json") {
 			continue
 		}
 		r, err := loadRun(filepath.Join(dir, name))
 		if err != nil {
 			return nil, err
 		}
+		if r.target == "gateway" {
+			if r.gw, err = loadGatewayRun(filepath.Join(dir, strings.TrimSuffix(name, ".json")+".gateway.json")); err != nil {
+				return nil, err
+			}
+		}
 		runs = append(runs, r)
 	}
-	if len(runs) == 0 {
+	bdir := filepath.Join(dir, Q1BreakdownDir)
+	if _, err := os.Stat(bdir); len(runs) == 0 && errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	var meta Meta
 	if err := readJSON(filepath.Join(dir, "meta.json"), &meta); err != nil {
 		return nil, err
 	}
-	return buildQ1(meta, runs), nil
+	bk, err := loadBreakdown(bdir, meta.Breakdown)
+	if err != nil {
+		return nil, err
+	}
+	if len(runs) == 0 && bk == nil {
+		return nil, nil
+	}
+	q := buildQ1(meta, runs)
+	q.Breakdown = bk
+	if meta.Breakdown != nil {
+		for _, c := range meta.Breakdown.Configs {
+			if c.Status != "measured" {
+				q.Pending = append(q.Pending, c)
+			}
+		}
+	}
+	for _, h := range bk.hardware() {
+		if !slices.Contains(q.Hardware, h) {
+			q.Hardware = append(q.Hardware, h)
+		}
+	}
+	slices.Sort(q.Hardware)
+	return q, nil
 }
 
 // loadRun reads one <target>-<mode>-<rate>.json file and checks that its
@@ -226,6 +271,7 @@ type rowKey struct {
 // by rate.
 func buildQ1(meta Meta, runs []run) *Q1 {
 	pairs := map[rowKey][2]*bench.Result{}
+	sidecars := map[rowKey]*GatewayRun{}
 	hardware := map[string]bool{}
 	windows := map[string]bool{}
 	var maxDelay float64
@@ -238,6 +284,7 @@ func buildQ1(meta Meta, runs []run) *Q1 {
 			p[0] = &r.res
 		} else {
 			p[1] = &r.res
+			sidecars[k] = r.gw
 		}
 		pairs[k] = p
 		hardware[describeHardware(r.res.Hardware)] = true
@@ -272,12 +319,12 @@ func buildQ1(meta Meta, runs []run) *Q1 {
 		MaxSendDelayP99:   fmt.Sprintf("%.3f", maxDelay),
 	}
 	for _, k := range keys {
-		q.Rows = append(q.Rows, buildRow(k, pairs[k][0], pairs[k][1]))
+		q.Rows = append(q.Rows, buildRow(k, pairs[k][0], pairs[k][1], sidecars[k]))
 	}
 	return q
 }
 
-func buildRow(k rowKey, direct, gateway *bench.Result) Q1Row {
+func buildRow(k rowKey, direct, gateway *bench.Result, gw *GatewayRun) Q1Row {
 	row := Q1Row{Mode: "non-streaming", Metric: "total", Rate: k.label}
 	pick := func(r *bench.Result) bench.Stats { return r.Latency }
 	if k.stream {
@@ -311,6 +358,10 @@ func buildRow(k rowKey, direct, gateway *bench.Result) Q1Row {
 	errs := func(r *bench.Result) int { return r.Errors() }
 	row.Requests = count(direct, requests) + " / " + count(gateway, requests)
 	row.Errors = count(direct, errs) + " / " + count(gateway, errs)
+	row.GatewayCores, row.GatewayRSS = na, na
+	if gw != nil {
+		row.GatewayCores, row.GatewayRSS = cores(gw.CPUSeconds, gw.WindowSeconds), mb(gw.PeakRSSKB)
+	}
 	return row
 }
 

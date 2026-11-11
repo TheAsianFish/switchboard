@@ -23,7 +23,9 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/cost"
+	"github.com/TheAsianFish/switchboard/internal/embed"
 	"github.com/TheAsianFish/switchboard/internal/hedge"
+	"github.com/TheAsianFish/switchboard/internal/router"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
 
@@ -107,9 +109,13 @@ func (p *Pipeline) Models(ctx context.Context) []string {
 // auto request the returned context's log lines say so, since every
 // later line names the model the router chose.
 func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (context.Context, Route, *core.Request, *admission, error) {
+	// The router and the semantic cache may both embed the last user
+	// turn; with one memo per request they share the vector.
+	ctx = embed.WithMemo(ctx)
 	pr := auth.FromContext(ctx)
-	rt, dec, err := p.route(ctx, pr, req)
+	rt, dec, rd, err := p.route(ctx, pr, req)
 	if err != nil {
+		p.observeRefused(ctx, pr, req, rt, rd, err)
 		return ctx, Route{}, nil, nil, err
 	}
 	if req.Model != rt.Model {
@@ -125,9 +131,10 @@ func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (context.Cont
 		default:
 			p.policy.Metrics.Call(pr.Name, rt.Model, telemetry.OutcomeError)
 		}
+		p.observeRefused(ctx, pr, req, rt, rd, err)
 		return ctx, Route{}, nil, nil, err
 	}
-	adm.cache = dec
+	adm.cache, adm.decision = dec, rd
 	up := *req
 	up.Model = rt.Upstream
 	if up.MaxTokens == 0 && adm.charged() {
@@ -141,7 +148,7 @@ func (p *Pipeline) resolve(ctx context.Context, req *core.Request) (context.Cont
 
 // route finds the request's route, checks the key may use it and decides
 // the cache mode, in the "route" span.
-func (p *Pipeline) route(ctx context.Context, pr *auth.Principal, req *core.Request) (rt Route, dec cache.Decision, err error) {
+func (p *Pipeline) route(ctx context.Context, pr *auth.Principal, req *core.Request) (rt Route, dec cache.Decision, rd *router.Decision, err error) {
 	_, span := telemetry.StartSpan(ctx, "route", attribute.String("switchboard.model", req.Model))
 	defer func() {
 		if err == nil {
@@ -150,18 +157,18 @@ func (p *Pipeline) route(ctx context.Context, pr *auth.Principal, req *core.Requ
 		telemetry.EndSpan(span, err)
 	}()
 	if pr == nil {
-		return Route{}, dec, core.Errorf(core.KindAuthentication, "missing API key")
+		return Route{}, dec, nil, core.Errorf(core.KindAuthentication, "missing API key")
 	}
 	rt, ok := p.routes[req.Model]
 	if !ok && (req.Model != AutoModel || p.policy.Router == nil) {
-		return Route{}, dec, core.Errorf(core.KindNotFound, "model %q is not configured on this gateway", req.Model)
+		return Route{}, dec, nil, core.Errorf(core.KindNotFound, "model %q is not configured on this gateway", req.Model)
 	}
 	if !pr.Allows(req.Model) {
-		return Route{}, dec, core.Errorf(core.KindPermission, "this API key may not use model %q", req.Model)
+		return Route{}, dec, nil, core.Errorf(core.KindPermission, "this API key may not use model %q", req.Model)
 	}
 	if req.Model == AutoModel && p.policy.Router != nil {
-		if rt, err = p.choose(ctx, pr, req); err != nil {
-			return Route{}, dec, err
+		if rt, rd, err = p.choose(ctx, pr, req); err != nil {
+			return Route{}, dec, nil, err
 		}
 	}
 	if p.policy.Cache != nil {
@@ -170,11 +177,11 @@ func (p *Pipeline) route(ctx context.Context, pr *auth.Principal, req *core.Requ
 		d, err := cache.Decide(pr.Cache, cache.ReportFrom(ctx).Directive(), req, p.policy.CacheMaxTemperature)
 		if err != nil {
 			p.policy.Metrics.Call(pr.Name, rt.Model, telemetry.OutcomeError)
-			return Route{}, dec, err
+			return rt, dec, rd, err
 		}
 		dec = d
 	}
-	return rt, dec, nil
+	return rt, dec, rd, nil
 }
 
 // choose runs the router for a request that asked for AutoModel, in the
@@ -183,13 +190,13 @@ func (p *Pipeline) route(ctx context.Context, pr *auth.Principal, req *core.Requ
 // with no list may use them all. The router never fails a request over
 // its own trouble: when the prompt cannot be embedded it sends the
 // request to its fallback and the cause is logged.
-func (p *Pipeline) choose(ctx context.Context, pr *auth.Principal, req *core.Request) (Route, error) {
+func (p *Pipeline) choose(ctx context.Context, pr *auth.Principal, req *core.Request) (Route, *router.Decision, error) {
 	_, span := telemetry.StartSpan(ctx, "router")
 	d, err := p.policy.Router.Route(ctx, req, func(m string) bool { _, ok := p.routes[m]; return ok && pr.Allows(m) })
 	if err != nil {
 		err = core.Wrap(core.KindPermission, err, "this API key may not use any of the models auto chooses between")
 		telemetry.EndSpan(span, err)
-		return Route{}, err
+		return Route{}, nil, err
 	}
 	span.SetAttributes(
 		attribute.String("switchboard.router.model", d.Model),
@@ -207,7 +214,7 @@ func (p *Pipeline) choose(ctx context.Context, pr *auth.Principal, req *core.Req
 		telemetry.Logger(ctx).Warn("router could not predict; using its fallback",
 			slog.String("model", d.Model), slog.String("error", d.Err.Error()))
 	}
-	return p.routes[d.Model], nil
+	return p.routes[d.Model], &d, nil
 }
 
 // Complete implements core.Gateway.
@@ -220,7 +227,7 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 	if lk.Response != nil {
 		resp := lk.Response
 		resp.Model = rt.Model
-		p.serveHit(ctx, adm, resp, false)
+		p.serveHit(ctx, adm, req, lk, resp, false)
 		return resp, nil
 	}
 	ctx, _ = hedge.WithReport(ctx)
@@ -232,16 +239,18 @@ func (p *Pipeline) Complete(ctx context.Context, req *core.Request) (*core.Respo
 		err = upstreamError(rt, err)
 		u, outcome := abandonedUsage(ctx, adm)
 		endProvider(span, 0, core.Usage{}, outcome, err)
-		p.settle(ctx, adm, u, 0, false, outcome)
+		u, spent := p.settle(ctx, adm, u, 0, false, outcome)
 		logCall(ctx, rt, false, elapsed, 0, core.Usage{}, err)
+		p.observeCall(ctx, adm, req, lk, false, p.now().Sub(adm.start), 0, u, spent, outcomeErr(outcome, err))
 		return nil, err
 	}
 	// The route's name, not the request's: for auto, the client learns
 	// which model answered.
 	resp.Model = rt.Model
 	endProvider(span, 0, resp.Usage, telemetry.OutcomeOK, nil)
-	p.settle(ctx, adm, resp.Usage, len(resp.Text), false, telemetry.OutcomeOK)
+	u, spent := p.settle(ctx, adm, resp.Usage, len(resp.Text), false, telemetry.OutcomeOK)
 	logCall(ctx, rt, false, elapsed, elapsed, resp.Usage, nil)
+	p.observeCall(ctx, adm, req, lk, false, p.now().Sub(adm.start), 0, u, spent, nil)
 	if lk.Fillable() {
 		p.policy.Cache.Fill(ctx, lk, resp)
 	}
@@ -285,12 +294,40 @@ func (p *Pipeline) lookup(ctx context.Context, adm *admission, req, up *core.Req
 // the token-limit charge and the budget reservation are returned in full.
 // The request still counted against the request limit, which bounds how
 // often a key may ask, whatever answers.
-func (p *Pipeline) serveHit(ctx context.Context, adm *admission, resp *core.Response, stream bool) {
+func (p *Pipeline) serveHit(ctx context.Context, adm *admission, req *core.Request, lk *cache.Lookup, resp *core.Response, stream bool) {
 	p.settle(ctx, adm, core.Usage{}, 0, stream, telemetry.OutcomeCacheHit)
+	var saved cost.Nanos
 	if adm.route.Priced {
-		p.policy.Metrics.CacheSaved(adm.pr.Name, adm.route.Model, adm.route.Price.Of(resp.Usage).USD())
+		saved = adm.route.Price.Of(resp.Usage)
+		p.policy.Metrics.CacheSaved(adm.pr.Name, adm.route.Model, saved.USD())
 	}
-	logCall(ctx, adm.route, stream, p.now().Sub(adm.start), 0, core.Usage{}, nil)
+	total := p.now().Sub(adm.start)
+	logCall(ctx, adm.route, stream, total, 0, core.Usage{}, nil)
+	if p.policy.OnCall != nil {
+		c := callOf(adm, req, stream, lk)
+		c.Outcome, c.Duration, c.Saved = telemetry.OutcomeCacheHit, total, saved
+		p.observe(ctx, c)
+	}
+}
+
+// observeCall reports an admitted call that reached the provider.
+func (p *Pipeline) observeCall(ctx context.Context, adm *admission, req *core.Request, lk *cache.Lookup, stream bool, total, ttft time.Duration, u core.Usage, spent cost.Nanos, err error) {
+	if p.policy.OnCall == nil {
+		return
+	}
+	c := callOf(adm, req, stream, lk)
+	c.Outcome, c.ErrorKind = outcomeOf(err)
+	c.Duration, c.TTFT, c.Usage, c.Spent = total, ttft, u, spent
+	p.observe(ctx, c)
+}
+
+// outcomeErr is the error observeCall classifies: a call the client
+// abandoned is reported as abandoned whatever error it ended with.
+func outcomeErr(outcome string, err error) error {
+	if outcome == telemetry.OutcomeAbandoned {
+		return errStreamAbandoned
+	}
+	return err
 }
 
 // Stream implements core.Gateway.
@@ -305,7 +342,7 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 		// the client's own wire format whichever format filled it.
 		resp := lk.Response
 		resp.Model = rt.Model
-		p.serveHit(ctx, adm, resp, true)
+		p.serveHit(ctx, adm, req, lk, resp, true)
 		return &core.SliceStream{Events: core.ResponseEvents(resp, cache.Chunks(resp.Text))}, nil
 	}
 	ctx, _ = hedge.WithReport(ctx)
@@ -319,11 +356,13 @@ func (p *Pipeline) Stream(ctx context.Context, req *core.Request) (core.Stream, 
 		err = upstreamError(rt, err)
 		u, outcome := abandonedUsage(ctx, adm)
 		endProvider(span, 0, core.Usage{}, outcome, err)
-		p.settle(ctx, adm, u, 0, true, outcome)
-		logCall(ctx, rt, true, p.now().Sub(start), 0, core.Usage{}, err)
+		u, spent := p.settle(ctx, adm, u, 0, true, outcome)
+		total := p.now().Sub(start)
+		logCall(ctx, rt, true, total, 0, core.Usage{}, err)
+		p.observeCall(ctx, adm, req, lk, true, p.now().Sub(adm.start), 0, u, spent, outcomeErr(outcome, err))
 		return nil, err
 	}
-	return &stream{inner: s, ctx: ctx, span: span, p: p, adm: adm, route: rt, model: rt.Model, start: start, now: p.now, lookup: lk}, nil
+	return &stream{inner: s, ctx: ctx, span: span, p: p, adm: adm, req: req, route: rt, model: rt.Model, start: start, now: p.now, lookup: lk}, nil
 }
 
 // abandonedUsage is what a call that failed before any output is charged.
@@ -366,6 +405,7 @@ type stream struct {
 	span  trace.Span
 	p     *Pipeline
 	adm   *admission
+	req   *core.Request
 	route Route
 	model string
 	start time.Time
@@ -466,8 +506,17 @@ func (s *stream) finish(err error) {
 			spanErr = nil // the client left; the upstream did not fail
 		}
 		endProvider(s.span, ttft, usage, outcome, spanErr)
-		s.p.settle(s.ctx, s.adm, usage, chars, true, outcome)
-		logCall(s.ctx, s.route, true, s.now().Sub(s.start), ttft, usage, err)
+		billed, spent := s.p.settle(s.ctx, s.adm, usage, chars, true, outcome)
+		total := s.now().Sub(s.start)
+		logCall(s.ctx, s.route, true, total, ttft, usage, err)
+		// The log line times the upstream call; the admin record times the
+		// request from admission, as a cache hit and the duration metric do,
+		// so the cache lookup and limit round trips count on a miss too.
+		sinceAdmit, ttftAdmit := s.now().Sub(s.adm.start), time.Duration(0)
+		if ttft > 0 {
+			ttftAdmit = ttft + s.start.Sub(s.adm.start)
+		}
+		s.p.observeCall(s.ctx, s.adm, s.req, s.lookup, true, sinceAdmit, ttftAdmit, billed, spent, err)
 		if err == nil && s.lookup.Fillable() {
 			// Only a stream that reached its stop event is a whole reply.
 			u, _ := s.adm.fillUsage(usage, chars)

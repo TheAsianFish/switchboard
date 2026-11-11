@@ -45,7 +45,11 @@ const maxBody = 16 << 20
 // sample is the timing of one request. Times are absolute and carry the
 // monotonic clock reading, so differences are immune to wall-clock steps.
 type sample struct {
-	outcome    string
+	outcome string
+	// status is the HTTP status, 0 if no response arrived; cache is the
+	// gateway's cache status header, "" if absent.
+	status     int
+	cache      string
 	sent       time.Time // handed to the HTTP client
 	firstToken time.Time // first generated text; zero if none arrived
 	done       time.Time // reply complete (or failed)
@@ -77,7 +81,7 @@ type anthropicRequest struct {
 
 // requestBody is the JSON body of request i in cfg's format.
 func requestBody(cfg *Config, i int) ([]byte, error) {
-	msgs := []message{{Role: "user", Content: fmt.Sprintf("bench request %d: say something", i)}}
+	msgs := []message{{Role: "user", Content: prompt(cfg, i)}}
 	if cfg.Format == FormatAnthropic {
 		return json.Marshal(anthropicRequest{Model: cfg.Model, MaxTokens: cfg.MaxTokens, Messages: msgs, Stream: cfg.Stream})
 	}
@@ -105,6 +109,9 @@ func newRequest(ctx context.Context, cfg *Config, i int) (*http.Request, error) 
 	req.Header.Set("Content-Type", "application/json")
 	if cfg.Stream {
 		req.Header.Set("Accept", "text/event-stream")
+	}
+	if cfg.CacheDirective != "" {
+		req.Header.Set(CacheDirectiveHeader, cfg.CacheDirective)
 	}
 	if cfg.Format == FormatAnthropic {
 		req.Header.Set("anthropic-version", "2023-06-01")
@@ -140,6 +147,7 @@ func send(parent context.Context, client *http.Client, cfg *Config, i int) sampl
 		return fail(err)
 	}
 	defer resp.Body.Close()
+	s.status, s.cache = resp.StatusCode, resp.Header.Get(CacheStatusHeader)
 
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))

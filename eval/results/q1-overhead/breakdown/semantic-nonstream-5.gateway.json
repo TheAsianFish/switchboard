@@ -1,0 +1,15 @@
+{
+  "config": "semantic",
+  "window_seconds": 30.107,
+  "gateway_cpu_seconds": 0.47,
+  "gateway_peak_rss_kb": 34536,
+  "redis_cpu_seconds": 0.261,
+  "ollama_cpu_seconds": 22.926,
+  "probe": {
+    "http_status": 200,
+    "cache_status": "miss",
+    "trace_id": "bb95f9280c9b9bc43b845485980d39bc",
+    "trace_in_jaeger": true,
+    "model": "fake"
+  }
+}

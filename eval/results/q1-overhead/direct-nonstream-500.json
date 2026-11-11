@@ -1,7 +1,7 @@
 {
   "config": {
     "label": "direct-nonstream-500",
-    "url": "http://127.0.0.1:9101",
+    "url": "http://127.0.0.1:19101",
     "format": "openai",
     "model": "fake",
     "stream": false,
@@ -10,44 +10,48 @@
     "warmup_seconds": 5,
     "timeout_seconds": 30,
     "max_in_flight": 1024,
-    "max_tokens": 0
+    "max_tokens": 0,
+    "cache_directive": "semantic"
   },
-  "started_at": "2026-10-27T00:30:26.220021587Z",
+  "started_at": "2026-11-10T19:45:34.769394967Z",
   "wall_seconds": 65.02,
   "requests": 30000,
   "warmup_requests": 2500,
   "offered_rps": 500,
   "achieved_rps": 500,
-  "peak_in_flight": 12,
+  "peak_in_flight": 14,
   "outcomes": {
     "ok": 30000
   },
   "latency": {
     "count": 30000,
-    "mean_ms": 21.087,
-    "p50_ms": 21.048,
-    "p90_ms": 21.678,
-    "p99_ms": 22.164,
-    "p999_ms": 22.367,
-    "max_ms": 23.614
+    "mean_ms": 21.023,
+    "p50_ms": 20.991,
+    "p90_ms": 21.681,
+    "p95_ms": 21.914,
+    "p99_ms": 22.194,
+    "p999_ms": 22.365,
+    "max_ms": 27.235
   },
   "ttft": {
     "count": 30000,
-    "mean_ms": 21.087,
-    "p50_ms": 21.048,
-    "p90_ms": 21.678,
-    "p99_ms": 22.164,
-    "p999_ms": 22.367,
-    "max_ms": 23.614
+    "mean_ms": 21.023,
+    "p50_ms": 20.991,
+    "p90_ms": 21.681,
+    "p95_ms": 21.914,
+    "p99_ms": 22.194,
+    "p999_ms": 22.365,
+    "max_ms": 27.235
   },
   "send_delay": {
     "count": 30000,
-    "mean_ms": 0.574,
-    "p50_ms": 0.594,
-    "p90_ms": 0.99,
-    "p99_ms": 1.083,
-    "p999_ms": 1.125,
-    "max_ms": 1.317
+    "mean_ms": 0.551,
+    "p50_ms": 0.55,
+    "p90_ms": 0.957,
+    "p95_ms": 1.027,
+    "p99_ms": 1.08,
+    "p999_ms": 1.11,
+    "max_ms": 3.886
   },
   "hardware": {
     "num_cpu": 4,
@@ -55,7 +59,7 @@
     "goos": "linux",
     "goarch": "amd64",
     "go_version": "go1.27.0",
-    "cpu_model": "AMD EPYC 7763 64-Core Processor",
-    "kernel": "6.17.0-1022-azure"
+    "cpu_model": "Intel(R) Xeon(R) 6973P-C",
+    "kernel": "7.0.0-1019-azure"
   }
 }

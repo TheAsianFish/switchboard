@@ -1,7 +1,7 @@
 {
   "config": {
     "label": "gateway-stream-200",
-    "url": "http://127.0.0.1:8080",
+    "url": "http://127.0.0.1:18080",
     "format": "openai",
     "model": "fake",
     "stream": true,
@@ -10,44 +10,48 @@
     "warmup_seconds": 5,
     "timeout_seconds": 30,
     "max_in_flight": 1024,
-    "max_tokens": 0
+    "max_tokens": 0,
+    "cache_directive": "semantic"
   },
-  "started_at": "2026-10-27T00:28:15.844553537Z",
-  "wall_seconds": 65.178,
+  "started_at": "2026-11-10T19:43:24.364821635Z",
+  "wall_seconds": 65.177,
   "requests": 12000,
   "warmup_requests": 1000,
   "offered_rps": 200,
   "achieved_rps": 200,
-  "peak_in_flight": 38,
+  "peak_in_flight": 39,
   "outcomes": {
     "ok": 12000
   },
   "latency": {
     "count": 12000,
-    "mean_ms": 177.831,
-    "p50_ms": 177.648,
-    "p90_ms": 180.603,
-    "p99_ms": 183.292,
-    "p999_ms": 185.698,
-    "max_ms": 186.321
+    "mean_ms": 186.796,
+    "p50_ms": 186.817,
+    "p90_ms": 189.309,
+    "p95_ms": 189.985,
+    "p99_ms": 190.953,
+    "p999_ms": 191.773,
+    "max_ms": 194.642
   },
   "ttft": {
     "count": 12000,
-    "mean_ms": 21.587,
-    "p50_ms": 21.577,
-    "p90_ms": 22.347,
-    "p99_ms": 22.968,
-    "p999_ms": 23.502,
-    "max_ms": 24.479
+    "mean_ms": 21.366,
+    "p50_ms": 21.315,
+    "p90_ms": 22.025,
+    "p95_ms": 22.172,
+    "p99_ms": 22.54,
+    "p999_ms": 22.972,
+    "max_ms": 24.518
   },
   "send_delay": {
     "count": 12000,
-    "mean_ms": 0.528,
-    "p50_ms": 0.513,
-    "p90_ms": 0.983,
-    "p99_ms": 1.308,
-    "p999_ms": 1.541,
-    "max_ms": 1.943
+    "mean_ms": 0.527,
+    "p50_ms": 0.505,
+    "p90_ms": 0.998,
+    "p95_ms": 1.064,
+    "p99_ms": 1.192,
+    "p999_ms": 1.322,
+    "max_ms": 1.803
   },
   "hardware": {
     "num_cpu": 4,
@@ -55,7 +59,7 @@
     "goos": "linux",
     "goarch": "amd64",
     "go_version": "go1.27.0",
-    "cpu_model": "AMD EPYC 7763 64-Core Processor",
-    "kernel": "6.17.0-1022-azure"
+    "cpu_model": "Intel(R) Xeon(R) 6973P-C",
+    "kernel": "7.0.0-1019-azure"
   }
 }

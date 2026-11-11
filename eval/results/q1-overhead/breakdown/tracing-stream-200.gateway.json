@@ -1,0 +1,15 @@
+{
+  "config": "tracing",
+  "window_seconds": 30.054,
+  "gateway_cpu_seconds": 11.65,
+  "gateway_peak_rss_kb": 45760,
+  "redis_cpu_seconds": 2.157,
+  "ollama_cpu_seconds": null,
+  "probe": {
+    "http_status": 200,
+    "cache_status": "miss",
+    "trace_id": "31e6a2ce13a02a5b2f3dd2a00e298663",
+    "trace_in_jaeger": true,
+    "model": "fake"
+  }
+}

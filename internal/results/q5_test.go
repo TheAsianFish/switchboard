@@ -93,7 +93,7 @@ func TestRenderQ5NotMeasured(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"## Q5: evaluated router\n\nCan a router",
-		"`eval/results/q5-router/`.\n\nNot measured yet. Run `make eval-router`, then `make results`.\n\n## Unmodified SDKs",
+		"`eval/results/q5-router/`.\n\nNot measured yet. Run `make eval-router`, then `make results`.\n\n## Q6: chaos",
 		"- Q5 router frontier: `make eval-router`.\n- Q5 with the Claude candidates:",
 		"then the same `MODELS=... make eval-router`.\n- Q6",
 	} {
