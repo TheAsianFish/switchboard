@@ -43,9 +43,10 @@ type BudgetPolicy struct {
 	// refills over GraceRefill and is not reset when Redis recovers.
 	GraceUSD Decimal `yaml:"grace_usd"`
 	// GraceRefill is how long a key's grace allowance takes to refill from
-	// empty. Over any stretch T one replica process lets a key spend at
-	// most grace_usd × (1 + T / grace_refill) without Redis, however often
-	// Redis flaps.
+	// empty. Over a stretch T that starts with Redis reachable, one
+	// replica process lets a key spend at most about
+	// grace_usd × (1 + T / grace_refill) without Redis, however often
+	// Redis flaps (budget.Degrading has the exact bound).
 	GraceRefill time.Duration `yaml:"grace_refill"`
 	// ReservationTTL is how long an unsettled reservation holds budget.
 	ReservationTTL time.Duration `yaml:"reservation_ttl"`

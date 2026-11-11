@@ -57,8 +57,12 @@ type DegradeOptions struct {
 // what the hold over-estimated (or takes what it under-estimated). The
 // bucket is not reset when an outage ends, so however often the primary
 // flaps, one replica process admits at most Grace × (1 + T / GraceRefill)
-// without the primary over any stretch of length T, plus whatever requests
-// cost above their estimates. A fleet multiplies that by the number of
+// without the primary over a stretch of length T that starts with no
+// grace hold open (an outage after the primary was reachable), plus
+// whatever requests cost above their estimates. A stretch that starts
+// while grace holds are open can gain up to one more Grace, since settling
+// a hold admitted before the stretch gives back what it over-estimated.
+// A fleet multiplies that by the number of
 // replica processes, not replicas: a restarted replica starts with a full
 // allowance.
 //

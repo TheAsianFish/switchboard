@@ -360,8 +360,10 @@ type FlapResult struct {
 	// Kill is the replica killed while Redis was down, if one was.
 	Kill *FlapKill `json:"kill,omitempty"`
 	// MaxControlGap is the largest |Unreconciled| at the end of a phase
-	// with Redis up, before any replica was killed: what the
-	// reconciliation reads when nothing is lost.
+	// with Redis up that starts at or after the first outage and ends
+	// before Kill (the last replica killed during an outage, if any): what
+	// the reconciliation reads when nothing is lost. The phase before the
+	// first outage is left out; its gap is in the phase table.
 	MaxControlGap cost.Nanos `json:"max_control_gap_nanodollars"`
 	// MinGap is the most negative Unreconciled at any snapshot after
 	// Redis came back (a double charge shows up as a negative gap).
