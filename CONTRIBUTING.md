@@ -43,10 +43,14 @@ make check
 | `make eval-router-label` | Q5 labels: every candidate answers the 600 questions through the gateway (local ladder on Ollama by default, about 3 h on a laptop CPU; `MODELS=claude-...` with a key); resumes | local |
 | `make eval-router-embed` / `make eval-router-data` | re-embed the eval prompts (Ollama with `nomic-embed-text`) / rebuild the eval set from GSM8K and MMLU | local |
 | `make chaos` | the phased kill run (Q6) | local, manual workflow |
-| `make results` | re-render RESULTS.md from `eval/results/` | after any of the above |
+| `make results` | re-render RESULTS.md and the README results table from `eval/results/` | after any of the above |
+| `make dist` | release archives (linux/darwin × amd64/arm64) and `SHA256SUMS` in `dist/`; `VERSION=v1.2.3` stamps the binaries | local, release workflow |
+| `make check-install` | `go install` from a bare copy of the repo in a clean `golang:1.27` container, then one request to the installed binary (`REF=` a commit) | local, before a release |
 
 Per-PR CI runs only the first three. Benchmarks, evals and chaos are `make`
 targets and a `workflow_dispatch` workflow; they never run on push.
+`release.yml` runs on `v*` tags (and by hand as a dry run that publishes
+nothing); RELEASE.md has the steps.
 
 ## Layout and conventions
 
