@@ -958,7 +958,7 @@ stretch is 4 s.
 | After: overshoot at most processes × grace × (1 + T / refill), a restarted replica counted as a new process | overshoot $0.0362 against $0.0410 (4 processes, T = 92.0 s) | yes |
 | After: whatever the outage count; outages 2 to 8 add at most the restarted process's grace plus the refill | outage 1 spent $0.0279, outages 2 to 8 together $0.0093 (allowed $0.0110) | yes |
 | Before: the replica killed 3.0 s into outage 5 takes its pending spend with it ($0.004 to $0.005), at most one grace; nothing is lost without the kill | Redis short of the provider by $0.004185 at the end (bound $0.0100); largest gap in a reachable phase before the kill $0 | yes |
-| After: the replica killed 3.0 s into outage 5 takes its pending spend with it (about $0: its allowance was spent in outage 1), at most one grace; nothing is lost without the kill | Redis short of the provider by $0 at the end (bound $0.0100); largest gap in a reachable phase before the kill $0 | yes |
+| After: the replica killed 3.0 s into outage 5 takes its pending spend with it, at most one grace; nothing is lost without the kill | Redis short of the provider by $0 at the end (bound $0.0100); largest gap in a reachable phase before the kill $0 | yes |
 
 **Reading the runs.**
 

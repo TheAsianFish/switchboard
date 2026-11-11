@@ -364,12 +364,14 @@ func m8Checks(before, after *chaos.FlapResult, grace cost.Nanos) []Q6Check {
 		if f == nil || f.Kill == nil {
 			continue
 		}
-		pred := "$0.004 to $0.005"
+		// PLAN.md predicted an amount only for the run before the fix;
+		// after it, the rule is the bound alone.
+		pred := " ($0.004 to $0.005)"
 		if c.name == "After" {
-			pred = "about $0: its allowance was spent in outage 1"
+			pred = ""
 		}
 		out = append(out, Q6Check{
-			Hypothesis: fmt.Sprintf("%s: the replica killed %.1f s into outage %s takes its pending spend with it (%s), at most one grace; nothing is lost without the kill",
+			Hypothesis: fmt.Sprintf("%s: the replica killed %.1f s into outage %s takes its pending spend with it%s, at most one grace; nothing is lost without the kill",
 				c.name, f.Kill.IntoOutageSeconds, killedOutage(f), pred),
 			Observed: fmt.Sprintf("Redis short of the provider by %s at the end (bound %s); largest gap in a reachable phase before the kill %s",
 				m8USD(f.Kill.Lost), q6USD(f.Kill.Bound), m8USD(f.MaxControlGap)),
