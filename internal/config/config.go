@@ -182,7 +182,7 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		Log:         Log{Format: "json", Level: "info"},
 		Redis:       Redis{Timeout: DefaultRedisTimeout, KeyPrefix: DefaultKeyPrefix},
 		RateLimit:   RateLimit{Algorithm: "fixed_window", Replicas: 1, RetryInterval: DefaultRetryInterval},
-		Budget:      BudgetPolicy{GraceUSD: DefaultGraceUSD, ReservationTTL: 15 * time.Minute},
+		Budget:      BudgetPolicy{GraceUSD: DefaultGraceUSD, GraceRefill: DefaultGraceRefill, ReservationTTL: 15 * time.Minute},
 		Cache:       defaultCache(),
 		Tracing:     defaultTracing(),
 		Router:      defaultRouter(),

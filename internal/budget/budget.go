@@ -68,9 +68,10 @@ type Reservation struct {
 	// in the same window even if the request crosses a boundary.
 	Window string
 	Amount cost.Nanos
-	// grace is the generation of the Degrading grace ledger that holds
-	// this reservation, or 0 if the primary ledger holds it.
-	grace uint64
+	// grace marks a hold that Degrading admitted against its grace
+	// allowance while the primary was unreachable; the primary never saw
+	// it. False if the primary ledger holds it.
+	grace bool
 }
 
 // Balance is a key's position in one window.

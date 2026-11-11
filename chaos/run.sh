@@ -258,7 +258,7 @@ cat >"$tmp/meta.json" <<JSON
   "time_scale": $scale,
   "schedule": "$sched",
   "limit": {"model": "fake-limited", "rate": 10, "period_seconds": 1},
-  "budget": {"model": "fake-budget", "usd": "0.20", "grace_usd": "0.01", "input_price": "3", "output_price": "15"},
+  "budget": {"model": "fake-budget", "usd": "0.20", "grace_usd": "0.01", "grace_refill": "1h", "input_price": "3", "output_price": "15"},
   "fake_provider": {"latency": "20ms", "tokens": 30, "token_interval": "5ms"}
 }
 JSON

@@ -85,6 +85,7 @@ func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, 
 	grace, _ := cost.ParseUSD(string(cfg.Budget.GraceUSD)) // validated
 	pol.Ledger = budget.NewDegrading(budget.NewRedis(rdb, cfg.Redis.KeyPrefix, ttl, time.Now), budget.DegradeOptions{
 		Grace:         grace,
+		GraceRefill:   cfg.Budget.GraceRefill,
 		RetryInterval: cfg.RateLimit.RetryInterval,
 		Timeout:       cfg.Redis.Timeout,
 		OnState:       func(d bool) { m.Degraded("budget", d); onDegraded("budget", d) },
@@ -102,7 +103,7 @@ func buildPolicy(ctx context.Context, cfg *config.Config, m *telemetry.Metrics, 
 			slog.String("error", err.Error()))
 	}
 	log.Info("shared limits and budgets", slog.String("algorithm", alg), slog.Int("replicas", cfg.RateLimit.Replicas),
-		slog.String("grace", grace.String()))
+		slog.String("grace", grace.String()), slog.Duration("grace_refill", cfg.Budget.GraceRefill))
 	wait := waitFills(pol.Cache)
 	return pol, func() { wait(); _ = rdb.Close() }, rdb, nil
 }

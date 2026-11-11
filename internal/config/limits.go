@@ -39,8 +39,14 @@ type RateLimit struct {
 // BudgetPolicy configures the budget ledger.
 type BudgetPolicy struct {
 	// GraceUSD is how much each replica may let a key spend while Redis is
-	// unreachable before it refuses that key.
+	// unreachable before it refuses that key. It is an allowance that
+	// refills over GraceRefill and is not reset when Redis recovers.
 	GraceUSD Decimal `yaml:"grace_usd"`
+	// GraceRefill is how long a key's grace allowance takes to refill from
+	// empty. Over any stretch T one replica process lets a key spend at
+	// most grace_usd × (1 + T / grace_refill) without Redis, however often
+	// Redis flaps.
+	GraceRefill time.Duration `yaml:"grace_refill"`
 	// ReservationTTL is how long an unsettled reservation holds budget.
 	ReservationTTL time.Duration `yaml:"reservation_ttl"`
 }
@@ -102,6 +108,7 @@ const (
 	DefaultKeyPrefix      = "sb:"
 	DefaultRetryInterval  = time.Second
 	DefaultGraceUSD       = "0.10"
+	DefaultGraceRefill    = time.Hour
 	DefaultOutputEstimate = 4096
 )
 
@@ -167,6 +174,9 @@ func (c *Config) validateShared(models map[string]Model) []error {
 	}
 	if _, err := cost.ParseUSD(string(c.Budget.GraceUSD)); err != nil {
 		errs = append(errs, fmt.Errorf("budget.grace_usd: %w", err))
+	}
+	if c.Budget.GraceRefill <= 0 {
+		errs = append(errs, fmt.Errorf("budget.grace_refill must be positive, got %v", c.Budget.GraceRefill))
 	}
 	for _, p := range c.Providers {
 		// A hold that expires while its call is still running frees

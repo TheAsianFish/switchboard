@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/bits"
 	"sync"
 	"time"
 
@@ -12,16 +13,24 @@ import (
 )
 
 // ErrUnavailable is returned by Degrading.Balance while the primary ledger
-// is unreachable: the grace ledger knows nothing about the real balance.
+// is unreachable: the grace allowance knows nothing about the real balance.
 var ErrUnavailable = errors.New("budget store unavailable")
+
+// DefaultGraceRefill is how long a key's grace allowance takes to refill
+// from empty when DegradeOptions.GraceRefill is not set.
+const DefaultGraceRefill = time.Hour
 
 // DegradeOptions configures a Degrading ledger.
 type DegradeOptions struct {
-	// Grace is how much each key may reserve on this replica while the
-	// primary is unreachable, per outage and per window. Zero refuses
-	// everything during an outage.
+	// Grace is the capacity of each key's grace allowance on this replica:
+	// the most the key may have reserved at once while the primary is
+	// unreachable. The allowance refills over GraceRefill and is not reset
+	// when an outage ends. Zero refuses everything during an outage.
 	Grace cost.Nanos
-	// RetryInterval is how long to stay on the grace ledger after a
+	// GraceRefill is how long the allowance takes to refill from empty, at
+	// a steady Grace per GraceRefill; DefaultGraceRefill if not positive.
+	GraceRefill time.Duration
+	// RetryInterval is how long to stay on the grace allowance after a
 	// primary failure before probing again; default 1s.
 	RetryInterval time.Duration
 	// Timeout bounds every primary call; default 100ms.
@@ -41,25 +50,38 @@ type DegradeOptions struct {
 // than the store, but unlimited spend during an outage is not acceptable
 // either.
 //
-// While degraded, each key may reserve up to Grace on this replica, after
-// which reservations are refused. Costs settled while degraded are kept as
-// pending charges per key and window and are charged to the primary on the
-// first successful primary call after recovery; once they are all charged
-// the grace ledger is reset, so each outage gets fresh grace. With N
-// replicas an outage can overspend a key by at most N × Grace plus
-// whatever the primary had already admitted.
+// While degraded, a key's reservations are admitted against a grace
+// allowance held in this process's memory: a token bucket per key with
+// capacity Grace that refills at Grace per GraceRefill. Admitting a
+// reservation takes its amount from the bucket, and settling it gives back
+// what the hold over-estimated (or takes what it under-estimated). The
+// bucket is not reset when an outage ends, so however often the primary
+// flaps, one replica process admits at most Grace × (1 + T / GraceRefill)
+// without the primary over any stretch of length T, plus whatever requests
+// cost above their estimates. A fleet multiplies that by the number of
+// replica processes, not replicas: a restarted replica starts with a full
+// allowance.
+//
+// Costs settled while degraded are kept as pending charges per key and
+// window and are charged to the primary on the first successful primary
+// call after recovery. Pending charges live only in this process's memory:
+// a replica killed while degraded takes its unreported spend with it,
+// which is at most what its allowance admitted plus the cost of primary
+// holds it settled during the outage.
 //
 // A reservation held on the primary and settled while degraded cannot be
 // released there; its cost goes to pending and the hold expires by TTL, so
-// until then the key is over-reserved by it, which errs on refusing.
+// until then the key is over-reserved by it, which errs on refusing. A
+// primary hold whose replica died before settling is also released by
+// TTL, and its cost never reaches the primary's spent.
 //
 // A primary call that times out after the primary applied it is
 // indistinguishable from one that never arrived; a settle in that state is
-// charged again from pending, so an outage can over-count spend (never
-// under-count it).
+// charged again from pending, so an outage can over-count spend.
 type Degrading struct {
 	primary Ledger
 	grace   cost.Nanos
+	refill  time.Duration
 	retry   time.Duration
 	timeout time.Duration
 	onState func(bool)
@@ -68,13 +90,29 @@ type Degrading struct {
 	mu       sync.Mutex
 	degraded bool
 	retryAt  time.Time
-	local    *Memory
-	gen      uint64
+	// buckets holds the grace allowance of every key below full; a key
+	// with no bucket has a full allowance. They are keyed by key alone,
+	// not by budget window: the allowance bounds what this process admits
+	// without the primary over time, and a key whose daily window rolls
+	// over mid-outage must not get a second allowance.
+	buckets  map[string]*graceBucket
 	pending  map[accountKey]pendingCharge
 	flushing bool
 	// failures counts primary failures; a success ends degraded mode only
 	// if none was recorded after its call started.
 	failures uint64
+}
+
+// graceBucket is one key's grace allowance.
+type graceBucket struct {
+	// tokens is what the key may still reserve. It goes below zero when a
+	// grace hold settles above its estimate; refill pays that back first.
+	tokens cost.Nanos
+	// last is when tokens was last refilled.
+	last time.Time
+	// rem is the remainder of the last refill's division by the refill
+	// period, so frequent refills lose nothing to rounding.
+	rem uint64
 }
 
 // pendingCharge is cost settled while degraded, not yet on the primary.
@@ -89,12 +127,17 @@ var _ Ledger = (*Degrading)(nil)
 func NewDegrading(primary Ledger, opts DegradeOptions) *Degrading {
 	d := &Degrading{
 		primary: primary,
-		grace:   opts.Grace,
+		grace:   max(opts.Grace, 0),
+		refill:  opts.GraceRefill,
 		retry:   opts.RetryInterval,
 		timeout: opts.Timeout,
 		onState: opts.OnState,
 		now:     opts.Now,
+		buckets: make(map[string]*graceBucket),
 		pending: make(map[accountKey]pendingCharge),
+	}
+	if d.refill <= 0 {
+		d.refill = DefaultGraceRefill
 	}
 	if d.retry <= 0 {
 		d.retry = time.Second
@@ -108,16 +151,90 @@ func NewDegrading(primary Ledger, opts DegradeOptions) *Degrading {
 	if d.onState == nil {
 		d.onState = func(bool) {}
 	}
-	d.gen = 1
-	d.local = NewMemory(DefaultReservationTTL, d.now)
 	return d
 }
 
-// Degraded reports whether the ledger is currently on its grace ledger.
+// Degraded reports whether the ledger is currently on its grace allowance.
 func (d *Degrading) Degraded() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.degraded
+}
+
+// GraceRemaining reports what key may still reserve on this replica while
+// the primary is unreachable. It is negative while the key pays back a
+// grace hold that settled above its estimate.
+func (d *Degrading) GraceRemaining(key string) cost.Nanos {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	g := d.bucket(key, d.now())
+	tokens := g.tokens
+	d.tidy(key, g)
+	return tokens
+}
+
+// bucket returns key's grace allowance refilled up to now, creating a full
+// one if the key has none. Callers hold mu and call tidy when done.
+func (d *Degrading) bucket(key string, now time.Time) *graceBucket {
+	g := d.buckets[key]
+	if g == nil {
+		g = &graceBucket{tokens: d.grace, last: now}
+		d.buckets[key] = g
+		return g
+	}
+	g.refill(now, d.grace, d.refill)
+	return g
+}
+
+// tidy forgets key's bucket once it is full, since a missing bucket is a
+// full one; the map then holds only keys that spent grace recently.
+// Callers hold mu.
+func (d *Degrading) tidy(key string, g *graceBucket) {
+	if g.tokens >= d.grace {
+		delete(d.buckets, key)
+	}
+}
+
+// refill adds grace per period for the time since g.last, up to grace. A
+// clock that went backwards adds nothing.
+func (g *graceBucket) refill(now time.Time, grace cost.Nanos, period time.Duration) {
+	if !now.After(g.last) {
+		return
+	}
+	elapsed := now.Sub(g.last)
+	g.last = now
+	if grace <= 0 || g.tokens >= grace {
+		g.tokens, g.rem = min(g.tokens, grace), 0
+		return
+	}
+	// Each whole period adds grace. Stop as soon as that fills the bucket,
+	// so a long gap cannot overflow.
+	if elapsed >= period {
+		n := int64(elapsed / period)
+		elapsed %= period
+		deficit := int64(grace - g.tokens)
+		need := deficit / int64(grace)
+		if deficit%int64(grace) != 0 {
+			need++
+		}
+		if n >= need {
+			g.tokens, g.rem = grace, 0
+			return
+		}
+		g.tokens += cost.Nanos(n) * grace
+	}
+	// The rest of a period adds grace × elapsed / period, worked out in 128
+	// bits. With elapsed < period and rem < period the dividend is below
+	// (grace + 1) × period, so the quotient fits in 64 bits and Div64
+	// cannot panic.
+	hi, lo := bits.Mul64(uint64(grace), uint64(elapsed))
+	lo, carry := bits.Add64(lo, g.rem, 0)
+	q, r := bits.Div64(hi+carry, lo, uint64(period))
+	g.tokens += cost.Nanos(q)
+	g.rem = r
+	if g.tokens >= grace {
+		g.tokens, g.rem = grace, 0
+	}
 }
 
 // tryPrimary reports whether a call should go to the primary, and the
@@ -151,16 +268,17 @@ func (d *Degrading) failed(ctx context.Context, err error) bool {
 	if !d.degraded {
 		d.degraded = true
 		telemetry.Logger(ctx).Warn("budget store unreachable, using per-replica grace",
-			"error", err, "grace", d.grace.String())
+			"error", err, "grace", d.grace.String(), "grace_refill", d.refill.String())
 		d.onState(true)
 	}
 	return true
 }
 
 // succeeded runs after a primary call that reached the store: it charges
-// pending costs and, once none are left, leaves degraded mode. A call
-// that started before the latest failure (seen is older) proves nothing
-// about the store now and changes nothing.
+// pending costs and, once none are left, leaves degraded mode. Recovery
+// does not touch the grace allowance, which keeps refilling at its own
+// pace. A call that started before the latest failure (seen is older)
+// proves nothing about the store now and changes nothing.
 func (d *Degrading) succeeded(ctx context.Context, seen uint64) {
 	d.mu.Lock()
 	if (!d.degraded && len(d.pending) == 0) || d.flushing || d.failures != seen {
@@ -183,8 +301,6 @@ func (d *Degrading) succeeded(ctx context.Context, seen uint64) {
 	}
 	if d.degraded && len(d.pending) == 0 {
 		d.degraded = false
-		d.gen++
-		d.local = NewMemory(DefaultReservationTTL, d.now)
 		telemetry.Logger(ctx).Info("budget store recovered", "flushed", flushed.String())
 		d.onState(false)
 	}
@@ -232,7 +348,9 @@ func (d *Degrading) flush(ctx context.Context) (cost.Nanos, error) {
 	}
 }
 
-// Reserve implements Ledger.
+// Reserve implements Ledger. While the primary is unreachable it admits
+// against key's grace allowance, with Memory's rule for zero amounts, and
+// fails with an error wrapping ErrExhausted once the allowance is short.
 func (d *Degrading) Reserve(ctx context.Context, key string, b Budget, id string, amount cost.Nanos) (Reservation, error) {
 	// Reject bad input here so it never reaches the primary and is never
 	// mistaken for a store failure.
@@ -250,18 +368,23 @@ func (d *Degrading) Reserve(ctx context.Context, key string, b Budget, id string
 			return r, err
 		}
 	}
+	now := d.now()
+	window := b.Window(now)
 	d.mu.Lock()
-	local, gen := d.local, d.gen
-	d.mu.Unlock()
-	r, err := local.Reserve(ctx, key, Budget{Limit: d.grace, Period: b.Period}, id, amount)
-	if err != nil {
+	defer d.mu.Unlock()
+	g := d.bucket(key, now)
+	if amount > g.tokens || (amount == 0 && g.tokens <= 0) {
+		err := exhausted(key, window, g.tokens, amount)
+		d.tidy(key, g)
 		return Reservation{}, fmt.Errorf("budget store unreachable, grace: %w", err)
 	}
-	r.grace = gen
-	return r, nil
+	g.tokens -= amount
+	d.tidy(key, g)
+	return Reservation{ID: id, Window: window, Amount: amount, grace: true}, nil
 }
 
-// Settle implements Ledger.
+// Settle implements Ledger. A grace hold adjusts key's grace allowance by
+// hold − actual whenever it settles, during the outage or after it.
 func (d *Degrading) Settle(ctx context.Context, key string, b Budget, r Reservation, actual cost.Nanos) error {
 	if err := checkSettle(b, actual); err != nil {
 		return err
@@ -272,9 +395,21 @@ func (d *Degrading) Settle(ctx context.Context, key string, b Budget, r Reservat
 	// The money was spent whether or not the caller is still waiting, so
 	// its cancellation must not drop the charge.
 	ctx = context.WithoutCancel(ctx)
+	if r.grace {
+		// The cost was admitted without the primary's consent, so it
+		// counts against the allowance: give back what the hold
+		// over-estimated, or take what it under-estimated. Tokens may go
+		// negative, which is honest about a low estimate; refill pays it
+		// back before the key is admitted again.
+		d.mu.Lock()
+		g := d.bucket(key, d.now())
+		g.tokens += r.Amount - actual
+		d.tidy(key, g)
+		d.mu.Unlock()
+	}
 	if try, seen := d.tryPrimary(); try {
 		pr := r
-		if r.grace != 0 {
+		if r.grace {
 			// The primary never saw this hold; charge the cost plainly.
 			pr = Reservation{Window: r.Window}
 		}
@@ -291,11 +426,6 @@ func (d *Degrading) Settle(ctx context.Context, key string, b Budget, r Reservat
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if r.grace == d.gen {
-		// Release the grace hold and count the cost against grace. An
-		// error here can only be a validation error, already ruled out.
-		_ = d.local.Settle(ctx, key, Budget{Limit: d.grace, Period: b.Period}, r, actual)
-	}
 	if actual > 0 {
 		k := accountKey{key, r.Window}
 		p := d.pending[k]
