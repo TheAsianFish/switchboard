@@ -299,8 +299,22 @@ func envOr(name, def string) string {
 	return def
 }
 
+// buildVersion is set by release builds (scripts/dist.sh and the
+// Dockerfile) with -ldflags "-X main.buildVersion=v1.2.3". Those builds have
+// no VCS stamp (-trimpath archives, and no .git in the Docker context), so
+// without it they would report "(devel)". go install module@version leaves
+// it empty and reports the module version instead.
+var buildVersion string
+
 func version() string {
 	info, ok := debug.ReadBuildInfo()
+	return versionString(buildVersion, info, ok)
+}
+
+func versionString(stamped string, info *debug.BuildInfo, ok bool) string {
+	if stamped != "" {
+		return stamped
+	}
 	if !ok {
 		return "unknown"
 	}
