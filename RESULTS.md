@@ -869,6 +869,158 @@ means the first whole second after the event already met the rule.
 - Commit: `bfd0dc3`, run 2026-11-10T19:34:37Z. Cost: $0 (fake provider; the budget's dollars are its made-up price).
 - Command: `make chaos`.
 
+## M8: budget grace under a flapping store
+
+Does Q6's outage bound survive a Redis that comes and goes? Command:
+`make chaos-flap RUN=before|after` (`SCHEDULE=flap chaos/run.sh`), raw
+files in `eval/results/m8-flap/before/` and `eval/results/m8-flap/after/`.
+
+**Method.** Q6's fleet and three streams (three replicas behind nginx,
+Redis 8, the fake provider; the budgeted key has $0.2000 in total and each
+replica may let it spend $0.0100 while Redis is unreachable), for 150 s. The
+budget is spent by about 43 s. From 50 s, Redis is taken off the compose
+network for 8 s and put back for 4 s, eight times (`docker network
+disconnect` / `connect`, so it keeps its state); replica 2 is killed
+(SIGKILL) 3 s into the fifth outage and started again 2 s after it. The
+phases and the rule for each hypothesis were written in PLAN.md (M8)
+before the first full run. Half a second before every docker action and
+once after the run, the script reads the key's `spent` and `reserved`
+from Redis with `redis-cli` inside the container, which works while it is
+off the network; the gap is the fake provider's ledger, priced, up to
+that moment minus Redis's `spent`. The same run was made at the commit
+before the fix (grace reset every time Redis came back) and at the commit
+with it (an allowance per replica and key that refills over 1 h).
+
+**Per outage.** Spend is what the provider served the key during the
+outage; requests a replica admitted on grace in the second before its
+next probe found Redis again land just after it and count in the
+overshoot, not here.
+
+| Outage | Window (s) | Replicas | Before: requests | spent | overshoot after | last served (s in) | After: requests | spent | overshoot after | last served (s in) |
+|-------:|------------|----------|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|
+| 1 | 50.0–58.0 | 3 | 58 | $0.0270 | $0.0260 | 7.9 | 60 | $0.0279 | $0.0269 | 7.1 |
+| 2 | 62.0–70.0 | 3 | 60 | $0.0279 | $0.0548 | 6.8 | 0 | $0.0000 | $0.0269 | – |
+| 3 | 74.0–82.0 | 3 | 60 | $0.0279 | $0.0827 | 6.9 | 0 | $0.0000 | $0.0269 | – |
+| 4 | 86.0–94.0 | 3 | 60 | $0.0279 | $0.1106 | 6.6 | 0 | $0.0000 | $0.0269 | – |
+| 5 | 98.0–106.0 | 3, one killed | 49 | $0.0228 | $0.1334 | 5.8 | 0 | $0.0000 | $0.0269 | – |
+| 6 | 110.0–118.0 | 3 | 58 | $0.0270 | $0.1604 | 7.3 | 20 | $0.0093 | $0.0362 | 4.6 |
+| 7 | 122.0–130.0 | 3 | 54 | $0.0251 | $0.1864 | 8.0 | 0 | $0.0000 | $0.0362 | – |
+| 8 | 134.0–142.0 | 3 | 60 | $0.0279 | $0.2166 | 7.5 | 0 | $0.0000 | $0.0362 | – |
+
+| | Before the fix | After the fix |
+|-|---------------:|--------------:|
+| Overshoot at the end | $0.2166 | $0.0362 |
+| Spent during the outages | $0.2134 | $0.0372 |
+| Overshoot added per outage (least-squares slope) | $0.0268 (R² 0.999) | $0.0017 (R² 0.714) |
+| T, first disconnect to last connect | 92.0 s | 92.0 s |
+| Replica processes in T | 4 | 4 |
+| Bound if grace resets every outage | $0.2400 | $0.2400 |
+| Bound processes × grace × (1 + T / refill) | – (no refill) | $0.0410 |
+| Killed replica's spend Redis never saw (bound: one grace) | $0.004185 (estimated pending $0.004495) | $0 (estimated pending $0) |
+| Largest gap in a reachable phase before the kill | $0 | $0 |
+| Most negative gap after the first outage | $0 | $0 |
+
+**Reconciliation and the main stream per phase.** Ledger and Redis are
+cumulative at the snapshot that ends the phase; a positive gap is spend
+Redis has not seen (pending on a replica, or lost with one), a negative
+one would be a double charge. Error rate and p99 are the main stream's,
+reported but not judged: Q6's steady-state rule needs 5 s and a reachable
+stretch is 4 s.
+
+| Phase | Redis | Replicas | Before: error rate | p99 (ms) | ledger | Redis spent | gap | Redis reserved | After: error rate | p99 (ms) | ledger | Redis spent | gap | Redis reserved |
+|-------|-------|---------:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|
+| steady | up | 3 | 0.00% | 185.35 | $0.1990 | $0.1990 | $0 | $0 | 0.00% | 183.76 | $0.1990 | $0.1990 | $0 | $0 |
+| outage 1 | cut off | 3 | 0.00% | 434.51 | $0.2255 | $0.1990 | $0.026505 | $0 | 0.00% | 436.00 | $0.2269 | $0.1990 | $0.027900 | $0 |
+| back 1 | up | 3 | 0.00% | 185.88 | $0.2269 | $0.2269 | $0 | $0 | 0.00% | 188.72 | $0.2269 | $0.2269 | $0 | $0 |
+| outage 2 | cut off | 3 | 0.00% | 433.14 | $0.2548 | $0.2269 | $0.027900 | $0 | 0.00% | 434.02 | $0.2269 | $0.2269 | $0 | $0 |
+| back 2 | up | 3 | 0.00% | 186.03 | $0.2548 | $0.2548 | $0 | $0 | 0.00% | 186.03 | $0.2269 | $0.2269 | $0 | $0 |
+| outage 3 | cut off | 3 | 0.00% | 433.62 | $0.2827 | $0.2548 | $0.027900 | $0 | 0.00% | 435.61 | $0.2269 | $0.2269 | $0 | $0 |
+| back 3 | up | 3 | 0.00% | 185.49 | $0.2827 | $0.2827 | $0 | $0 | 0.00% | 185.51 | $0.2269 | $0.2269 | $0 | $0 |
+| outage 4 | cut off | 3 | 0.00% | 434.30 | $0.3106 | $0.2827 | $0.027900 | $0 | 0.00% | 433.66 | $0.2269 | $0.2269 | $0 | $0 |
+| back 4 | up | 3 | 0.00% | 187.48 | $0.3106 | $0.3106 | $0 | $0 | 0.00% | 185.40 | $0.2269 | $0.2269 | $0 | $0 |
+| outage 5 | cut off | 3 | 0.00% | 435.62 | $0.3218 | $0.3106 | $0.011160 | $0 | 0.00% | 435.75 | $0.2269 | $0.2269 | $0 | $0 |
+| outage 5, replica 2 down | cut off | 2 | 1.30% | 431.07 | $0.3334 | $0.3106 | $0.022785 | $0 | 1.80% | 433.78 | $0.2269 | $0.2269 | $0 | $0 |
+| back 5, replica 2 down | up | 2 | 0.00% | 184.93 | $0.3334 | $0.3292 | $0.004185 | $0 | 0.00% | 186.06 | $0.2269 | $0.2269 | $0 | $0 |
+| back 5 | up | 3 | 0.00% | 185.71 | $0.3334 | $0.3292 | $0.004185 | $0 | 0.00% | 186.32 | $0.2269 | $0.2269 | $0 | $0 |
+| outage 6 | cut off | 3 | 0.00% | 434.78 | $0.3604 | $0.3292 | $0.031155 | $0 | 0.00% | 432.71 | $0.2362 | $0.2269 | $0.009300 | $0 |
+| back 6 | up | 3 | 0.00% | 185.62 | $0.3613 | $0.3571 | $0.004185 | $0 | 0.00% | 186.38 | $0.2362 | $0.2362 | $0 | $0 |
+| outage 7 | cut off | 3 | 0.00% | 434.58 | $0.3860 | $0.3571 | $0.028830 | $0 | 0.00% | 433.88 | $0.2362 | $0.2362 | $0 | $0 |
+| back 7 | up | 3 | 0.00% | 187.11 | $0.3887 | $0.3846 | $0.004185 | $0 | 0.00% | 185.80 | $0.2362 | $0.2362 | $0 | $0 |
+| outage 8 | cut off | 3 | 0.00% | 433.81 | $0.4166 | $0.3846 | $0.032085 | $0 | 0.00% | 434.71 | $0.2362 | $0.2362 | $0 | $0 |
+| back 8 | up | 3 | 0.00% | 186.36 | $0.4166 | $0.4125 | $0.004185 | $0 | 0.00% | 184.34 | $0.2362 | $0.2362 | $0 | $0 |
+
+**Hypotheses (PLAN.md, M8) against the runs.**
+
+| Hypothesis | Observed | Held |
+|------------|----------|------|
+| Before: eight outages overshoot by about 8 × 3 × grace = $0.24 (falsified under $0.06) | overshoot $0.2166 at the end; $0.2134 spent during the outages | yes |
+| Before: the overshoot grows linearly with the outages (R² ≥ 0.95, slope $0.0225 to $0.0375 per outage) | slope $0.0268 per outage, R² 0.999 | yes |
+| After: overshoot at most processes × grace × (1 + T / refill), a restarted replica counted as a new process | overshoot $0.0362 against $0.0410 (4 processes, T = 92.0 s) | yes |
+| After: whatever the outage count; outages 2 to 8 add at most the restarted process's grace plus the refill | outage 1 spent $0.0279, outages 2 to 8 together $0.0093 (allowed $0.0110) | yes |
+| Before: the replica killed 3.0 s into outage 5 takes its pending spend with it ($0.004 to $0.005), at most one grace; nothing is lost without the kill | Redis short of the provider by $0.004185 at the end (bound $0.0100); largest gap in a reachable phase before the kill $0 | yes |
+| After: the replica killed 3.0 s into outage 5 takes its pending spend with it (about $0: its allowance was spent in outage 1), at most one grace; nothing is lost without the kill | Redis short of the provider by $0 at the end (bound $0.0100); largest gap in a reachable phase before the kill $0 | yes |
+
+**Reading the runs.**
+
+- Before the fix every outage was a fresh one. Each replica's grace
+  ledger was replaced once its pending charges reached Redis, so the
+  fleet's $0.0100 × 3 came back after every reconnect, and the overshoot
+  rose by $0.0268 per outage (R² 0.999) to $0.2166 on a $0.2000 budget.
+  Each outage spent a little less than three graces because a hold is
+  the request's worst case (64 output tokens) while a reply uses 30, and
+  the last holds of an outage cannot fit in what is left.
+- After the fix the first outage used up the allowance ($0.0279) and
+  later outages found it nearly empty: an hour's refill is $0.0100, so
+  12 s of it is worth less than one reply. The one later outage that
+  spent anything ($0.0093) is the first after replica 2 restarted: a
+  new process starts with a full allowance, which is why the bound
+  counts 4 processes over T = 92 s, not three replicas. The overshoot,
+  $0.0362, sits under that bound ($0.0410) whatever the outage count.
+- What the killed replica takes with it is its pending spend: costs it
+  settled on grace and had not yet charged to Redis. Before the fix it
+  was $0.004185, close to the estimate (the outage's spend before the kill
+  over three replicas), and the gap never closed. After the fix it was
+  $0, because its allowance was already empty when it died, so it had
+  admitted nothing to lose. The loss is bounded, not removed: a replica
+  killed late in its first outage would lose up to one allowance ($0.0100)
+  plus the requests it had reserved on Redis before the outage.
+- No gap was negative and Redis's `reserved` was 0 at every snapshot in
+  both runs. The double charge (a settle that timed out after Redis
+  applied it, charged again from pending) needs a reply lost after the
+  write; cutting the network drops packets in both directions, and no
+  transition in either run caught a settle in that window. The
+  expired hold (a hold on Redis whose replica died before settling, which
+  expires after its TTL without its cost reaching `spent`) needs a replica
+  killed while Redis is reachable with a request in flight; here the kill
+  came 3 s into an outage, so its holds were in its own memory. Both stay
+  under known problems.
+- The main stream's p99 rises to the cache's store timeout in every
+  outage and falls back within the 4 s reachable stretch, with no errors
+  except the streams cut by the kill, in both runs: the fix touches only
+  the budget's degraded path.
+
+**`make chaos` after the fix.** The fix changes the degraded path Q6
+exercises, so Q6 was run again at `e9036ca` (2026-11-11T19:10:31Z), into
+`eval/results/m8-flap/q6-rerun/` beside the committed run rather than over
+it. One outage shorter than the refill period is bounded the same way
+before and after (the live replicas' grace). The budget rows match to the
+hundredth of a cent; the replica kill's error rate is the streams that
+happened to be in flight on the killed replica, a path the fix does not
+touch:
+
+| Q6 number | Committed (`bfd0dc3`) | Re-run after the fix |
+|-----------|-----------:|-------------------:|
+| Error rate after the replica kill | 0.10% | 0.20% |
+| Errors with Redis down | 0 | 0 |
+| p99 with Redis down | 431.05 ms | 429.49 ms |
+| Spent while Redis was down | $0.0186 (bound $0.0200) | $0.0186 (bound $0.0200) |
+| Hit rate of repeats after the Redis restart | 84.6% | 84.6% |
+| Overshoot at the end | $0.1980 | $0.1980 |
+
+- Before: commit `8111595`, run 2026-11-11T19:03:13Z, `make chaos-flap RUN=before`; AMD EPYC 9V45 96-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- After: commit `563034e`, run 2026-11-11T19:07:41Z, `make chaos-flap RUN=after`; AMD EPYC 9V45 96-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Cost: $0 (fake provider; the budget's dollars are its made-up price).
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -891,6 +1043,32 @@ the client, and says nothing about the gateway's overhead (Q1 does).
 
 Recorded on 2026-10-27. The raw files do not record the machine,
 and each TTFT is one sample, not a performance claim. Cost: $0 (local Ollama only).
+
+## Known problems
+
+Measured weaknesses and cases the runs could not reach, each with what was
+observed.
+
+- **Pending budget spend dies with its replica.** Costs a replica settles
+  on grace are kept in its memory until Redis answers again. In M8 the
+  replica killed during an outage took $0.004185 with it before the grace
+  fix and $0 after it (its allowance was already spent). The loss is
+  at most one allowance ($0.0100) plus the requests it had reserved on Redis
+  before the outage and settled during it; a replica killed late in its
+  first outage would come close.
+- **A settle that timed out after Redis applied it is charged twice.**
+  The replica cannot tell it from one that never arrived, so it keeps the
+  cost as pending and charges it again: an over-count, never a miss. Not
+  observed in M8: no reconciliation gap was negative in either run.
+- **A hold whose replica died while Redis was up expires without its cost
+  reaching `spent`.** The request was sent upstream; nobody settles it,
+  and after the reservation TTL the hold is released. Not reached by M8,
+  whose kill came during an outage (`reserved` was 0 at every snapshot);
+  Q6's replica kill, with Redis up, is the case, and its reconciliation is
+  not recorded.
+- **Budgets reset on a Redis restart.** Redis runs without persistence,
+  so the ledger comes back empty (Q6's overshoot after the restart); M9
+  measures what an append-only file costs.
 
 ## To measure
 

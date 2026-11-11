@@ -820,6 +820,127 @@ means the first whole second after the event already met the rule.
 {{else}}
 Not measured yet. Run `make chaos`, then `make results`.
 {{end}}
+## M8: budget grace under a flapping store
+
+Does Q6's outage bound survive a Redis that comes and goes? Command:
+`make chaos-flap RUN=before|after` (`SCHEDULE=flap chaos/run.sh`), raw
+files in `eval/results/m8-flap/before/` and `eval/results/m8-flap/after/`.
+{{with .M8}}
+**Method.** Q6's fleet and three streams (three replicas behind nginx,
+Redis 8, the fake provider; the budgeted key has {{.Budget}} in total and each
+replica may let it spend {{.Grace}} while Redis is unreachable), for 150 s. The
+budget is spent by about 43 s. From 50 s, Redis is taken off the compose
+network for 8 s and put back for 4 s, eight times (`docker network
+disconnect` / `connect`, so it keeps its state); replica 2 is killed
+(SIGKILL) 3 s into the fifth outage and started again 2 s after it. The
+phases and the rule for each hypothesis were written in PLAN.md (M8)
+before the first full run. Half a second before every docker action and
+once after the run, the script reads the key's `spent` and `reserved`
+from Redis with `redis-cli` inside the container, which works while it is
+off the network; the gap is the fake provider's ledger, priced, up to
+that moment minus Redis's `spent`. The same run was made at the commit
+before the fix (grace reset every time Redis came back) and at the commit
+with it (an allowance per replica and key that refills over {{.Refill}}).
+
+**Per outage.** Spend is what the provider served the key during the
+outage; requests a replica admitted on grace in the second before its
+next probe found Redis again land just after it and count in the
+overshoot, not here.
+
+| Outage | Window (s) | Replicas | Before: requests | spent | overshoot after | last served (s in) | After: requests | spent | overshoot after | last served (s in) |
+|-------:|------------|----------|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|
+{{- range .Outages}}
+| {{.N}} | {{.Window}} | {{.Replicas}} | {{.BeforeRequests}} | {{.BeforeSpent}} | {{.BeforeOver}} | {{.BeforeExhaust}} | {{.AfterRequests}} | {{.AfterSpent}} | {{.AfterOver}} | {{.AfterExhaust}} |
+{{- end}}
+
+| | Before the fix | After the fix |
+|-|---------------:|--------------:|
+{{- range .Totals}}
+| {{.Name}} | {{.Before}} | {{.After}} |
+{{- end}}
+
+**Reconciliation and the main stream per phase.** Ledger and Redis are
+cumulative at the snapshot that ends the phase; a positive gap is spend
+Redis has not seen (pending on a replica, or lost with one), a negative
+one would be a double charge. Error rate and p99 are the main stream's,
+reported but not judged: Q6's steady-state rule needs 5 s and a reachable
+stretch is 4 s.
+
+| Phase | Redis | Replicas | Before: error rate | p99 (ms) | ledger | Redis spent | gap | Redis reserved | After: error rate | p99 (ms) | ledger | Redis spent | gap | Redis reserved |
+|-------|-------|---------:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|
+{{- range .Phases}}
+| {{.Name}} | {{.Redis}} | {{.Replicas}} | {{.Before.ErrorRate}} | {{.Before.P99}} | {{.Before.Ledger}} | {{.Before.Redis}} | {{.Before.Gap}} | {{.Before.Reserved}} | {{.After.ErrorRate}} | {{.After.P99}} | {{.After.Ledger}} | {{.After.Redis}} | {{.After.Gap}} | {{.After.Reserved}} |
+{{- end}}
+
+**Hypotheses (PLAN.md, M8) against the runs.**
+
+| Hypothesis | Observed | Held |
+|------------|----------|------|
+{{- range .Checks}}
+| {{.Hypothesis}} | {{.Observed}} | {{.Held}} |
+{{- end}}
+
+**Reading the runs.**
+
+- Before the fix every outage was a fresh one. Each replica's grace
+  ledger was replaced once its pending charges reached Redis, so the
+  fleet's {{.Grace}} × 3 came back after every reconnect, and the overshoot
+  rose by {{.SlopeBefore}} per outage (R² {{.R2Before}}) to {{.OvershootBefore}} on a {{.Budget}} budget.
+  Each outage spent a little less than three graces because a hold is
+  the request's worst case (64 output tokens) while a reply uses 30, and
+  the last holds of an outage cannot fit in what is left.
+- After the fix the first outage used up the allowance ({{.FirstAfter}}) and
+  later outages found it nearly empty: an hour's refill is {{.Grace}}, so
+  12 s of it is worth less than one reply. The one later outage that
+  spent anything ({{.RestartedAfter}}) is the first after replica 2 restarted: a
+  new process starts with a full allowance, which is why the bound
+  counts {{.ProcessesAfter}} processes over T = {{.T}}, not three replicas. The overshoot,
+  {{.OvershootAfter}}, sits under that bound ({{.RefillBound}}) whatever the outage count.
+- What the killed replica takes with it is its pending spend: costs it
+  settled on grace and had not yet charged to Redis. Before the fix it
+  was {{.LostBefore}}, close to the estimate (the outage's spend before the kill
+  over three replicas), and the gap never closed. After the fix it was
+  {{.LostAfter}}, because its allowance was already empty when it died, so it had
+  admitted nothing to lose. The loss is bounded, not removed: a replica
+  killed late in its first outage would lose up to one allowance ({{.Grace}})
+  plus the requests it had reserved on Redis before the outage.
+- No gap was negative and Redis's `reserved` was 0 at every snapshot in
+  both runs. The double charge (a settle that timed out after Redis
+  applied it, charged again from pending) needs a reply lost after the
+  write; cutting the network drops packets in both directions, and no
+  transition in either run caught a settle in that window. The
+  expired hold (a hold on Redis whose replica died before settling, which
+  expires after its TTL without its cost reaching `spent`) needs a replica
+  killed while Redis is reachable with a request in flight; here the kill
+  came 3 s into an outage, so its holds were in its own memory. Both stay
+  under known problems.
+- The main stream's p99 rises to the cache's store timeout in every
+  outage and falls back within the 4 s reachable stretch, with no errors
+  except the streams cut by the kill, in both runs: the fix touches only
+  the budget's degraded path.
+{{with .RerunMeta}}
+**`make chaos` after the fix.** The fix changes the degraded path Q6
+exercises, so Q6 was run again at `{{.Commit}}` ({{.Date}}), into
+`eval/results/m8-flap/q6-rerun/` beside the committed run rather than over
+it. One outage shorter than the refill period is bounded the same way
+before and after (the live replicas' grace). The budget rows match to the
+hundredth of a cent; the replica kill's error rate is the streams that
+happened to be in flight on the killed replica, a path the fix does not
+touch:
+
+| Q6 number | Committed (`{{$.M8.Q6Commit}}`) | Re-run after the fix |
+|-----------|-----------:|-------------------:|
+{{- range $.M8.Rerun}}
+| {{.Name}} | {{.Before}} | {{.After}} |
+{{- end}}
+{{end}}
+{{with .Before}}- Before: commit `{{.Meta.Commit}}`, run {{.Meta.Date}}, `{{.Meta.Command}}`; {{.Hardware}}.
+{{end}}{{with .After}}- After: commit `{{.Meta.Commit}}`, run {{.Meta.Date}}, `{{.Meta.Command}}`; {{.Hardware}}.
+{{end}}- Cost: $0 (fake provider; the budget's dollars are its made-up price).
+{{else}}
+Not measured yet. Run `make chaos-flap RUN=before` at the commit before
+the grace fix and `make chaos-flap RUN=after`, then `make results`.
+{{end}}
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -844,6 +965,35 @@ and each TTFT is one sample, not a performance claim. Cost: $0 (local Ollama onl
 {{else}}
 Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `make results`.
 {{end}}
+## Known problems
+
+Measured weaknesses and cases the runs could not reach, each with what was
+observed.
+{{with .M8}}
+- **Pending budget spend dies with its replica.** Costs a replica settles
+  on grace are kept in its memory until Redis answers again. In M8 the
+  replica killed during an outage took {{.LostBefore}} with it before the grace
+  fix and {{.LostAfter}} after it (its allowance was already spent). The loss is
+  at most one allowance ({{.Grace}}) plus the requests it had reserved on Redis
+  before the outage and settled during it; a replica killed late in its
+  first outage would come close.
+- **A settle that timed out after Redis applied it is charged twice.**
+  The replica cannot tell it from one that never arrived, so it keeps the
+  cost as pending and charges it again: an over-count, never a miss. Not
+  observed in M8: no reconciliation gap was negative in either run.
+- **A hold whose replica died while Redis was up expires without its cost
+  reaching `spent`.** The request was sent upstream; nobody settles it,
+  and after the reservation TTL the hold is released. Not reached by M8,
+  whose kill came during an outage (`reserved` was 0 at every snapshot);
+  Q6's replica kill, with Redis up, is the case, and its reconciliation is
+  not recorded.
+{{else}}
+- Budget reconciliation under a flapping store: not measured yet
+  (`make chaos-flap`).
+{{end}}- **Budgets reset on a Redis restart.** Redis runs without persistence,
+  so the ledger comes back empty (Q6's overshoot after the restart); M9
+  measures what an append-only file costs.
+
 ## To measure
 
 {{if not (and .Q1 .Q1.Breakdown)}}- Q1 per-feature breakdown (limits, budget, exact and semantic cache miss
