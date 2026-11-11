@@ -301,9 +301,10 @@ func envOr(name, def string) string {
 
 // buildVersion is set by release builds (scripts/dist.sh and the
 // Dockerfile) with -ldflags "-X main.buildVersion=v1.2.3". Those builds have
-// no VCS stamp (-trimpath archives, and no .git in the Docker context), so
-// without it they would report "(devel)". go install module@version leaves
-// it empty and reports the module version instead.
+// no VCS stamp (dist.sh builds with -buildvcs=false so untracked files cannot
+// change the bytes, and the Docker context has no .git), so without it they
+// would report "(devel)". go install module@version leaves it empty and
+// reports the module version instead.
 var buildVersion string
 
 func version() string {
