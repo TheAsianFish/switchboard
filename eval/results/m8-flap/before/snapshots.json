@@ -1,0 +1,21 @@
+[
+{"label": "disconnect redis", "unix": 1794423843.066044290, "spent_nanodollars": 199020000, "reserved_nanodollars": 0},
+{"label": "connect redis", "unix": 1794423851.065737669, "spent_nanodollars": 199020000, "reserved_nanodollars": 0},
+{"label": "disconnect redis", "unix": 1794423855.066147008, "spent_nanodollars": 226920000, "reserved_nanodollars": 0},
+{"label": "connect redis", "unix": 1794423863.065635886, "spent_nanodollars": 226920000, "reserved_nanodollars": 0},
+{"label": "disconnect redis", "unix": 1794423867.065513525, "spent_nanodollars": 254820000, "reserved_nanodollars": 0},
+{"label": "connect redis", "unix": 1794423875.065691553, "spent_nanodollars": 254820000, "reserved_nanodollars": 0},
+{"label": "disconnect redis", "unix": 1794423879.066073925, "spent_nanodollars": 282720000, "reserved_nanodollars": 0},
+{"label": "connect redis", "unix": 1794423887.065991025, "spent_nanodollars": 282720000, "reserved_nanodollars": 0},
+{"label": "disconnect redis", "unix": 1794423891.066349842, "spent_nanodollars": 310620000, "reserved_nanodollars": 0},
+{"label": "kill switchboard-2", "unix": 1794423894.066292693, "spent_nanodollars": 310620000, "reserved_nanodollars": 0},
+{"label": "connect redis", "unix": 1794423899.065440279, "spent_nanodollars": 310620000, "reserved_nanodollars": 0},
+{"label": "start switchboard-2", "unix": 1794423901.065089884, "spent_nanodollars": 329220000, "reserved_nanodollars": 0},
+{"label": "disconnect redis", "unix": 1794423903.066289141, "spent_nanodollars": 329220000, "reserved_nanodollars": 0},
+{"label": "connect redis", "unix": 1794423911.065994447, "spent_nanodollars": 329220000, "reserved_nanodollars": 0},
+{"label": "disconnect redis", "unix": 1794423915.065972518, "spent_nanodollars": 357120000, "reserved_nanodollars": 0},
+{"label": "connect redis", "unix": 1794423923.066614046, "spent_nanodollars": 357120000, "reserved_nanodollars": 0},
+{"label": "disconnect redis", "unix": 1794423927.067101069, "spent_nanodollars": 384555000, "reserved_nanodollars": 0},
+{"label": "connect redis", "unix": 1794423935.065278161, "spent_nanodollars": 384555000, "reserved_nanodollars": 0},
+{"label": "end", "unix": 1794423944.875755589, "spent_nanodollars": 412455000, "reserved_nanodollars": 0}
+]
