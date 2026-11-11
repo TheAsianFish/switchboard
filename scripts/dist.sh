@@ -7,9 +7,10 @@
 #
 # VERSION defaults to `git describe`. The binaries are pure Go (CGO off), so
 # every target cross-compiles from one machine. The archives are
-# reproducible: the same commit and VERSION give the same bytes (trimmed
-# paths, no build id, fixed file times and owners, gzip without a name or
-# time stamp).
+# reproducible: the same commit, VERSION and Go toolchain give the same
+# bytes (trimmed paths, no build id, fixed file times and owners, gzip
+# without a name or time stamp). A different Go patch release gives a
+# different binary.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

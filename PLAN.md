@@ -762,8 +762,11 @@ Changes made while building:
   - The Dockerfile cross-compiles in a build stage on the builder's own
     platform, so the arm64 image needs no QEMU. Archives come from
     `scripts/dist.sh` rather than GoReleaser: four `go build`s and `tar`
-    are all a pure-Go binary needs, and the script is reproducible (same
-    commit and version, same bytes).
+    are all a pure-Go binary needs, and the script is reproducible: two
+    builds of one commit and version with one Go toolchain gave the same
+    `SHA256SUMS`. The workflow's runner had Go 1.27.3 and this machine
+    1.27.0, and their archives differ, so the release's checksums are
+    reproducible only with the runner's Go.
   - `release.yml` publishes only on a pushed `v*` tag. Run by hand it is a
     dry run of the same jobs that publishes nothing; it was dry-run
     locally with `act` (the `catthehacker/ubuntu:act-latest` image) and
