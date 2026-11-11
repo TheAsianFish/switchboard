@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -34,6 +35,38 @@ func TestRunUsage(t *testing.T) {
 			}
 			if !strings.Contains(out.String(), tt.wantOut) || !strings.Contains(errOut.String(), tt.wantErr) {
 				t.Errorf("stdout %q stderr %q; want %q / %q", out.String(), errOut.String(), tt.wantOut, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestVersionString(t *testing.T) {
+	t.Parallel()
+	vcs := &debug.BuildInfo{
+		Main: debug.Module{Version: "(devel)"},
+		Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "0123456789abcdef0123"},
+			{Key: "vcs.modified", Value: "true"},
+			{Key: "vcs.time", Value: "2026-11-11T10:00:00Z"},
+		},
+	}
+	tests := []struct {
+		name    string
+		stamped string
+		info    *debug.BuildInfo
+		ok      bool
+		want    string
+	}{
+		{"release build stamp wins", "v1.0.0", vcs, true, "v1.0.0"},
+		{"go install module version", "", &debug.BuildInfo{Main: debug.Module{Version: "v1.0.0"}}, true, "v1.0.0"},
+		{"local build with vcs", "", vcs, true, "(devel) (0123456789ab-dirty, 2026-11-11)"},
+		{"no build info", "", nil, false, "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := versionString(tt.stamped, tt.info, tt.ok); got != tt.want {
+				t.Errorf("versionString = %q, want %q", got, tt.want)
 			}
 		})
 	}

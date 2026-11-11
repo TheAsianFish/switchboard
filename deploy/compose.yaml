@@ -121,7 +121,7 @@ services:
       - "127.0.0.1:9095:9090"
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.15
     profiles: [dev, fleet]
     ports:
       - "127.0.0.1:11434:11434"

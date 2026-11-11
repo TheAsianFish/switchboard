@@ -340,17 +340,21 @@ or the compose stack is a `make` target or a `workflow_dispatch` job.
   plus release archives for linux/darwin × amd64/arm64 attached to the GitHub
   release.
 - **Container.** `ghcr.io/theasianfish/switchboard:<tag>` built by a tag-guarded
-  workflow (`release.yml`, runs only on `v*` tags, multi-arch, uses the
-  repository's `GITHUB_TOKEN`, no extra secret).
-- **Quickstart.** `docker compose up` in `deploy/` brings up one replica,
-  Redis, Ollama, Jaeger and Prometheus; `--profile fleet` scales to three
+  workflow (`release.yml`, publishes only on `v*` tags and dry-runs when
+  started by hand, multi-arch, uses the repository's `GITHUB_TOKEN`, no
+  extra secret).
+- **Quickstart.** `docker compose -f deploy/compose.yaml --profile dev up`
+  brings up one replica, Redis, Ollama, Jaeger and Prometheus;
+  `--profile fleet` instead runs three
   replicas behind the load balancer. Point any OpenAI or Anthropic SDK at
   `http://localhost:8080` with a key from `switchboard.yaml`; the admin page is
   on `http://127.0.0.1:9090`.
 - **Maintainer must provide.** Nothing paid. To publish: make the repository
-  public, allow GitHub Packages for the repo, push a `v1.0.0` tag. For live
-  evals: `ANTHROPIC_API_KEY` as a repository secret (the eval workflow is
-  manual and skips without it). RELEASE.md (M7) lists the exact steps.
+  public, give Actions read and write permissions, push a `v1.0.0` tag,
+  then make the GHCR package public. For the live evals: an
+  `ANTHROPIC_API_KEY` in the shell that runs them (RESULTS.md "To measure"
+  gives each command and its estimated cost; no workflow uses the key).
+  RELEASE.md lists the exact steps.
 
 ## Risks
 
@@ -744,10 +748,51 @@ Changes made while building:
     is the `ui` job in `.github/workflows/ci.yml`; `make bench` at
     `bfd0dc3` answers Q1 with the per-feature breakdown.
 
+- **M7.**
+  - `go install` is checked without a public repository:
+    `scripts/check-install.sh` gives a clean `golang:1.27` container a bare
+    copy of the repo in place of `https://github.com/TheAsianFish/switchboard`
+    (git's `insteadOf`) and tags the commit there, so Go fetches and zips
+    the module through its own VCS path, as it would from GitHub. The
+    installed binary must report the tag, answer a chat completion from
+    the fake model and serve the embedded admin page.
+  - Release builds have no VCS stamp (`-trimpath` archives, no `.git` in
+    the Docker context), so they reported `(devel)`; they now set
+    `main.buildVersion` through `-ldflags`.
+  - The Dockerfile cross-compiles in a build stage on the builder's own
+    platform, so the arm64 image needs no QEMU. Archives come from
+    `scripts/dist.sh` rather than GoReleaser: four `go build`s and `tar`
+    are all a pure-Go binary needs, and the script is reproducible: two
+    builds of one commit and version with one Go toolchain gave the same
+    `SHA256SUMS`. The workflow's runner had Go 1.27.3 and this machine
+    1.27.0, and their archives differ, so the release's checksums are
+    reproducible only with the runner's Go.
+  - `release.yml` publishes only on a pushed `v*` tag. Run by hand it is a
+    dry run of the same jobs that publishes nothing; it was dry-run
+    locally with `act` (the `catthehacker/ubuntu:act-latest` image) and
+    checked with `actionlint`. Its first run on GitHub is the maintainer's
+    dry run in RELEASE.md.
+  - `make results` also renders the README's results table between two
+    markers, so no headline number in the README is typed by hand.
+  - The quickstart starts from `git clone` and `docker compose`, with the
+    fake model for a first request. The compose Ollama image is pinned
+    (0.40.15) so the quickstart does not move under it.
+  - Done-criteria evidence: from a fresh `git clone`, the README's
+    quickstart commands brought up the dev profile, answered the `fake`
+    request, pulled `qwen2.5:0.5b`, and streamed replies with both
+    unmodified Python SDKs (openai 3.49.0, anthropic 2.8.0); the admin
+    page, Jaeger and Prometheus answered, and the fleet profile showed
+    three replicas up. The release workflow dry-ran green under `act`
+    (test, archives and the two-platform image), `make check-install`
+    passed, and `actionlint` is clean.
+  - The demo GIF is a placeholder: `docs/demo/demo.tape` records it with
+    VHS, which this build machine does not have (no ttyd, ffmpeg or
+    browser); `docs/demo.md` has the steps.
+
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
 - [x] M3: Exact and semantic cache — canonical request hash cache; `embed` client for Ollama `/api/embed` with a fake; vector index interface with Redis HNSW/FLAT and in-memory FLAT implementations; cacheability rules (temperature, explicit header, context hash) and tenant namespacing; cached streams replayed in the client's wire format; `make eval-cache` with the PAWS-Wiki and GSM8K-perturbation pair sets, the threshold sweep and the FLAT vs HNSW latency check; RESULTS.md cache section answering Q3. Done when the cross-tenant and cross-context leak tests pass, the eval runs end to end on a laptop with Ollama, and the chosen threshold is the one the eval produced.
 - [x] M4: Resilience and observability — retries with backoff on retryable statuses, hedged requests bounded by time-to-first-token and a per-tenant hedge budget, per-provider circuit breaker and health; tool-call and `stop_reason` translation in both wire formats; OpenTelemetry spans per pipeline stage exported over OTLP to Jaeger in compose, trace id in the response headers; `make bench-hedge` answering Q4 on the synthetic tail and on a real provider where a key exists. Done when a trace shows every stage and the hedge, and the hedging numbers are in RESULTS.md with their cost.
 - [x] M5: Evaluated router — committed eval set (GSM8K + MMLU, 600 questions); `switchboard eval router label` runs every candidate through the gateway and records correctness, usage, dollars and latency (replays from recordings at $0); feature extraction and the per-candidate logistic models trained in Go; `model: "auto"` with a configurable quality target; `make eval-router` with 5-fold cross-validation, the four baselines and the random-mix line; RESULTS.md router section answering Q5 (live labels when a key exists, otherwise the Ollama candidate and "To measure"). Done when the router's held-out frontier is plotted against the line and the gateway serves `auto` from the trained weights.
 - [x] M6: Admin page, chaos and the overhead breakdown — admin JSON API on the loopback listener (keys, limits, spend, cache stats, router decisions, recent requests with trace links); React + TypeScript page embedded in the binary with Vitest tests; `chaos/run.sh` with the phased kill schedule and per-phase report; `make bench` extended to the per-feature breakdown. RESULTS.md answers Q1 in full and Q6. Done when the chaos run completes on a laptop with a report, the admin page shows a live fleet, and `make ui-check` is in CI.
-- [ ] M7: Release readiness — `go install` path verified in a clean container, release archives, `release.yml` guarded by `v*` tags building the multi-arch image to GHCR, RELEASE.md with every maintainer step; README complete (what/why, demo GIF placeholder with capture instructions, quickstart for both SDKs, Mermaid architecture, design decisions and trade-offs, results table rendered from RESULTS.md, roadmap); RESULTS.md complete with every measured number, its method, cost and hardware, and every unmeasured one under "To measure" with its command. Done when a fresh clone runs the quickstart from the README alone and the release workflow dry-runs green.
+- [x] M7: Release readiness — `go install` path verified in a clean container, release archives, `release.yml` guarded by `v*` tags building the multi-arch image to GHCR, RELEASE.md with every maintainer step; README complete (what/why, demo GIF placeholder with capture instructions, quickstart for both SDKs, Mermaid architecture, design decisions and trade-offs, results table rendered from RESULTS.md, roadmap); RESULTS.md complete with every measured number, its method, cost and hardware, and every unmeasured one under "To measure" with its command. Done when a fresh clone runs the quickstart from the README alone and the release workflow dry-runs green.

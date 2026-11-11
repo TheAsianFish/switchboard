@@ -31,6 +31,10 @@ type Q6 struct {
 	Phases                                     []Q6Phase
 	Events                                     []Q6Event
 	Checks                                     []Q6Check
+	// ReplicaDown is the first phase with a replica down and Redis up,
+	// RedisDown the first with Redis down; nil when the run has none.
+	// Found by state, as the checks find them.
+	ReplicaDown, RedisDown *Q6Phase
 	// Budget and Grace are the budgeted key's allowance and per-replica
 	// grace, formatted; LimitRate the limited key's rate per window.
 	Budget, Grace, LimitRate string
@@ -50,6 +54,8 @@ type Q6Phase struct {
 	Name, From, To, Replicas, Redis string
 	// Main stream.
 	Requests, ErrorRate, Errors, P50, P99, TTFTP99, Slow, HitRate, RepeatHitRate string
+	// ErrorCount is the main stream's failed requests in the phase.
+	ErrorCount string
 	// Limited key.
 	LimOffered, LimRefused, LimAdmitted, MostInWindow, LocalBound, Over string
 	// Budgeted key.
@@ -136,7 +142,7 @@ func buildQ6(s *chaos.Summary) (*Q6, error) {
 		q.Phases = append(q.Phases, Q6Phase{
 			Name: p.Name, From: fmt.Sprintf("%.1f", p.FromSeconds), To: fmt.Sprintf("%.1f", p.ToSeconds),
 			Replicas: fmt.Sprintf("%d of %d", p.ReplicasUp, s.Meta.Replicas), Redis: redis,
-			Requests: fmt.Sprint(m.Requests), ErrorRate: q6Pct2(m.ErrorRate), Errors: q6Kinds(m.ErrorsByKind),
+			Requests: fmt.Sprint(m.Requests), ErrorRate: q6Pct2(m.ErrorRate), Errors: q6Kinds(m.ErrorsByKind), ErrorCount: fmt.Sprint(m.Errors),
 			P50: msf(m.Latency.P50), P99: msf(m.Latency.P99), TTFTP99: msf(m.TTFT.P99), Slow: fmt.Sprint(m.Slow),
 			HitRate: q6Pct(m.CacheHitRate), RepeatHitRate: q6Pct(m.RepeatHitRate),
 			LimOffered: fmt.Sprint(l.Offered), LimRefused: fmt.Sprint(l.Refused), LimAdmitted: fmt.Sprint(l.Admitted),
@@ -144,6 +150,14 @@ func buildQ6(s *chaos.Summary) (*Q6, error) {
 			BudOffered: fmt.Sprint(b.Offered), BudRefused: fmt.Sprint(b.Refused), BudAdmitted: fmt.Sprint(b.Admitted),
 			Spent: q6USD(b.Spent), Cumulative: q6USD(b.Cumulative), Overshoot: q6USD(b.Overshoot), GraceBound: q6Dash(b.GraceBound),
 		})
+	}
+	for i, p := range s.Phases {
+		switch {
+		case q.RedisDown == nil && !p.RedisUp:
+			q.RedisDown = &q.Phases[i]
+		case q.ReplicaDown == nil && p.RedisUp && p.ReplicasUp < s.Meta.Replicas:
+			q.ReplicaDown = &q.Phases[i]
+		}
 	}
 	for _, e := range s.Events {
 		ev := Q6Event{

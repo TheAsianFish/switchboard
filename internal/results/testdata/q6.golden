@@ -52,6 +52,14 @@ backend? Command: `eval/hedge/ollama.sh` (needs Ollama), raw files in
 
 Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `eval/hedge/ollama.sh`, then `make results`.
 
+### Q4 against Claude
+
+Does hedging help against a real provider, whose slow requests may be
+correlated? Command: `ANTHROPIC_API_KEY=... eval/hedge/claude.sh` (paid),
+raw files in `eval/results/q4-hedge-claude/`.
+
+Not measured yet; the command and its estimated cost are under "To measure".
+
 ## Q5: evaluated router
 
 Can a router trained on an offline eval set beat the random-mix line
@@ -222,13 +230,17 @@ Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `
   until then).
 - Q3 semantic cache threshold sweep: `make eval-cache` (needs Ollama).
 - Q4 hedging on the synthetic tail: `make bench-hedge`.
-- Q4 on a real provider: 200 streamed requests to `claude-haiku-5-5`
-  through the gateway with hedging off and on (PLAN.md budgets under
-  $0.50; needs `ANTHROPIC_API_KEY`).
+- Q4 against Claude:
+  `ANTHROPIC_API_KEY=... eval/hedge/claude.sh`, then `make results` (no
+  cost estimate yet: it is computed from the local run,
+  `eval/hedge/ollama.sh`).
 - Q5 router frontier: `make eval-router`.
 - Q5 with the Claude candidates: `ANTHROPIC_API_KEY=...
   MODELS=claude-haiku-5-5,claude-sonnet-5-5,claude-opus-5-5 eval/router/label.sh`,
   then the same `MODELS=... make eval-router`.
+- Q6 with GCRA: set `ratelimit.algorithm: gcra` in `chaos/switchboard.yaml`
+  and run `make chaos` once the GCRA limiter is implemented
+  (`internal/ratelimit/gcra.go`).
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with
   `claude-haiku-5-5`).

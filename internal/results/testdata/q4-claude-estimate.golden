@@ -1,0 +1,9 @@
+- Q4 against Claude:
+  `ANTHROPIC_API_KEY=... RATE=1 DURATION=180s WARMUP=30s MAX_TOKENS=16 eval/hedge/claude.sh`,
+  then `make results`. Estimated $0.003732 at `claude-haiku-5-5` list prices:
+  439 upstream requests (two arms of 210, the local run's rate ×
+  (duration + warm-up), plus its 9.1% hedges in the hedging-on arm),
+  each counted at `max_tokens` (16) output tokens, an upper bound, and
+  5 prompt tokens (the fake provider's word count of the same bench
+  prompt in `eval/results/q4-hedge/`; Claude's tokenizer counts
+  differently, so the prompt part is not a bound).

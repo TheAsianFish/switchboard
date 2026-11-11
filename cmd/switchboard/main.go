@@ -3,7 +3,7 @@
 //	switchboard serve             run the gateway
 //	switchboard fake-provider     run the deterministic fake backend
 //	switchboard bench             drive load at a target and record latency
-//	switchboard eval results      render RESULTS.md from eval/results/
+//	switchboard eval results      render RESULTS.md and the README table from eval/results/
 //	switchboard eval limits       Q2: over-admission from the fake provider's ledger
 //	switchboard eval budget       Q2: shared budget spend against the ledger
 //	switchboard eval cache-data   Q3: build the cache pair sets (needs Ollama)
@@ -53,7 +53,7 @@ commands:
   serve             run the gateway (config: --config or SWITCHBOARD_CONFIG)
   fake-provider     run the deterministic fake backend
   bench             drive load at a target and record latency
-  eval results      render RESULTS.md from eval/results/
+  eval results      render RESULTS.md and the README table from eval/results/
   eval limits       Q2: over-admission from the fake provider's ledger
   eval budget       Q2: shared budget spend against the ledger
   eval cache-data   Q3: build the cache pair sets (needs Ollama)
@@ -299,8 +299,23 @@ func envOr(name, def string) string {
 	return def
 }
 
+// buildVersion is set by release builds (scripts/dist.sh and the
+// Dockerfile) with -ldflags "-X main.buildVersion=v1.2.3". Those builds have
+// no VCS stamp (dist.sh builds with -buildvcs=false so untracked files cannot
+// change the bytes, and the Docker context has no .git), so without it they
+// would report "(devel)". go install module@version leaves it empty and
+// reports the module version instead.
+var buildVersion string
+
 func version() string {
 	info, ok := debug.ReadBuildInfo()
+	return versionString(buildVersion, info, ok)
+}
+
+func versionString(stamped string, info *debug.BuildInfo, ok bool) string {
+	if stamped != "" {
+		return stamped
+	}
 	if !ok {
 		return "unknown"
 	}

@@ -139,7 +139,11 @@ type Q5Operating struct {
 	// Sentence is "X% of `best`'s accuracy at Y% of its cost; gain over
 	// the line +G points (95% CI lo to hi)".
 	Sentence string
-	Met      bool
+	// Gain is the gain over the line with its interval, "-0.8 points (95%
+	// CI -1.8 to +1.0)", and GainVerdict what the interval says: "above
+	// the line", "below the line" or "not clearly above the line".
+	Gain, GainVerdict string
+	Met               bool
 	// ShareByDataset is "GSM8K: `a` 10% / ...; MMLU: ...".
 	ShareByDataset string
 }
@@ -324,12 +328,14 @@ func buildQ5(path string, s routereval.Summary, meta routereval.Meta) (*Q5, erro
 	}
 
 	if op.Variant != "" {
+		gain := fmt.Sprintf("%s points (95%% CI %s to %s)", points(100*op.Gain), points(100*op.GainCI[0]), points(100*op.GainCI[1]))
 		q.Operating = Q5Operating{
 			Variant: op.Variant, Target: target(op.Target), Accuracy: q5Acc(op.Point), Cost: c1k(op.CostPer1K), Met: op.Met,
-			Sentence: fmt.Sprintf("%s of `%s`'s accuracy at %s of its cost; gain over the line %s points (95%% CI %s to %s), over the candidates' hull %s points (%s to %s)",
-				pct1(op.PctBestAccuracy/100), s.Best, pct1(op.PctBestCost/100),
-				points(100*op.Gain), points(100*op.GainCI[0]), points(100*op.GainCI[1]),
+			Sentence: fmt.Sprintf("%s of `%s`'s accuracy at %s of its cost; gain over the line %s, over the candidates' hull %s points (%s to %s)",
+				pct1(op.PctBestAccuracy/100), s.Best, pct1(op.PctBestCost/100), gain,
 				points(100*op.HullGain), points(100*op.HullGainCI[0]), points(100*op.HullGainCI[1])),
+			Gain:           gain,
+			GainVerdict:    gainVerdict(op.GainCI),
 			ShareByDataset: q5ShareByDataset(s.Candidates, op.ShareByDataset),
 		}
 	}
@@ -547,6 +553,19 @@ func points(v float64) string {
 		v = 0
 	}
 	return fmt.Sprintf("%+.1f", v)
+}
+
+// gainVerdict reads a gain's 95% interval: above or below the line only
+// when the interval excludes zero.
+func gainVerdict(ci [2]float64) string {
+	switch {
+	case ci[0] > 0:
+		return "above the line"
+	case ci[1] < 0:
+		return "below the line"
+	default:
+		return "not clearly above the line"
+	}
 }
 
 func target(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) }

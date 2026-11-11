@@ -159,9 +159,18 @@ func TestRedisIndexBothProtocols(t *testing.T) {
 			if err := idx.Add(ctx, cache.Item{ID: "x", Namespace: "n", Context: "c", Vector: []float32{0.6, 0.8}, Payload: []byte("p"), TTL: time.Minute}); err != nil {
 				t.Fatal(err)
 			}
-			ms, err := idx.Search(ctx, cache.Query{Namespace: "n", Context: "c", Vector: []float32{1, 0}, K: 1})
-			if err != nil {
-				t.Fatal(err)
+			// A freshly created index scans the keyspace in the background,
+			// so on a loaded machine the item can take a moment to appear.
+			var ms []cache.Match
+			for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+				var err error
+				ms, err = idx.Search(ctx, cache.Query{Namespace: "n", Context: "c", Vector: []float32{1, 0}, K: 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(ms) > 0 || time.Now().After(deadline) {
+					break
+				}
 			}
 			if len(ms) != 1 || ms[0].ID != "x" || string(ms[0].Payload) != "p" || ms[0].Similarity < 0.5999 || ms[0].Similarity > 0.6001 {
 				t.Fatalf("got %+v", ms)

@@ -4,7 +4,7 @@ BIN := $(CURDIR)/bin
 GOLANGCI := $(BIN)/golangci-lint
 export GOTOOLCHAIN ?= auto
 
-.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge chaos eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results ui ui-check docker clean
+.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge chaos eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results ui ui-check docker dist check-install clean
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -94,11 +94,17 @@ bench-hedge: ## Q4: hedging off and on through the fake provider's slow tail (ab
 chaos: ## Q6: replica and Redis kills under load in a 3-replica compose fleet (about 3 minutes)
 	chaos/run.sh
 
-results: ## render RESULTS.md from eval/results/
+results: ## render RESULTS.md and the README results table from eval/results/
 	go run ./cmd/switchboard eval results
 
 docker: ## build the container image
 	docker build -t switchboard:dev .
+
+dist: ## release archives for linux/darwin x amd64/arm64 and SHA256SUMS in dist/ (VERSION=v1.2.3)
+	scripts/dist.sh
+
+check-install: ## go install from a bare copy of this repo in a clean golang container, then serve a request (REF=HEAD)
+	scripts/check-install.sh $(or $(REF),HEAD)
 
 clean:
 	rm -rf $(BIN) dist

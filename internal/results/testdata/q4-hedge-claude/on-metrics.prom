@@ -1,0 +1,5 @@
+switchboard_provider_hedges_total{event="lost",provider="anthropic"} 2
+switchboard_provider_hedges_total{event="sent",provider="anthropic"} 5
+switchboard_provider_hedges_total{event="won",provider="anthropic"} 3
+switchboard_tokens_total{key="bench",model="local",type="input"} 980
+switchboard_tokens_total{key="bench",model="local",type="output"} 1118

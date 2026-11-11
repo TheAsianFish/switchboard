@@ -146,7 +146,7 @@ func TestMainWritesFile(t *testing.T) {
 	t.Parallel()
 	out := filepath.Join(t.TempDir(), "RESULTS.md")
 	var stdout, stderr bytes.Buffer
-	if code := Main([]string{"--results", t.TempDir(), "--template", tmplPath, "--out", out}, &stdout, &stderr); code != 0 {
+	if code := Main([]string{"--results", t.TempDir(), "--template", tmplPath, "--out", out, "--readme", ""}, &stdout, &stderr); code != 0 {
 		t.Fatalf("Main = %d: %s", code, stderr.String())
 	}
 	b, err := os.ReadFile(out)
@@ -303,9 +303,9 @@ func q3Sims(model, set string, dims int, neg float64) cacheeval.Sims {
 	return cacheeval.Sims{Model: model, Set: set, Dims: dims, Pairs: ps}
 }
 
-func TestRenderQ3(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
+// writeQ3 writes a made-up Q3 sweep and index check under dir.
+func writeQ3(t *testing.T, dir string) {
+	t.Helper()
 	q3 := filepath.Join(dir, Q3Dir)
 	if err := os.Mkdir(q3, 0o755); err != nil {
 		t.Fatal(err)
@@ -332,6 +332,12 @@ func TestRenderQ3(t *testing.T) {
 			{Algorithm: "HNSW", Params: map[string]int{"M": 16, "EF_CONSTRUCTION": 200, "EF_RUNTIME": 10}, BuildSeconds: 40, Unfiltered: cacheeval.IndexLatency{P50Ms: 0.75, P99Ms: 2}, Filtered: cacheeval.IndexLatency{P50Ms: 1.5, P99Ms: 3}, RecallAt1: 0.987, FilteredRecallAt1: 1, IndexSizeMB: 210},
 		},
 	})
+}
+
+func TestRenderQ3(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeQ3(t, dir)
 
 	var first, second bytes.Buffer
 	if err := Render(dir, tmplPath, &first); err != nil {

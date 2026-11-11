@@ -1,0 +1,34 @@
+### Q4 against Claude
+
+Does hedging help against a real provider, whose slow requests may be
+correlated? Command: `ANTHROPIC_API_KEY=... eval/hedge/claude.sh` (paid),
+raw files in `eval/results/q4-hedge-claude/`.
+
+The same comparison as the local model's, with the same hedge settings,
+through the gateway's Anthropic provider to `claude-haiku-5-5`: 1 streamed
+request per second (open loop), `max_tokens` 16, 60s measured after a 10s
+warm-up, hedging off then on. The generator and the gateway share one
+machine; the provider is the Anthropic API, so network time is in every
+number.
+
+| Hedging | Requests | Errors | TTFT p50 | p95 | p99 | p99 95% CI | Total p50 | Total p99 | Total p99 95% CI | Hedges sent / won | Extra upstream | Tokens counted (in / out) | At claude-haiku-5-5 prices |
+|---------|---------:|-------:|---------:|----:|----:|-----------:|----------:|----------:|-----------------:|------------------:|---------------:|-------------------------:|-----:|
+| off | 60 | 0 | 516.7 | 2023.2 | 2400.0 | 2023.2–2400.0 | 766.7 | 2650.0 | 2273.2–2650.0 | 0 / 0 | 0.0% | 980 / 1120 | $0.000658 |
+| on | 60 | 0 | 440.9 | 968.1 | 1100.0 | 968.1–1100.0 | 690.9 | 1350.0 | 1218.1–1350.0 | 5 / 3 | 7.1% | 980 / 1118 | $0.000657 |
+
+Hedging changed the TTFT p99 by -1300.0 ms (-54%) and the total p99 by -1300.0 ms (-49%).
+With hedging off, the TTFT p99 was 4.6× the median. Read the two p99 intervals before reading the
+change: where they overlap, this run cannot tell hedging from no hedging.
+
+**Spend.** The gateway counted 1960 input and 2238 output tokens over
+both arms (the reply each client request got), $0.001315 at `claude-haiku-5-5` list
+prices. It never sees the usage of the 5 attempts cancelled when a hedge
+raced them (one per hedge sent); Anthropic bills those for their prompt
+and whatever they streamed before the cancel: $0.000047 if each had the mean
+prompt and streamed all `max_tokens`, more than they can have streamed.
+The run cost between $0.001315 and about $0.001362.
+
+- Hardware: Test CPU @ 3.00GHz, 8 logical CPUs (GOMAXPROCS 8), linux/amd64, kernel 6.17.0, go1.27.2 (generator and gateway).
+- Commit: `fixture`, run 2026-11-10T12:00:00Z. Cost: $0.001315 to about $0.001362 (above).
+- Command: `ANTHROPIC_API_KEY=... MODEL=claude-haiku-5-5 RATE=1 DURATION=60s WARMUP=10s MAX_TOKENS=16 eval/hedge/claude.sh`.
+
