@@ -499,8 +499,9 @@ Releases: `make dist` builds the archives, `make check-install` checks the
 - A reranking stage for semantic hits: Q3 shows embeddings alone cannot
   keep false hits under 1% at a useful hit rate on adversarial pairs.
 - Pending budget spend lives in each replica's memory: a replica killed
-  while Redis is down loses what it admitted on grace and had not yet
-  charged (at most one allowance; RESULTS.md M8). A settle that times out
+  while Redis is down loses the cost it settled during the outage and had
+  not yet charged: at most one allowance, plus requests it had reserved on
+  Redis before the outage (RESULTS.md M8). A settle that times out
   after Redis applied it is charged twice, and a hold whose replica died
   while Redis was up expires without its cost reaching `spent`; neither
   showed up in M8's runs.
