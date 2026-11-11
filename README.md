@@ -1,73 +1,158 @@
 # Switchboard
 
-One Go binary that sits between your services and your LLM providers. It
-speaks the OpenAI and Anthropic APIs in front, fans out to Anthropic, Ollama
-or any OpenAI-compatible server behind, streams tokens through unchanged, and
-enforces per-key rate limits and dollar budgets that stay correct across
-replicas through Redis. On top of that: retries and hedged requests for the
-latency tail, an exact and a semantic cache with a measured false-hit rate, a
-`model: "auto"` router trained on an offline eval set, cost accounting per key
-and model, OpenTelemetry traces, Prometheus metrics and a small admin page.
-Every feature ships with the benchmark or eval that says what it is worth.
+An LLM gateway in one Go binary. Every service that calls LLMs ends up
+re-implementing retries, provider quirks, per-team rate limits and budgets,
+caching and cost accounting; Switchboard does it once, in front of every
+provider, and keeps it correct when it runs as several replicas.
 
-**Status: M6 of 7.** The streaming spine (M1), shared state (M2), the
-response cache (M3), resilience and observability (M4), the evaluated
-router (M5) and the admin page, chaos run and overhead breakdown (M6) work:
-both front
-ends, with text and tool calls, in and out of every backend; the Anthropic,
-OpenAI-compatible and fake providers; per-key request and token rate limits
-and dollar budgets shared by every replica through Redis, with a degrade
-policy for when Redis is down; cost accounting from a price table; an exact
-plus semantic response cache in Redis, namespaced per tenant, whose
-threshold comes from `make eval-cache`; retries, hedged requests with a
-per-tenant hedge budget and a circuit breaker per provider; OpenTelemetry
-traces with a span per stage, and Prometheus metrics; and `model: "auto"`,
-served from router weights trained and cross-validated by
-`make eval-router`; an admin page that shows the whole fleet from any
-replica; a chaos run that kills a replica and Redis under load; and the
-overhead of every feature, measured one at a time. The release follows
-(see [PLAN.md](PLAN.md)).
+It speaks the OpenAI and Anthropic APIs in front, so an unmodified SDK of
+either kind works by changing its base URL, and fans out to Anthropic,
+Ollama or any OpenAI-compatible server (vLLM, llama.cpp) behind, streaming
+tokens through unchanged. Per-key rate limits and dollar budgets are shared
+by every replica through Redis and degrade to local limits when Redis dies.
+Retries, hedged requests and a circuit breaker handle the latency tail. An
+exact and a semantic cache serve repeated questions, with a false-hit rate
+that was measured, not assumed. `model: "auto"` routes each request to the
+cheapest model likely to answer it, using a router trained and
+cross-validated on an offline eval set. Every request is priced, traced
+(OpenTelemetry) and counted (Prometheus), and a small React admin page shows
+the whole fleet.
 
-![The admin page during an earlier chaos run (before the load balancer picked replicas at random): replica 2 was killed 21 s earlier and shows as down, the budgeted key has spent its budget, and recent requests stream in from the two live replicas.](docs/admin.png)
-Every measured number lives in [RESULTS.md](RESULTS.md), which is rendered
-from the raw files under `eval/results/`.
+**Why it is built this way.** A single gateway process is a single point
+of failure. Several replicas, though, have to agree on limits, budgets and
+the cache at request speed without becoming a latency tax, and have to
+stay sane when a replica or the store dies. That shared state, and knowing
+what each feature costs, is the hard part. So every feature ships with the
+harness that measures it: the gateway's own overhead feature by feature,
+how many requests slip past a shared limit, the cache's false-hit rate,
+what hedging buys, whether the router beats a coin flip between models, and
+what a replica kill and a Redis kill cost under load.
+
+**Status:** all seven milestones of [PLAN.md](PLAN.md) are done; the first
+release (`v1.0.0`) is prepared but not tagged ([RELEASE.md](RELEASE.md)).
+
+## Demo
+
+![The admin page during a chaos run: replica 2 was killed 21 s earlier and shows as down, the budgeted key has spent its budget, and recent requests stream in from the two live replicas.](docs/admin.png)
+
+The screenshot is the admin page during an earlier chaos run (`make chaos`,
+before the load balancer picked replicas at random). A terminal demo GIF
+(both SDKs streaming through the gateway, then a cache hit and a refused
+request) is not captured yet; [docs/demo.md](docs/demo.md) has the script
+and the steps to record it as `docs/demo.gif`.
+
+## Results
+
+Headline numbers, rendered by `make results` from the raw files under
+`eval/results/` (the same files RESULTS.md is rendered from). RESULTS.md has
+the method, the intervals, the hardware and the cost of every row.
+
+<!-- results:start -->
+
+<!-- Generated by `make results` from eval/results/ and eval/README-results.md.tmpl. Do not edit between the markers by hand. -->
+| Question | Headline result | Command |
+|----------|-----------------|---------|
+| [Q1: gateway overhead](RESULTS.md#q1-gateway-overhead) | Passthrough +0.37 ms p50; limits, budget, exact, tracing together +1.34 ms p50 at 200 req/s; a semantic-cache miss adds +35.97 ms for its embedding at 5 req/s | `make bench` |
+| [Q2: shared limits and budgets](RESULTS.md#q2-shared-limits-and-budgets-across-three-replicas) | Fixed-window baseline at 3× its limit: at most 100 admitted per limiter window (rate 100), 47 over the rate-plus-burst bound in the worst 60 s; 58 over while Redis was down; 181 over with per-replica limits; shared $0.10 budget: $0.099045000 spent, gateway ledger equals the provider's to the cent: yes | `make test-limits` |
+| [Q3: semantic cache false hits](RESULTS.md#q3-semantic-cache-false-hits) | Ships `nomic-embed-text` at threshold 0.9989 (number guard on); hit / false-hit rate there: `paws-wiki` 5.6% / 0.6%; `gsm8k-perturb` 0.9% / 0.0% | `make eval-cache` |
+| [Q4: hedging](RESULTS.md#q4-hedging) | TTFT p99 from 638.3 to 224.4 ms with hedging on, for +5.3% upstream requests (synthetic slow tail); against one local `qwen2.5:0.5b`: TTFT p99 +2.9 ms (+2%) | `make bench-hedge` |
+| [Q5: evaluated router](RESULTS.md#q5-evaluated-router) | `router` at its operating point: 72.2% (68.4–75.6) accuracy, gain over the random-mix line -0.8 points (95% CI -1.8 to +1.0), not clearly above the line | `make eval-router` |
+| [Q6: chaos](RESULTS.md#q6-chaos) | Replica kill: 6 errors (0.10%) in its phase; Redis down: 0 errors, p99 431.05 ms (steady 181.76 ms), 6 over-admissions (bound 6 per window), budget overshoot $0.0176 (grace bound $0.0200) | `make chaos` |
+
+Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
+in RESULTS.md (among them the Claude rows, which need an API key, and Q2
+with GCRA, which is not implemented yet).
+
+<!-- results:end -->
 
 ## Quickstart
 
+Docker with Compose v2 is all it needs. From a fresh clone:
+
 ```sh
-go install github.com/TheAsianFish/switchboard/cmd/switchboard@latest
-cp switchboard.example.yaml switchboard.yaml   # keys, providers, models
-switchboard serve                              # 127.0.0.1:8080
+git clone https://github.com/TheAsianFish/switchboard
+cd switchboard
+docker compose -f deploy/compose.yaml --profile dev up -d --build
 ```
 
-With Ollama running and `qwen2.5:0.5b` pulled, point an unmodified SDK at the
-gateway with the key from `switchboard.yaml`:
+That starts one gateway on http://localhost:8080 with Redis, Ollama, a
+deterministic fake backend, Jaeger and Prometheus (the first build takes a
+few minutes). The image's config ([deploy/switchboard.yaml](deploy/switchboard.yaml))
+has one key, `sk-switchboard-dev`, allowed the `fake` model and
+`qwen2.5:0.5b`. The fake model needs nothing else:
+
+```sh
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer sk-switchboard-dev" -H "Content-Type: application/json" \
+  -d '{"model": "fake", "messages": [{"role": "user", "content": "hello"}]}'
+```
+
+For a real model, pull one into the compose Ollama (about 400 MB), then
+point an unmodified SDK at the gateway:
+
+```sh
+docker compose -f deploy/compose.yaml exec ollama ollama pull qwen2.5:0.5b
+python3 -m venv .venv && . .venv/bin/activate && pip install openai anthropic
+```
 
 ```python
 from openai import OpenAI
-client = OpenAI(base_url="http://127.0.0.1:8080/v1", api_key="sk-switchboard-dev")
-for chunk in client.chat.completions.create(
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="sk-switchboard-dev")
+stream = client.chat.completions.create(
     model="qwen2.5:0.5b", stream=True,
     messages=[{"role": "user", "content": "Name three primary colours."}],
-):
-    print(chunk.choices[0].delta.content or "" if chunk.choices else "", end="", flush=True)
+)
+for chunk in stream:
+    if chunk.choices:
+        print(chunk.choices[0].delta.content or "", end="", flush=True)
+print()
 ```
 
 ```python
 from anthropic import Anthropic
-client = Anthropic(base_url="http://127.0.0.1:8080", api_key="sk-switchboard-dev")
+
+client = Anthropic(base_url="http://localhost:8080", api_key="sk-switchboard-dev")
 with client.messages.stream(
     model="qwen2.5:0.5b", max_tokens=128,
     messages=[{"role": "user", "content": "Name three primary colours."}],
 ) as stream:
     for text in stream.text_stream:
         print(text, end="", flush=True)
+print()
 ```
 
-Either SDK can reach either backend: an Anthropic client talking to Ollama,
-or an OpenAI client talking to Claude (set `ANTHROPIC_API_KEY` on the
-gateway, never in the file). No model at all? The `fake` model in the example
-config answers deterministically.
+Either SDK reaches either backend: here an Anthropic client is talking to
+Ollama, and an OpenAI client can talk to Claude the same way (set
+`ANTHROPIC_API_KEY` in the shell before `docker compose up`, and use a
+key of your own, since the demo key only reaches the free models). Then
+look around:
+
+- the admin page: http://127.0.0.1:9090 (keys, spend, cache, router
+  decisions, the last requests);
+- traces: http://localhost:16686 (every response carries its trace id in
+  `X-Trace-Id`);
+- metrics: http://localhost:9095 (Prometheus, scraping `/metrics`).
+
+`docker compose -f deploy/compose.yaml --profile fleet up -d --build` runs
+three replicas behind nginx sharing one Redis instead (the admin pages on
+9091 to 9093, each showing all three). `docker compose -f deploy/compose.yaml
+--profile dev down` stops everything.
+
+**Without Docker.** Install the binary (`go install
+github.com/TheAsianFish/switchboard/cmd/switchboard@latest` with Go 1.27,
+or an archive from the GitHub release), then serve the example config,
+which expects Ollama on `localhost:11434` and keeps limits per process
+until `redis.url` is set:
+
+```sh
+cp switchboard.example.yaml switchboard.yaml   # from the clone or the archive
+switchboard serve --config switchboard.yaml    # 127.0.0.1:8080, admin on 127.0.0.1:9090
+```
+
+The same SDK snippets work against it unchanged.
+
+## Using it
 
 Limits and budgets are per key, prices per model (Claude models fall back to
 built-in list prices):
@@ -141,14 +226,11 @@ the binary; its data is `GET /api/overview`. Like `/metrics`, it is never
 on the public port, and it answers only requests addressed to a loopback
 name or an IP address.
 
-Docker: `make docker` builds a distroless image. `make dev` runs one replica
-with Redis, Ollama and the fake provider in compose, and `make fleet` runs
-three replicas behind nginx sharing one Redis. Both also run Jaeger (UI on
-http://localhost:16686) and Prometheus (http://localhost:9095), which
-scrapes every replica. With tracing on (`tracing.endpoint`, set in compose)
-every request is one trace with a span per pipeline stage, and every
-response carries its trace id in `X-Trace-Id`; `scripts/trace-check.sh`
-sends a request and prints its span tree from Jaeger.
+The compose stack ([deploy/compose.yaml](deploy/compose.yaml)) sets
+`tracing.endpoint`, so every request is one trace with a span per pipeline
+stage; `scripts/trace-check.sh` sends a request and prints its span tree
+from Jaeger. `make docker` builds the distroless image alone, `make dev`
+and `make fleet` run the two compose profiles in the foreground.
 
 ## Architecture
 
@@ -158,7 +240,7 @@ flowchart LR
     O[OpenAI SDK]
     A[Anthropic SDK]
   end
-  LB[nginx<br/>round robin]
+  LB[nginx<br/>load balancer]
   subgraph gw["switchboard serve (×3)"]
     FO[api/openai<br/>/v1/chat/completions]
     FA[api/anthropic<br/>/v1/messages]
@@ -191,7 +273,18 @@ Every request, whichever front end it arrived on, becomes one canonical
 feature in the middle (limits, cache, routing, accounting) is written once
 for all four client × backend combinations.
 
-**The hard part in M1: streaming through two translations without
+### The hard parts
+
+The hard part is shared state that stays correct when replicas and the
+store die, at an overhead small enough that nobody notices it is there:
+limits and budgets that three replicas enforce together (M2), a cache that
+can never answer the wrong tenant (M3), and the measurements that say what
+each of those costs and what a failure costs (M6). Around it sit the
+streaming spine (M1), the latency tail (M4) and the router (M5). Each
+paragraph below names the problem, the decision that solved it and the
+number that checks it.
+
+**Streaming through two translations without
 changing what the client sees.** The front end reads the provider's first
 event *before* it writes any header, so an upstream failure before the first
 token is an ordinary HTTP error with the right status code (and is retried
@@ -203,7 +296,7 @@ the client's own error format. Usage is normalised once (`input`,
 total) and the Anthropic one (uncached input apart from cache reads)
 convert without loss.
 
-**The hard part in M2: replicas that agree on limits and budgets at
+**Replicas that agree on limits and budgets at
 request speed, and stay sane when the store dies.** Every limit check and
 every budget reservation is one Lua script in Redis, so the read, the
 decision and the write are atomic across replicas, and the scripts read
@@ -232,7 +325,7 @@ harness measures every window length from 1 s to 60 s. RESULTS.md has the
 table, including what a Redis restart without persistence does to a
 fixed-window counter.
 
-**The hard part in M3: a semantic cache that never serves an answer to
+**A semantic cache that never serves an answer to
 the wrong person, with a threshold that was measured, not guessed.**
 Isolation is structural. The exact key hashes the whole request (tenant,
 model, the provider and upstream model it routes to, system prompt,
@@ -262,28 +355,7 @@ small contexts measured FLAT and HNSW are equally fast, FLAT is exact and
 builds in a second, and its unfiltered worst case at 100,000 entries
 (about 5–9 ms) is still below the embedding call, so the index is FLAT.
 
-**The hard part in M6: knowing what the gateway costs and what a failure
-costs, from measurements rather than claims.** Two harnesses answer it.
-`make bench` puts the gateway in front of the fake provider with features
-added one at a time (limits, budget, exact cache, tracing, semantic cache,
-router), each in a fresh process against direct runs that bracket the
-group, with a bootstrap interval on every step and the direct runs' own
-drift beside it. The breakdown found a real inefficiency: on an `auto`
-request the router and the semantic cache each embedded the same prompt,
-two calls to Ollama for one request. A per-request memo now shares the
-vector, and the re-run shows the router adding nothing measurable at p50 on
-top of the cache. `make chaos` runs three replicas behind nginx under three
-load streams (a cached workload, a rate-limited key, a budgeted key),
-kills a replica and then Redis, restarts both, and reports every phase
-from the per-request logs and the fake provider's ledger, with recovery
-times under a rule fixed before the run. Two findings came from it.
-nginx's strict round robin aliased with fixed-rate load and piled one
-key's requests onto one replica, so the chaos fleet picks replicas at
-random. And a Redis restart without persistence resets every budget, so
-a key can spend its budget a second time; the outage itself stays within
-the grace bound. RESULTS.md (Q1 and Q6) has the tables.
-
-**The hard part in M4: cutting the latency tail without paying for it
+**Cutting the latency tail without paying for it
 twice.** A slow upstream request is usually not slow because of the prompt
 but because of where it landed, so asking again often comes back fast.
 The provider wrapper in `internal/hedge` turns each request into a race:
@@ -305,7 +377,7 @@ fast after consecutive provider failures and probes after a cooldown.
 RESULTS.md (Q4) has both. Every stage, and both attempts of a hedge, are
 spans in one trace (`eval/results/m4-trace/`).
 
-**The hard part in M5: proving a router is worth having.** Any mix of a
+**Proving a router is worth having.** Any mix of a
 cheap and a dear model trades accuracy for cost: sending a random share of
 requests to each traces a straight line between the two, with no
 intelligence at all. So the router (`internal/router`) is judged only by
@@ -322,10 +394,36 @@ candidates' cost order and the fallback) is fitted on the training folds
 only. The shipped target is picked by a rule written down before the run,
 with a bootstrap interval that re-applies the rule in every resample. The
 weights trained on the whole set are built into the binary, and a test
-keeps them equal to the eval's. RESULTS.md (Q5) has the frontier, the
-baselines and the plot.
+keeps them equal to the eval's. On the local ladder measured so far
+(three qwen2.5 sizes) the router does not clearly beat the line at its
+operating point (the results table above has the interval): the
+harness is what tells a router that works from one that only looks like it
+does, and the Claude candidates are the run that would test it on models
+far apart in price. RESULTS.md (Q5) has the frontier, the baselines and
+the plot.
 
-How the M1 streaming path is checked:
+**Knowing what the gateway costs and what a failure
+costs, from measurements rather than claims.** Two harnesses answer it.
+`make bench` puts the gateway in front of the fake provider with features
+added one at a time (limits, budget, exact cache, tracing, semantic cache,
+router), each in a fresh process against direct runs that bracket the
+group, with a bootstrap interval on every step and the direct runs' own
+drift beside it. The breakdown found a real inefficiency: on an `auto`
+request the router and the semantic cache each embedded the same prompt,
+two calls to Ollama for one request. A per-request memo now shares the
+vector, and the re-run shows the router adding nothing measurable at p50 on
+top of the cache. `make chaos` runs three replicas behind nginx under three
+load streams (a cached workload, a rate-limited key, a budgeted key),
+kills a replica and then Redis, restarts both, and reports every phase
+from the per-request logs and the fake provider's ledger, with recovery
+times under a rule fixed before the run. Two findings came from it.
+nginx's strict round robin aliased with fixed-rate load and piled one
+key's requests onto one replica, so the chaos fleet picks replicas at
+random. And a Redis restart without persistence resets every budget, so
+a key can spend its budget a second time; the outage itself stays within
+the grace bound. RESULTS.md (Q1 and Q6) has the tables.
+
+How the streaming path is tested:
 
 - recorded real streams from Ollama in both formats replay through the
   providers (`internal/provider/testdata/`);
@@ -336,7 +434,7 @@ How the M1 streaming path is checked:
 - `make sdk-smoke` does the same with the unmodified Python SDKs against a
   real Ollama.
 
-## Design decisions
+## Design decisions and trade-offs
 
 | Decision | Why | Rejected |
 |----------|-----|----------|
@@ -371,60 +469,42 @@ How the M1 streaming path is checked:
 | One embedding per request, shared by the router and the semantic cache | Q1 showed two identical embedding calls on every `auto` request with the cache on. | Two calls: twice the load on the embedder, which on a CPU is the gateway's bottleneck. |
 | Open-loop load generator | Requests leave on schedule whether or not earlier ones finished, so a slow target cannot hide its queueing (coordinated omission). | Closed-loop workers: under-report the tail. |
 
-## Results
-
-Headline numbers, rendered by `make results` from the raw files under
-`eval/results/` (the same files RESULTS.md is rendered from). RESULTS.md has
-the method, the intervals, the hardware and the cost of every row.
-
-<!-- results:start -->
-
-<!-- Generated by `make results` from eval/results/ and eval/README-results.md.tmpl. Do not edit between the markers by hand. -->
-| Question | Headline result | Command |
-|----------|-----------------|---------|
-| [Q1: gateway overhead](RESULTS.md#q1-gateway-overhead) | Passthrough +0.37 ms p50; limits, budget, exact, tracing together +1.34 ms p50 at 200 req/s; a semantic-cache miss adds +35.97 ms for its embedding at 5 req/s | `make bench` |
-| [Q2: shared limits and budgets](RESULTS.md#q2-shared-limits-and-budgets-across-three-replicas) | Fixed-window baseline at 3× its limit: at most 100 admitted per limiter window (rate 100), 47 over the rate-plus-burst bound in the worst 60 s; 58 over while Redis was down; 181 over with per-replica limits; shared $0.10 budget: $0.099045000 spent, gateway ledger equals the provider's to the cent: yes | `make test-limits` |
-| [Q3: semantic cache false hits](RESULTS.md#q3-semantic-cache-false-hits) | Ships `nomic-embed-text` at threshold 0.9989 (number guard on); hit / false-hit rate there: `paws-wiki` 5.6% / 0.6%; `gsm8k-perturb` 0.9% / 0.0% | `make eval-cache` |
-| [Q4: hedging](RESULTS.md#q4-hedging) | TTFT p99 from 638.3 to 224.4 ms with hedging on, for +5.3% upstream requests (synthetic slow tail); against one local `qwen2.5:0.5b`: TTFT p99 +2.9 ms (+2%) | `make bench-hedge` |
-| [Q5: evaluated router](RESULTS.md#q5-evaluated-router) | `router` at its operating point: 72.2% (68.4–75.6) accuracy, gain over the random-mix line -0.8 points (95% CI -1.8 to +1.0), not clearly above the line | `make eval-router` |
-| [Q6: chaos](RESULTS.md#q6-chaos) | Replica kill: 6 errors (0.10%) in its phase; Redis down: 0 errors, p99 431.05 ms (steady 181.76 ms), 6 over-admissions (bound 6 per window), budget overshoot $0.0176 (grace bound $0.0200) | `make chaos` |
-
-Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
-in RESULTS.md (among them the Claude rows, which need an API key, and Q2
-with GCRA, which is not implemented yet).
-
-<!-- results:end -->
-
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). `make check` is the per-PR gate
-(gofmt, go vet, golangci-lint, `go test -race`), offline and well under two
-minutes. `make bench` reruns the overhead benchmark, `make sdk-smoke` the SDK
-check against Ollama, `make test-limits` the three-replica limit and budget
-test in compose (about 12 minutes), `make eval-cache` the semantic cache
-sweep and the FLAT against HNSW check, `make bench-hedge` the hedging
-benchmark, `make eval-router` the router's cross-validation from the
-committed recordings (`make eval-router-label` re-labels through the
-gateway), `make chaos` the replica and Redis kill run, `make test-integration` the Lua
-scripts and the vector index against a real Redis 8, `make ui-check` the
-admin page's typecheck, lint, tests and build (`make ui` rebuilds it), and
-`make results` re-renders RESULTS.md.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions and every
+command. `make check` is the per-PR gate (gofmt, go vet, golangci-lint,
+`go test -race`), offline and well under two minutes;
+`make test-integration` runs the Lua scripts and the vector index against
+a real Redis 8, and `make ui-check` the admin page's typecheck, lint, tests
+and build. Each measured number has its own target: `make bench` (Q1),
+`make test-limits` (Q2), `make eval-cache` (Q3), `make bench-hedge` (Q4),
+`make eval-router` (Q5, offline from committed recordings) and `make chaos`
+(Q6); `make results` re-renders RESULTS.md and the table above. None of
+them runs on a push; `.github/workflows/measure.yml` runs some by hand.
+
+Releases: `make dist` builds the archives, `make check-install` checks the
+`go install` path in a clean container, and a `v*` tag runs
+`.github/workflows/release.yml`. [RELEASE.md](RELEASE.md) has the steps.
 
 ## Roadmap
 
-GCRA limiter and its Q2 numbers · a reranking step for semantic hits
-(Q3 shows embeddings alone cannot keep false hits under 1% at a useful hit
-rate on adversarial pairs) · Q4 against Claude
-(needs a key) · pass `traceparent` on to providers · a first-token timeout
-per attempt, so a provider that accepts connections and never answers opens
-the breaker instead of waiting on client disconnects · accept tool-call
-arguments that are not JSON in OpenAI-format history (a cut-off call echoed
-back is refused today) · the router's Claude candidates (needs a key) and
-a router evaluated on harder, mixed prompts · budgets that survive a Redis
-restart (AOF, or settling spend to a durable ledger; Q6 shows a restart
-resets them) · an embedding service sized for the fleet, since a CPU
-embedder caps the semantic cache and the router at its own rate (Q1
-measures it) · M7 release.
+- GCRA as the limiter algorithm, with its Q2 rows (the interface, contract
+  tests and Lua slot are in; the implementation is not).
+- A reranking stage for semantic hits: Q3 shows embeddings alone cannot
+  keep false hits under 1% at a useful hit rate on adversarial pairs.
+- Budgets that survive a Redis restart (AOF, or settling spend to a
+  durable ledger); Q6 shows a restart resets them.
+- Q4 against Claude, and the router's Claude candidates (both need an API
+  key; RESULTS.md lists the commands and the estimated cost).
+- A first-token timeout per attempt, so a provider that accepts
+  connections and never answers opens the breaker.
+- Pass `traceparent` on to providers.
+- Accept tool-call arguments that are not JSON in OpenAI-format history (a
+  cut-off call echoed back is refused today).
+- A router evaluated on harder, mixed prompts.
+- An embedding service sized for the fleet: a CPU embedder caps the
+  semantic cache and the router at its own rate (Q1 measures it).
+- `/metrics` behind the same Host check as the admin page.
 
 ## Licence
 
