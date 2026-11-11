@@ -238,7 +238,7 @@ func TestRenderQ5Variants(t *testing.T) {
 		"Of the 11 such rules, the most and the least accurate are\nshown",
 		"| knows the dataset: GSM8K to `qwen2.5:3b`, MMLU to `qwen2.5:1.5b` | 63.3% (59.4–67.1) |",
 		"| knows the dataset: GSM8K to `qwen2.5:0.5b`, MMLU to `qwen2.5:3b` | 42.5% (38.6–46.5) |",
-		"needs `ANTHROPIC_API_KEY`).\n- Q6",
+		"`eval/hedge/ollama.sh`).\n- Q6",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render lacks %q", want)

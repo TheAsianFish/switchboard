@@ -505,6 +505,14 @@ local server.
 - Commit: `84a20db`, run 2026-11-09T22:17:53Z. Cost: $0 (local model).
 - Command: `MODEL=qwen2.5:0.5b RATE=1 DURATION=180s WARMUP=30s MAX_TOKENS=16 eval/hedge/ollama.sh`.
 
+### Q4 against Claude
+
+Does hedging help against a real provider, whose slow requests may be
+correlated? Command: `ANTHROPIC_API_KEY=... eval/hedge/claude.sh` (paid),
+raw files in `eval/results/q4-hedge-claude/`.
+
+Not measured yet; the command and its estimated cost are under "To measure".
+
 ## Q5: evaluated router
 
 Can a router trained on an offline eval set beat the random-mix line
@@ -881,21 +889,31 @@ the client, and says nothing about the gateway's overhead (Q1 does).
 | openai-python 3.39.0 | `qwen2.5:0.5b-via-messages` | ollama /v1/messages (anthropic provider) | yes | 5 | stop | 6 | 28 | Red, Yellow, Blue |
 | openai-python 3.39.0 | `qwen2.5:0.5b` | ollama /v1/chat/completions (openaicompat provider) | yes | 5 | stop | 6 | 852 | Red, Yellow, Blue |
 
-Recorded 2026-10-27 on the machine in Q1. Cost: $0 (local Ollama only).
+Recorded on 2026-10-27. The raw files do not record the machine,
+and each TTFT is one sample, not a performance claim. Cost: $0 (local Ollama only).
 
 ## To measure
 
 - Q2 with GCRA: `ALGORITHMS=gcra make test-limits` once the GCRA limiter
   is implemented (`internal/ratelimit/gcra.go`; its contract tests skip
   until then).
-- Q4 on a real provider: 200 streamed requests to `claude-haiku-5-5`
-  through the gateway with hedging off and on (PLAN.md budgets under
-  $0.50; needs `ANTHROPIC_API_KEY`).
+- Q4 against Claude:
+  `ANTHROPIC_API_KEY=... RATE=1 DURATION=180s WARMUP=30s MAX_TOKENS=16 eval/hedge/claude.sh`,
+  then `make results`. Estimated $0.003706 at `claude-haiku-5-5` list prices:
+  436 upstream requests (two arms of 210, the local run's rate ×
+  (duration + warm-up), plus its 7.6% hedges in the hedging-on arm),
+  each counted at `max_tokens` (16) output tokens, an upper bound, and
+  5 prompt tokens (the fake provider's word count of the same bench
+  prompt in `eval/results/q4-hedge/`; Claude's tokenizer counts
+  differently, so the prompt part is not a bound).
 - Q5 with the Claude candidates: `ANTHROPIC_API_KEY=...
   MODELS=claude-haiku-5-5,claude-sonnet-5-5,claude-opus-5-5 eval/router/label.sh`,
   then the same `MODELS=... make eval-router` (estimated $2.90: `claude-haiku-5-5` $0.05, `claude-sonnet-5-5` $0.95, `claude-opus-5-5` $1.90;
   estimated from `qwen2.5:3b`'s token counts at list prices; Claude's own
   replies will differ).
+- Q6 with GCRA: set `ratelimit.algorithm: gcra` in `chaos/switchboard.yaml`
+  and run `make chaos` once the GCRA limiter is implemented
+  (`internal/ratelimit/gcra.go`).
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with
   `claude-haiku-5-5`).

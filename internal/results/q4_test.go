@@ -129,3 +129,139 @@ func TestRenderQ4Ollama(t *testing.T) {
 		}
 	}
 }
+
+// section returns doc from the first line starting with from up to, not
+// including, the next line starting with to.
+func section(t *testing.T, doc, from, to string) string {
+	t.Helper()
+	i := strings.Index(doc, "\n"+from)
+	if i < 0 {
+		t.Fatalf("render has no %q", from)
+	}
+	rest := doc[i+1:]
+	j := strings.Index(rest[len(from):], "\n"+to)
+	if j < 0 {
+		t.Fatalf("render has no %q after %q", to, from)
+	}
+	return rest[:len(from)+j+1]
+}
+
+// writeQ4Ollama writes a made-up local run under dir.
+func writeQ4Ollama(t *testing.T, dir string) {
+	t.Helper()
+	q := filepath.Join(dir, Q4OllamaDir)
+	if err := os.Mkdir(q, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(q, "meta.json"), map[string]any{
+		"commit": "abc1234", "date": "2026-11-09T12:00:00Z", "model": "qwen2.5:0.5b", "ollama_version": "0.40.15",
+		"rate": 1, "duration": "180s", "warmup": "30s", "max_tokens": 16, "command": "eval/hedge/ollama.sh",
+	})
+	writeJSON(t, filepath.Join(q, "off.json"), q4Arm(180, 400))
+	writeJSON(t, filepath.Join(q, "on.json"), q4Arm(180, 450))
+	if err := os.WriteFile(filepath.Join(q, "on-metrics.prom"), []byte("switchboard_provider_hedges_total{event=\"sent\",provider=\"ollama\"} 18\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRenderQ4Claude renders the Claude subsection from the made-up run
+// in testdata/q4-hedge-claude, and the "To measure" entry that stands in
+// for it when it has not run.
+func TestRenderQ4Claude(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		setup  func(t *testing.T, dir string)
+		from   string // the golden is the render from this line ...
+		to     string // ... up to this one
+		golden string
+		want   []string
+		absent []string
+	}{
+		{
+			name:  "measured",
+			setup: func(t *testing.T, dir string) { copyTestdata(t, dir, "q4-hedge-claude", Q4ClaudeDir) },
+			from:  "### Q4 against Claude", to: "## Q5",
+			golden: "q4-claude.golden",
+			want: []string{
+				"| on | 60 | 0 |",
+				"| 5 / 3 | 7.1% | 980 / 1118 | $0.000657 |",
+				// 5 × (1960/140 × $0.10 + 16 × $0.50) per million tokens.
+				"streamed before the cancel: $0.000047 if",
+				"The run cost between $0.001315 and about $0.001362.",
+				"`ANTHROPIC_API_KEY=... MODEL=claude-haiku-5-5 RATE=1 DURATION=60s WARMUP=10s MAX_TOKENS=16 eval/hedge/claude.sh`",
+			},
+		},
+		{
+			name: "estimated from the local and synthetic runs",
+			setup: func(t *testing.T, dir string) {
+				writeQ4(t, dir)
+				writeQ4Ollama(t, dir)
+			},
+			from: "- Q4 against Claude:", to: "- Q5",
+			golden: "q4-claude-estimate.golden",
+			want: []string{
+				"`ANTHROPIC_API_KEY=... RATE=1 DURATION=180s WARMUP=30s MAX_TOKENS=16 eval/hedge/claude.sh`",
+				// 210 + 210 × (1 + 18/198) upstream requests, each 5 × $0.10
+				// + 16 × $0.50 per million tokens.
+				"Estimated $0.003732 at `claude-haiku-5-5` list prices:\n  439 upstream requests (two arms of 210",
+				"plus its 9.1% hedges",
+				"5 prompt tokens (the fake provider's word count",
+			},
+		},
+		{
+			name:  "estimated from the local run alone",
+			setup: writeQ4Ollama,
+			from:  "- Q4 against Claude:", to: "- Q5",
+			want: []string{"no prompt tokens (no\n  run records a prompt-token count; `make bench-hedge` does)."},
+		},
+		{
+			name:  "nothing to estimate from",
+			setup: func(*testing.T, string) {},
+			from:  "- Q4 against Claude:", to: "- Q5",
+			want:   []string{"`ANTHROPIC_API_KEY=... eval/hedge/claude.sh`, then `make results` (no\n  cost estimate yet"},
+			absent: []string{"Estimated"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			tt.setup(t, dir)
+			var buf bytes.Buffer
+			if err := Render(dir, tmplPath, &buf); err != nil {
+				t.Fatal(err)
+			}
+			got := section(t, buf.String(), tt.from, tt.to)
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("render lacks %q in:\n%s", w, got)
+				}
+			}
+			for _, a := range tt.absent {
+				if strings.Contains(got, a) {
+					t.Errorf("render has %q in:\n%s", a, got)
+				}
+			}
+			if tt.golden != "" {
+				golden(t, tt.golden, []byte(got))
+			}
+		})
+	}
+}
+
+// TestRenderQ4ClaudeMeasuredDropsToMeasure checks that a Claude run takes
+// its entry out of "To measure".
+func TestRenderQ4ClaudeMeasuredDropsToMeasure(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	copyTestdata(t, dir, "q4-hedge-claude", Q4ClaudeDir)
+	writeQ4Ollama(t, dir)
+	var buf bytes.Buffer
+	if err := Render(dir, tmplPath, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(section(t, buf.String(), "## To measure", "- Q5"), "Q4 against Claude") {
+		t.Error(`a measured Claude run is still under "To measure"`)
+	}
+}

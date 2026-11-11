@@ -1,0 +1,2 @@
+switchboard_tokens_total{key="bench",model="local",type="input"} 980
+switchboard_tokens_total{key="bench",model="local",type="output"} 1120

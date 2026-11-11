@@ -58,11 +58,15 @@ type Data struct {
 	Q2 *Q2
 	Q3 *Q3
 	Q4 *Q4
-	// Q4Ollama is Q4's check against a local model.
-	Q4Ollama *Q4Ollama
-	Q5       *Q5
-	Q6       *Q6
-	SDK      *SDK
+	// Q4Ollama is Q4's check against a local model, Q4Claude against
+	// Claude; Q4ClaudeEstimate is the latter's estimated cost while it has
+	// not run (nil without a local run to estimate from).
+	Q4Ollama         *Q4Live
+	Q4Claude         *Q4Live
+	Q4ClaudeEstimate *Q4ClaudeEstimate
+	Q5               *Q5
+	Q6               *Q6
+	SDK              *SDK
 }
 
 // Q1 is the gateway overhead section.
@@ -145,9 +149,19 @@ func Load(resultsDir string) (Data, error) {
 	if err != nil {
 		return Data{}, err
 	}
-	q4o, err := loadQ4Ollama(filepath.Join(resultsDir, Q4OllamaDir))
+	q4o, err := loadQ4Live(filepath.Join(resultsDir, Q4OllamaDir))
 	if err != nil {
 		return Data{}, err
+	}
+	q4c, err := loadQ4Live(filepath.Join(resultsDir, Q4ClaudeDir))
+	if err != nil {
+		return Data{}, err
+	}
+	var q4cEst *Q4ClaudeEstimate
+	if q4c == nil && q4o != nil {
+		if q4cEst, err = estimateQ4Claude(q4o, q4); err != nil {
+			return Data{}, err
+		}
 	}
 	q5, err := loadQ5(filepath.Join(resultsDir, Q5Dir))
 	if err != nil {
@@ -157,10 +171,14 @@ func Load(resultsDir string) (Data, error) {
 	if err != nil {
 		return Data{}, err
 	}
-	if q4 != nil && q4o != nil {
-		q4o.SyntheticTailRatio = ratio(q4.Rows[0].ttftP99, q4.Rows[0].ttftP50)
+	if q4 != nil {
+		for _, live := range []*Q4Live{q4o, q4c} {
+			if live != nil {
+				live.SyntheticTailRatio = ratio(q4.Rows[0].ttftP99, q4.Rows[0].ttftP50)
+			}
+		}
 	}
-	return Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q5: q5, Q6: q6, SDK: sdk}, nil
+	return Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q4Claude: q4c, Q4ClaudeEstimate: q4cEst, Q5: q5, Q6: q6, SDK: sdk}, nil
 }
 
 // Execute runs the template at templatePath on d.

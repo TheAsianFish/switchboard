@@ -1,0 +1,12 @@
+{
+  "_note": "made-up test fixture for internal/results; not a measured result",
+  "commit": "fixture",
+  "date": "2026-11-10T12:00:00Z",
+  "provider": "anthropic",
+  "model": "claude-haiku-5-5",
+  "rate": 1,
+  "duration": "60s",
+  "warmup": "10s",
+  "max_tokens": 16,
+  "command": "MODEL=claude-haiku-5-5 RATE=1 DURATION=60s WARMUP=10s MAX_TOKENS=16 eval/hedge/claude.sh"
+}

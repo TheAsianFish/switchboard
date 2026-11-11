@@ -451,7 +451,7 @@ is the number to plan with.
 again usually draws fast. A real provider's slow requests are often
 correlated (a busy region, a long prompt, an overloaded model), and then a
 hedge waits as long as the request it races and only adds load. The live
-part of Q4 (below, under "To measure") is what tells the two apart.
+part of Q4 (below{{if not $.Q4Claude}}, under "To measure"{{end}}) is what tells the two apart.
 {{else}}
 Not measured yet. Run `make bench-hedge`, then `make results`.
 {{end}}
@@ -491,6 +491,44 @@ local server.
 - Command: `{{.Meta.Command}}`.
 {{else}}
 Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `eval/hedge/ollama.sh`, then `make results`.
+{{end}}
+### Q4 against Claude
+
+Does hedging help against a real provider, whose slow requests may be
+correlated? Command: `ANTHROPIC_API_KEY=... eval/hedge/claude.sh` (paid),
+raw files in `eval/results/q4-hedge-claude/`.
+{{with .Q4Claude}}
+The same comparison as the local model's, with the same hedge settings,
+through the gateway's Anthropic provider to `{{.Meta.Model}}`: {{.Meta.Rate}} streamed
+request per second (open loop), `max_tokens` {{.Meta.MaxTokens}}, {{.Meta.Duration}} measured after a {{.Meta.Warmup}}
+warm-up, hedging off then on. The generator and the gateway share one
+machine; the provider is the Anthropic API, so network time is in every
+number.
+
+| Hedging | Requests | Errors | TTFT p50 | p95 | p99 | p99 95% CI | Total p50 | Total p99 | Total p99 95% CI | Hedges sent / won | Extra upstream |{{if .Spend}} Tokens counted (in / out) | At {{.Spend.PriceModel}} prices |{{end}}
+|---------|---------:|-------:|---------:|----:|----:|-----------:|----------:|----------:|-----------------:|------------------:|---------------:|{{if .Spend}}-------------------------:|-----:|{{end}}
+{{- range .Rows}}
+| {{.Arm}} | {{.Requests}} | {{.Errors}} | {{.TTFTP50}} | {{.TTFTP95}} | {{.TTFTP99}} | {{.TTFTP99CI}} | {{.LatencyP50}} | {{.LatencyP99}} | {{.LatencyP99CI}} | {{.HedgesSent}} / {{.HedgesWon}} | {{.ExtraPercent}} |{{if $.Q4Claude.Spend}} {{.InputTokens}} / {{.OutputTokens}} | {{.Spend}} |{{end}}
+{{- end}}
+
+Hedging changed the TTFT p99 by {{.TTFTCut}} and the total p99 by {{.LatencyCut}}.
+With hedging off, the TTFT p99 was {{.TailRatio}}× the median{{if .SyntheticTailRatio}}, against {{.SyntheticTailRatio}}× for
+the synthetic run above{{end}}. Read the two p99 intervals before reading the
+change: where they overlap, this run cannot tell hedging from no hedging.
+{{with .Spend}}
+**Spend.** The gateway counted {{.InputTokens}} input and {{.OutputTokens}} output tokens over
+both arms (the reply each client request got), {{.Counted}} at `{{.PriceModel}}` list
+prices. It never sees the usage of the {{.Losers}} attempts cancelled when a hedge
+raced them (one per hedge sent); Anthropic bills those for their prompt
+and whatever they streamed before the cancel: {{.LoserBound}} if each had the mean
+prompt and streamed all `max_tokens`, more than they can have streamed.
+The run cost between {{.Counted}} and about {{.Total}}.
+{{end}}
+- Hardware: {{.Hardware}} (generator and gateway).
+- Commit: `{{.Meta.Commit}}`, run {{.Meta.Date}}. Cost: {{with .Spend}}{{.Counted}} to about {{.Total}} (above){{else}}not recorded (the metrics files have no token counts, or `{{$.Q4Claude.Meta.Model}}` has no list price){{end}}.
+- Command: `ANTHROPIC_API_KEY=... {{.Meta.Command}}`.
+{{else}}
+Not measured yet; the command and its estimated cost are under "To measure".
 {{end}}
 ## Q5: evaluated router
 
@@ -801,7 +839,8 @@ the client, and says nothing about the gateway's overhead (Q1 does).
 | {{.SDK}} | `{{.Model}}` | {{.Backend}} | {{.Passed}} | {{.Chunks}} | {{.StopReason}} | {{.OutputTokens}} | {{.TTFT}} | {{if .Error}}error: {{.Error}}{{else}}{{.Text}}{{end}} |
 {{- end}}
 
-Recorded {{range $i, $d := .Dates}}{{if $i}}, {{end}}{{$d}}{{end}} on the machine in Q1. Cost: $0 (local Ollama only).
+Recorded on {{range $i, $d := .Dates}}{{if $i}}, {{end}}{{$d}}{{end}}. The raw files do not record the machine,
+and each TTFT is one sample, not a performance claim. Cost: $0 (local Ollama only).
 {{else}}
 Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `make results`.
 {{end}}
@@ -820,9 +859,22 @@ Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `
 {{- if not .Q4}}
 - Q4 hedging on the synthetic tail: `make bench-hedge`.
 {{- end}}
-- Q4 on a real provider: 200 streamed requests to `claude-haiku-5-5`
-  through the gateway with hedging off and on (PLAN.md budgets under
-  $0.50; needs `ANTHROPIC_API_KEY`).
+{{- if not .Q4Claude}}
+- Q4 against Claude:{{with .Q4ClaudeEstimate}}
+  `{{.Command}}`,
+  then `make results`. Estimated {{.USD}} at `{{.PriceModel}}` list prices:
+  {{.Upstream}} upstream requests (two arms of {{.PerArm}}, the local run's rate ×
+  (duration + warm-up), plus its {{.HedgeShare}} hedges in the hedging-on arm),
+  each counted at `max_tokens` ({{.MaxTokens}}) output tokens, an upper bound, and
+  {{if .Input}}{{.Input}} prompt tokens (the fake provider's word count of the same bench
+  prompt in `eval/results/q4-hedge/`; Claude's tokenizer counts
+  differently, so the prompt part is not a bound){{else}}no prompt tokens (no
+  run records a prompt-token count; `make bench-hedge` does){{end}}.
+{{- else}}
+  `ANTHROPIC_API_KEY=... eval/hedge/claude.sh`, then `make results` (no
+  cost estimate yet: it is computed from the local run,
+  `eval/hedge/ollama.sh`).{{end}}
+{{- end}}
 {{- if not .Q5}}
 - Q5 router frontier: `make eval-router`.
 {{- end}}
@@ -837,6 +889,9 @@ Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `
 {{- if not .Q6}}
 - Q6 replica and Redis kills under load: `make chaos`.
 {{- end}}
+- Q6 with GCRA: set `ratelimit.algorithm: gcra` in `chaos/switchboard.yaml`
+  and run `make chaos` once the GCRA limiter is implemented
+  (`internal/ratelimit/gcra.go`).
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with
   `claude-haiku-5-5`).
