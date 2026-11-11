@@ -440,3 +440,116 @@ func TestMainReadsRawFiles(t *testing.T) {
 		t.Errorf("bad subcommand: exit %d", code)
 	}
 }
+
+// flapEvents cut Redis off three times (10-14, 18-22, 26-30 s), kill
+// replica 2 two seconds into the second outage and start it again at
+// 24 s, between outages.
+func flapEvents() []Event {
+	ev := func(at float64, action, target, phase string) Event {
+		return Event{Name: action + " " + target, Action: action, Target: target, Phase: phase,
+			PlannedSeconds: at, IssuedUnix: unixAt(at), DoneUnix: unixAt(at + 0.1)}
+	}
+	return []Event{
+		ev(10, ActionDisconnect, RedisTarget, "outage 1"),
+		ev(14, ActionConnect, RedisTarget, "back 1"),
+		ev(18, ActionDisconnect, RedisTarget, "outage 2"),
+		ev(20, ActionKill, "switchboard-2", "outage 2, replica 2 down"),
+		ev(22, ActionConnect, RedisTarget, "back 2, replica 2 down"),
+		ev(24, ActionStart, "switchboard-2", "back 2"),
+		ev(26, ActionDisconnect, RedisTarget, "outage 3"),
+		ev(30, ActionConnect, RedisTarget, "back 3"),
+	}
+}
+
+func TestFlap(t *testing.T) {
+	t.Parallel()
+	const reply = cost.Nanos(465_000)
+	// Two replies within the $0.001 budget, then two in each outage.
+	ledger := ledgerAt("bud", 1, 2, 11, 12, 19, 21, 27, 28)
+	snap := func(at float64, spent cost.Nanos) Snapshot {
+		return Snapshot{Label: "x", Unix: unixAt(at), Spent: spent}
+	}
+	snaps := []Snapshot{
+		snap(9.5, 2*reply),  // steady: all recorded
+		snap(13.5, 2*reply), // outage 1: two pending on the replicas
+		snap(17.5, 4*reply), // back 1: flushed, the control
+		snap(19.5, 4*reply),
+		snap(21.5, 4*reply),
+		snap(23.5, 5*reply), // back 2: the reply at 19 s died with replica 2
+		snap(25.5, 5*reply),
+		snap(29.5, 5*reply),
+		snap(41, 7*reply), // end
+	}
+	m := meta()
+	m.Budget.GraceRefill = "1h"
+	b := &Stream{Result: bench.Result{StartedAt: t0}}
+	b.Records = append(b.Records, bench.Record{I: 0, At: 1, Outcome: "ok", LatencyMS: f(10)})
+	s, err := Analyse(Input{Meta: m, Events: flapEvents(), Ledger: ledger, Snapshots: snaps,
+		Streams: map[string]*Stream{StreamMain: synthMain(nil), StreamBudget: b}}, DefaultRule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Phases) != 9 || s.Phases[1].RedisUp || !s.Phases[2].RedisUp || s.Phases[4].ReplicasUp != 2 || s.Phases[4].RedisUp {
+		t.Fatalf("phases %+v", s.Phases)
+	}
+	fl := s.Flap
+	if fl == nil || len(fl.Outages) != 3 {
+		t.Fatalf("flap %+v", fl)
+	}
+	limit := cost.Dollar / 1000
+	for i, o := range fl.Outages {
+		want := cost.Nanos(2*(i+2))*reply - limit
+		if o.Requests != 2 || o.Spent != 2*reply || o.OvershootAfter != want || o.N != i+1 {
+			t.Errorf("outage %d = %+v, overshoot want %v", i+1, o, want)
+		}
+	}
+	if o := fl.Outages[1]; o.FromSeconds != 18 || o.ToSeconds != 22 || !o.ReplicaKilled || o.SecondsToExhaust != 3 {
+		t.Errorf("outage 2 = %+v", o)
+	}
+	if fl.Slope != 2*reply || fl.R2 != 1 || fl.Intercept != 2*reply-limit {
+		t.Errorf("fit slope %v intercept %v r2 %v", fl.Slope, fl.Intercept, fl.R2)
+	}
+	if fl.TSeconds != 20 || fl.Processes != 4 || fl.OutageSpend != 6*reply || fl.Overshoot != 8*reply-limit {
+		t.Errorf("T %v processes %d outage spend %v overshoot %v", fl.TSeconds, fl.Processes, fl.OutageSpend, fl.Overshoot)
+	}
+	grace := cost.Dollar / 10000
+	if fl.PerOutageBound != 9*grace {
+		t.Errorf("per-outage bound %v", fl.PerOutageBound)
+	}
+	// 4 processes × $0.0001 × (1 + 20 s / 1 h).
+	if fl.RefillBound != 402_222 {
+		t.Errorf("refill bound %v", fl.RefillBound)
+	}
+	k := fl.Kill
+	if k == nil || k.Target != "switchboard-2" || k.IntoOutageSeconds != 2 || k.Lost != reply || k.Bound != grace || k.EstimatedPending != reply/3 {
+		t.Errorf("kill %+v", k)
+	}
+	if fl.MaxControlGap != 0 || fl.MinGap != 0 {
+		t.Errorf("control gap %v, min gap %v", fl.MaxControlGap, fl.MinGap)
+	}
+	r := s.Phases[1].Budget.Reconcile
+	if r == nil || r.Ledger != 4*reply || r.RedisSpent != 2*reply || r.Unreconciled != 2*reply || r.AtSeconds != 13.5 {
+		t.Errorf("outage 1 reconcile %+v", r)
+	}
+	if r := s.Phases[8].Budget.Reconcile; r == nil || r.Unreconciled != reply {
+		t.Errorf("end reconcile %+v", r)
+	}
+}
+
+func TestFlapNeedsADisconnect(t *testing.T) {
+	t.Parallel()
+	b := &Stream{Result: bench.Result{StartedAt: t0}}
+	s, err := Analyse(Input{Meta: meta(), Events: events(), Ledger: ledgerAt("bud", 1),
+		Streams: map[string]*Stream{StreamMain: synthMain(nil), StreamBudget: b}}, DefaultRule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Flap != nil {
+		t.Errorf("Q6 schedule produced a flap summary %+v", s.Flap)
+	}
+	m := meta()
+	m.Budget.GraceRefill = "soon"
+	if _, err := Analyse(Input{Meta: m, Events: flapEvents(), Streams: map[string]*Stream{StreamMain: synthMain(nil), StreamBudget: b}}, DefaultRule); err == nil {
+		t.Error("bad grace refill accepted")
+	}
+}

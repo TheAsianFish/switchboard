@@ -29,6 +29,9 @@ type Input struct {
 	Events  []Event
 	Streams map[string]*Stream
 	Ledger  []fake.Entry
+	// Snapshots are Redis's view of the budgeted key, if the run took
+	// any.
+	Snapshots []Snapshot
 }
 
 // Analyse computes the summary of a run under rule.
@@ -80,7 +83,7 @@ func Analyse(in Input, rule Rule) (*Summary, error) {
 		}
 	}
 	if st := in.Streams[StreamBudget]; st != nil {
-		if err := budgeted(s, st, in.Ledger, start, ph); err != nil {
+		if err := budgeted(s, st, in.Ledger, in.Snapshots, start, ph); err != nil {
 			return nil, err
 		}
 	}
@@ -98,7 +101,7 @@ func phases(m Meta, events []Event, start time.Time, end float64) []PhaseResult 
 		at := round3(rel(start, e.IssuedUnix))
 		cur.ToSeconds = at
 		out = append(out, cur)
-		down[e.Target] = e.Action == ActionKill
+		down[e.Target] = e.Action == ActionKill || e.Action == ActionDisconnect
 		cur = PhaseResult{Name: e.Phase, FromSeconds: at, ReplicasUp: replicas, RedisUp: !down[RedisTarget]}
 		for target, d := range down {
 			if d && target != RedisTarget {
@@ -334,7 +337,7 @@ func limited(s *Summary, st *Stream, ledger []fake.Entry, start time.Time, end f
 
 // budgeted fills each phase's BudgetPhase from the budget stream and the
 // ledger, pricing the ledger's usage with the meta's prices.
-func budgeted(s *Summary, st *Stream, ledger []fake.Entry, start time.Time, ph func(float64) int) error {
+func budgeted(s *Summary, st *Stream, ledger []fake.Entry, snaps []Snapshot, start time.Time, ph func(float64) int) error {
 	b := s.Meta.Budget
 	limit, err := cost.ParseUSD(b.USD)
 	if err != nil {
@@ -389,7 +392,203 @@ func budgeted(s *Summary, st *Stream, ledger []fake.Entry, start time.Time, ph f
 			p.Budget.GraceBound = cost.Nanos(p.ReplicasUp) * grace
 		}
 	}
+	price := func(e fake.Entry) cost.Nanos {
+		return cost.Nanos(int64(e.InputTokens)*int64(in) + int64(e.OutputTokens)*int64(out))
+	}
+	var spend []timedSpend
+	for _, e := range ledger {
+		if e.Model == b.Model {
+			spend = append(spend, timedSpend{at: e.Time.Sub(start).Seconds(), amount: price(e)})
+		}
+	}
+	// The last snapshot in a phase is the one at its end.
+	for _, sn := range snaps {
+		at := rel(start, sn.Unix)
+		var led cost.Nanos
+		for _, x := range spend {
+			if x.at < at {
+				led += x.amount
+			}
+		}
+		s.Phases[ph(at)].Budget.Reconcile = &Reconcile{
+			AtSeconds: round3(at), Ledger: led, RedisSpent: sn.Spent, RedisReserved: sn.Reserved, Unreconciled: led - sn.Spent,
+		}
+	}
+	if s.Meta.Budget.GraceRefill != "" {
+		if _, err := time.ParseDuration(s.Meta.Budget.GraceRefill); err != nil {
+			return fmt.Errorf("chaos: grace refill: %w", err)
+		}
+	}
+	s.Flap = flap(s, spend, limit, grace)
 	return nil
+}
+
+type timedSpend struct {
+	at     float64
+	amount cost.Nanos
+}
+
+// flap summarises the budget over the run's Redis outages, or returns nil
+// if Redis was never cut off from the network.
+func flap(s *Summary, spend []timedSpend, limit, grace cost.Nanos) *FlapResult {
+	var cut bool
+	for _, e := range s.Events {
+		cut = cut || (e.Action == ActionDisconnect && e.Target == RedisTarget)
+	}
+	if !cut {
+		return nil
+	}
+	f := &FlapResult{}
+	// Group consecutive Redis-down phases into outages.
+	for i := 0; i < len(s.Phases); i++ {
+		if s.Phases[i].RedisUp {
+			continue
+		}
+		o := Outage{N: len(f.Outages) + 1, FromSeconds: s.Phases[i].FromSeconds, ReplicasUp: s.Phases[i].ReplicasUp}
+		j := i
+		for j+1 < len(s.Phases) && !s.Phases[j+1].RedisUp {
+			j++
+		}
+		o.ToSeconds = s.Phases[j].ToSeconds
+		o.OvershootAfter = s.Phases[j].Budget.Overshoot
+		last := o.FromSeconds
+		for _, x := range spend {
+			if x.at >= o.FromSeconds && x.at < o.ToSeconds {
+				o.Spent += x.amount
+				o.Requests++
+				last = max(last, x.at)
+			}
+		}
+		o.SecondsToExhaust = round3(last - o.FromSeconds)
+		f.OutageSpend += o.Spent
+		f.Outages = append(f.Outages, o)
+		i = j
+	}
+	if len(f.Outages) == 0 {
+		return f
+	}
+	f.FirstOutageSeconds = f.Outages[0].FromSeconds
+	f.LastOutageEndSeconds = f.Outages[len(f.Outages)-1].ToSeconds
+	f.TSeconds = round3(f.LastOutageEndSeconds - f.FirstOutageSeconds)
+	f.Processes = f.Outages[0].ReplicasUp
+	var total cost.Nanos
+	for _, x := range spend {
+		total += x.amount
+	}
+	f.Overshoot = max(total-limit, 0)
+
+	outageOf := func(t float64) int {
+		for k, o := range f.Outages {
+			if t >= o.FromSeconds && t < o.ToSeconds {
+				return k
+			}
+		}
+		return -1
+	}
+	killed := false
+	for _, e := range s.Events {
+		if e.Target == RedisTarget {
+			continue
+		}
+		switch e.Action {
+		case ActionStart:
+			if e.AtSeconds >= f.FirstOutageSeconds && e.AtSeconds < f.LastOutageEndSeconds {
+				f.Processes++
+			}
+		case ActionKill:
+			k := outageOf(e.AtSeconds)
+			if k < 0 {
+				continue
+			}
+			killed = true
+			o := &f.Outages[k]
+			o.ReplicaKilled = true
+			var before cost.Nanos
+			for _, x := range spend {
+				if x.at >= o.FromSeconds && x.at < e.AtSeconds {
+					before += x.amount
+				}
+			}
+			f.Kill = &FlapKill{
+				Target: e.Target, AtSeconds: e.AtSeconds, IntoOutageSeconds: round3(e.AtSeconds - o.FromSeconds),
+				Bound: grace, EstimatedPending: before / cost.Nanos(max(o.ReplicasUp, 1)),
+			}
+		}
+	}
+	// Per-outage bound: each outage gets every live replica's grace, and
+	// a replica started during an outage brings a fresh one.
+	for _, o := range f.Outages {
+		f.PerOutageBound += cost.Nanos(o.ReplicasUp) * grace
+	}
+	for _, e := range s.Events {
+		if e.Target != RedisTarget && e.Action == ActionStart && outageOf(e.AtSeconds) >= 0 {
+			f.PerOutageBound += grace
+		}
+	}
+	if r := s.Meta.Budget.GraceRefill; r != "" {
+		refill, _ := time.ParseDuration(r) // checked by budgeted
+		if refill > 0 {
+			per := float64(grace) * (1 + f.TSeconds/refill.Seconds())
+			f.RefillBound = cost.Nanos(math.Floor(float64(f.Processes) * per))
+		}
+	}
+
+	// Reconciliation: the end of the run, the control phases (Redis up,
+	// before any kill) and the most negative gap once Redis was back.
+	var lastRec *Reconcile
+	for _, p := range s.Phases {
+		r := p.Budget.Reconcile
+		if r == nil {
+			continue
+		}
+		lastRec = r
+		if !p.RedisUp {
+			continue
+		}
+		if f.Kill == nil || r.AtSeconds < f.Kill.AtSeconds {
+			if p.FromSeconds >= f.FirstOutageSeconds {
+				f.MaxControlGap = max(f.MaxControlGap, abs(r.Unreconciled))
+			}
+		}
+		if p.FromSeconds >= f.FirstOutageSeconds {
+			f.MinGap = min(f.MinGap, r.Unreconciled)
+		}
+	}
+	if killed && lastRec != nil {
+		f.Kill.Lost = lastRec.Unreconciled
+	}
+
+	// Least-squares line through (n, overshoot after outage n).
+	n := float64(len(f.Outages))
+	var sx, sy, sxx, sxy float64
+	for _, o := range f.Outages {
+		x, y := float64(o.N), float64(o.OvershootAfter)
+		sx, sy, sxx, sxy = sx+x, sy+y, sxx+x*x, sxy+x*y
+	}
+	if d := n*sxx - sx*sx; d != 0 {
+		slope := (n*sxy - sx*sy) / d
+		icpt := (sy - slope*sx) / n
+		f.Slope, f.Intercept = cost.Nanos(math.Round(slope)), cost.Nanos(math.Round(icpt))
+		var ssRes, ssTot float64
+		mean := sy / n
+		for _, o := range f.Outages {
+			y := float64(o.OvershootAfter)
+			e := y - (slope*float64(o.N) + icpt)
+			ssRes += e * e
+			ssTot += (y - mean) * (y - mean)
+		}
+		if ssTot > 0 {
+			f.R2 = round6(1 - ssRes/ssTot)
+		}
+	}
+	return f
+}
+
+func abs(n cost.Nanos) cost.Nanos {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func streamInfo(name string, st *Stream, start time.Time) StreamInfo {
