@@ -3,7 +3,10 @@
 A release is a `v*` tag. Pushing one runs `.github/workflows/release.yml`,
 which tests the tagged commit, attaches four archives and `SHA256SUMS` to
 a GitHub release, and pushes a linux/amd64 + linux/arm64 image to
-`ghcr.io/theasianfish/switchboard:<tag>` and `:latest`. Nothing in it is
+`ghcr.io/theasianfish/switchboard:<tag>` and `:latest`. A tag with a
+`-` (`v1.1.0-rc.1`) is published as a pre-release and does not move
+`:latest`. The image is built only after the archives and the GitHub
+release succeed, so a failed release never leaves an image behind. Nothing in it is
 paid and it needs no secret beyond the repository's own `GITHUB_TOKEN`.
 
 ## One-time setup (maintainer)
@@ -12,17 +15,21 @@ paid and it needs no secret beyond the repository's own `GITHUB_TOKEN`.
    Change visibility). `go install …@latest` fetches from GitHub through
    the public module proxy, which cannot read a private repository, and
    the README quickstart starts with `git clone`.
-2. **Let Actions write releases and packages.** Settings → Actions →
-   General → Workflow permissions: "Read and write permissions". The
-   workflow asks for `contents: write` (the release) and `packages: write`
-   (the image) per job, which this setting allows.
+2. **Check that Actions may write releases and packages.** The workflow
+   asks for `contents: write` (the release) and `packages: write` (the
+   image) per job, which a personal repository allows whatever the default
+   under Settings → Actions → General → Workflow permissions. Only an
+   organisation policy that caps the token at read-only blocks it.
 3. **After the first image is pushed, make the package public.** GHCR
    creates `switchboard` as a private package owned by the account. Open
    it (profile → Packages → switchboard → Package settings), set the
    visibility to public, and under "Manage Actions access" check that the
    `switchboard` repository has write access (it does when the workflow
    created the package).
-4. Optional, for the live evals only: add `ANTHROPIC_API_KEY` as a
+4. **Protect release tags.** Any collaborator who can push a `v*` tag can
+   publish. Settings → Rules → Rulesets → New tag ruleset, target
+   `v*`, restrict creations, updates and deletions to the maintainer.
+5. Optional, for the live evals only: add `ANTHROPIC_API_KEY` as a
    repository secret (Settings → Secrets and variables → Actions). No
    workflow on push uses it; RESULTS.md "To measure" lists what it would
    run and the estimated cost.
@@ -37,7 +44,7 @@ make test-integration      # Lua and vector index against redis:8
 make ui-check              # the admin page and its committed build
 make results && git diff --exit-code RESULTS.md README.md   # rendered docs are current
 make check-install         # go install in a clean golang container serves a request
-VERSION=v1.0.0 make dist   # the four archives build; dist/ is gitignored
+VERSION=v1.0.0 make dist   # the four archives build (GNU tar; gtar on macOS); dist/ is gitignored
 ```
 
 Then dry-run the workflow itself: Actions → release → "Run workflow" on
@@ -87,8 +94,11 @@ Watch the run under Actions → release. When it is green:
   pre-release or delete it, delete the image tag in the package settings,
   and release `v1.0.1`. If the module version itself must not be used,
   add a `retract v1.0.0` directive to `go.mod` in `v1.0.1`.
-- **The image push was refused** (`denied: permission_denied`): step 2 or
-  3 of the setup is missing.
+- **The archives and the GitHub release are out but the image push was
+  refused** (`denied: permission_denied`): the package's "Manage Actions
+  access" lacks this repository (setup step 3), or an organisation policy
+  caps the token (step 2). Fix it and re-run the failed `image` job; the
+  tag stays where it is.
 
 ## Versioning
 
