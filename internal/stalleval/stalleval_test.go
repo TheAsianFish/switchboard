@@ -174,10 +174,18 @@ func writeMeta(t *testing.T, root string) {
 
 func writeSanity(t *testing.T, root, metrics string) {
 	t.Helper()
+	writeSanityLedger(t, root, metrics, 110)
+}
+
+// writeSanityLedger writes a sanity run of 100 measured and 10 warm-up
+// requests whose provider ledger received upstream requests.
+func writeSanityLedger(t *testing.T, root, metrics string, upstream int) {
+	t.Helper()
 	dir := filepath.Join(root, SanityDir)
-	res := bench.Result{StartedAt: t0, Requests: 100, Outcomes: map[string]int{"ok": 100},
+	res := bench.Result{StartedAt: t0, Requests: 100, WarmupRequests: 10, Outcomes: map[string]int{"ok": 100},
 		TTFT: bench.Stats{Count: 100, P99: 600, P999: 950, Max: 1450}}
 	writeJSONFile(t, filepath.Join(dir, SanityArm+".json"), res)
+	writeFile(t, filepath.Join(dir, SanityArm+"-ledger.json"), []byte(fmt.Sprintf(`{"requests":%d,"completed":%d}`, upstream, upstream)))
 	writeFile(t, filepath.Join(dir, "meta.json"), []byte(`{"commit":"abc1234","date":"2026-01-02T03:10:00Z","command":"eval/hedge/run.sh"}`))
 	writeFile(t, filepath.Join(dir, SanityArm+"-metrics.prom"), []byte(metrics))
 }
@@ -408,6 +416,32 @@ func TestSanity(t *testing.T) {
 			if s.Sanity.FirstTokenTimeouts != tt.fired || s.Sanity.FirstTokenTimeoutsSeries != tt.series ||
 				s.Sanity.Held != (tt.fired == 0) || s.Sanity.TTFT.Max != 1450 || s.Sanity.TimeoutSeconds != 2 {
 				t.Errorf("sanity %+v", s.Sanity)
+			}
+		})
+	}
+}
+
+// An empty scrape reads like a counter that never fired; the provider's
+// ledger is what lets the check fail then.
+func TestSanityFailsOnExtraUpstreamRequests(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		upstream int
+		held     bool
+	}{
+		{"one upstream request per request sent", 110, true},
+		{"a retried attempt the scrape missed", 111, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeMeta(t, root)
+			writeSanityLedger(t, root, "", tt.upstream)
+			s := analyse(t, root)
+			if s.Sanity == nil || s.Sanity.Held != tt.held || s.Sanity.Sent != 110 || s.Sanity.Upstream != tt.upstream {
+				t.Errorf("sanity %+v, want held %v", s.Sanity, tt.held)
 			}
 		})
 	}

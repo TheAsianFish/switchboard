@@ -268,6 +268,11 @@ type Sanity struct {
 	// FirstTokenTimeouts reads an absent series as 0 (see Metrics).
 	FirstTokenTimeouts       int  `json:"first_token_timeouts"`
 	FirstTokenTimeoutsSeries bool `json:"first_token_timeouts_series"`
+	// Sent is the requests the bench sent, warm-up included; Upstream the
+	// requests the fake provider's ledger received. A timeout that fired
+	// is retried, so Held needs them equal as well as no timeouts counted.
+	Sent     int `json:"sent"`
+	Upstream int `json:"upstream"`
 	// TTFT is the measured requests' time to first token.
 	TTFT bench.Stats `json:"ttft_ms"`
 	Held bool        `json:"held"`
@@ -692,11 +697,23 @@ func analyseSanity(dir string) (*Sanity, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The counter alone cannot fail the check: a scrape that failed leaves
+	// an empty file, which reads like a counter that never fired. The fake
+	// provider's ledger can: every timeout that fired was retried, so the
+	// provider would have seen more requests than the bench sent.
+	var ledger struct {
+		Requests int `json:"requests"`
+	}
+	if err := readJSON(filepath.Join(dir, SanityArm+"-ledger.json"), &ledger); err != nil {
+		return nil, err
+	}
+	sent := res.Requests + res.WarmupRequests
 	return &Sanity{
 		Commit: meta.Commit, Date: meta.Date, Command: meta.Command, Hardware: res.Hardware,
 		Requests: res.Requests, Errors: res.Errors(), TimeoutSeconds: SanityTimeout.Seconds(),
 		FirstTokenTimeouts: m.FirstTokenTimeouts, FirstTokenTimeoutsSeries: m.FirstTokenTimeoutsSeries,
-		TTFT: res.TTFT, Held: m.FirstTokenTimeouts == 0,
+		Sent: sent, Upstream: ledger.Requests,
+		TTFT: res.TTFT, Held: m.FirstTokenTimeouts == 0 && ledger.Requests == sent && res.Errors() == 0,
 	}, nil
 }
 
