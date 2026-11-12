@@ -11,6 +11,7 @@
 //	switchboard eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
 //	switchboard eval router      Q5: build, label and cross-validate the router
 //	switchboard eval hedge-ledger Q4: summarise the fake provider's ledger (stdin)
+//	switchboard eval stall        M10: summarise a `make bench-stall` run
 //	switchboard chaos report      Q6: per-phase report of a chaos run
 //	switchboard version           print the build version
 package main
@@ -44,6 +45,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/results"
 	"github.com/TheAsianFish/switchboard/internal/routereval"
 	"github.com/TheAsianFish/switchboard/internal/server"
+	"github.com/TheAsianFish/switchboard/internal/stalleval"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
 
@@ -61,6 +63,7 @@ commands:
   eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
   eval router       Q5: data | label | embed | run (the router eval)
   eval hedge-ledger Q4: summarise the fake provider's ledger read on stdin
+  eval stall        M10: summarise a make bench-stall run as JSON
   chaos report      Q6: per-phase report of a chaos run (chaos/run.sh)
   version           print the build version
 `
@@ -93,6 +96,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && args[1] == "hedge-ledger" {
 			return results.LedgerMain(os.Stdin, stdout, stderr)
 		}
+		if len(args) > 1 && args[1] == "stall" {
+			return stalleval.Main(args[2:], stdout, stderr)
+		}
 		if len(args) > 1 && (args[1] == "limits" || args[1] == "budget") {
 			return limitseval.Main(ctx, args[1:], stdout, stderr)
 		}
@@ -102,7 +108,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && (args[1] == "cache-data" || args[1] == "cache" || args[1] == "cache-index") {
 			return cacheeval.Main(ctx, args[1:], stdout, stderr)
 		}
-		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache|cache-index|router|hedge-ledger [flags]")
+		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache|cache-index|router|hedge-ledger|stall [flags]")
 		return 2
 	case "version":
 		_, _ = fmt.Fprintln(stdout, version())
