@@ -9,8 +9,8 @@ import (
 )
 
 // Memory is an in-process Ledger with the same semantics as Redis. It
-// serves single-replica deployments without Redis and is the grace ledger
-// of Degrading. It is safe for concurrent use.
+// serves single-replica deployments without Redis. It is safe for
+// concurrent use.
 type Memory struct {
 	ttl time.Duration
 	now func() time.Time

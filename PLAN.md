@@ -456,6 +456,54 @@ What the numbers and the code say:
   `make chaos` and its Q6 numbers stay as they are. The first commit fixes
   the flaky hedge test above at its cause (not by widening its deadline
   alone), so the gate this milestone is judged by is trustworthy.
+- *Phases (fixed before the full run).* The Q6 fleet and its three
+  streams, for 150 s. The budgeted key spends its $0.20 in about 43 s, so
+  every outage starts with the budget already spent:
+
+  | Offset | Action | Phase it starts |
+  |--------|--------|-----------------|
+  | 0 s | load starts | steady |
+  | 50 + 12k s (k = 0..7) | disconnect Redis | outage k + 1 |
+  | 58 + 12k s (k ≠ 4) | connect Redis | back k + 1 |
+  | 101 s | kill replica 2 (SIGKILL), 3 s into outage 5 | outage 5, replica 2 down |
+  | 106 s | connect Redis | back 5, replica 2 down |
+  | 108 s | start replica 2 | back 5 |
+  | 150 s | load ends | |
+
+  Each outage is 8 s and each reachable stretch 4 s (8 s after the last),
+  so T, from the first disconnect to the last connect, is 92 s. Redis is
+  reconnected with its service name as the network alias, so the replicas
+  find it again by name. Half a second before every action, and once after
+  the run, the script reads the budgeted key's balance (`spent`,
+  `reserved`) with `redis-cli` inside the Redis container, which works
+  while it is off the network; a phase's reconciliation is the fake
+  provider's ledger, priced, up to that read minus Redis's `spent`. An
+  outage is a run of phases with Redis down; its spend is what the
+  provider served the key during it, and "linear in outages" is read from
+  a least-squares line through the overshoot after each outage (slope and
+  R²). The processes in the bound are the three replicas up at the first
+  disconnect plus the start at 108 s: four. The control for the
+  reconciliation is every reachable phase before the kill (gap expected
+  0 within one in-flight reply, $0.000465); the killed replica's loss is
+  the gap at the end of the run. Per-phase error rate and p99 of the main
+  stream are reported, not judged: Q6's steady-state rule needs 5 s and a
+  reachable stretch is 4 s.
+- *How each hypothesis is judged (fixed with the phases).* Before the
+  fix: the overshoot hypothesis holds at $0.06 or more (the stated
+  falsifier), and the report sets it beside the $0.24 prediction;
+  "linear in outages" holds if the fit's R² is at least 0.95 and its
+  slope is within a quarter of three replicas' grace ($0.0225 to
+  $0.0375 per outage). After the fix: the bound holds if the overshoot
+  at the end is at most processes × grace × (1 + T / refill), and
+  "whatever the outage count" holds if outages 2 to 8 together add at
+  most the restarted process's grace plus the refill (one grace plus
+  four × grace × T / refill) to what outage 1 spent. In both runs the
+  killed replica's loss (the gap at the end) holds against its bound if
+  it is between 0 and one replica's grace, and the control holds if no
+  reachable phase before the kill shows a gap above one in-flight reply.
+  A negative gap anywhere after the first outage is a double charge and
+  is reported as observed; Redis's `reserved` at the end is the
+  expired-hold case (holds whose replica died, waiting out their TTL).
 
 **M9. What does it cost to make a budget survive a Redis restart?**
 
@@ -968,6 +1016,37 @@ Changes made while building:
   - The demo GIF is a placeholder: `docs/demo/demo.tape` records it with
     VHS, which this build machine does not have (no ttyd, ffmpeg or
     browser); `docs/demo.md` has the steps.
+- **M8.**
+  - The flaky hedge test had two causes. The test cancelled its request
+    40 ms after the call, assuming both attempts had been sent by then,
+    which a loaded `-race` run does not guarantee; it now cancels once the
+    hedge has reached the provider. And the hedge layer itself lost the
+    count of cancelled attempts when their failures (caused by the same
+    cancellation) were selected before `ctx.Done`, so settle charged one
+    prompt estimate where two attempts had gone out; a repeated test under
+    `-cpu 1` showed `Cancelled: 0` with both attempts sent. Both are
+    fixed; five consecutive `make check` runs were green before the flap
+    harness was built.
+  - T is 92 s (first disconnect to last connect), not 96 s, and the bound
+    counts four processes (the replica started at 108 s is a new one), so
+    the after-fix bound is 4 × $0.01 × (1 + 92 / 3600) = $0.0410 rather
+    than the $0.031 written for three replicas.
+  - Redis is put back with `--alias redis`: `docker network connect` does
+    not restore a compose service's name, and without it the replicas
+    could not resolve Redis again.
+  - The allowance is keyed by key alone, not by budget window, so a daily
+    window rolling over mid-outage cannot hand out a second allowance; a
+    grace hold adjusts the bucket by hold − actual whenever it settles,
+    before or after recovery.
+  - `make chaos` was re-run after the fix into
+    `eval/results/m8-flap/q6-rerun/` instead of over the committed Q6
+    files, so Q6's numbers stay the ones its prose was written from, and
+    RESULTS.md sets the two side by side.
+  - The bound holds over a stretch T that starts with no grace hold open,
+    as in the run (T starts at the first outage, after Redis was
+    reachable). A stretch that starts while grace holds are open can gain
+    up to one more grace, because settling a hold admitted before it gives
+    the over-estimate back; `budget/degrade.go` says so.
 
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
@@ -976,6 +1055,6 @@ Changes made while building:
 - [x] M5: Evaluated router — committed eval set (GSM8K + MMLU, 600 questions); `switchboard eval router label` runs every candidate through the gateway and records correctness, usage, dollars and latency (replays from recordings at $0); feature extraction and the per-candidate logistic models trained in Go; `model: "auto"` with a configurable quality target; `make eval-router` with 5-fold cross-validation, the four baselines and the random-mix line; RESULTS.md router section answering Q5 (live labels when a key exists, otherwise the Ollama candidate and "To measure"). Done when the router's held-out frontier is plotted against the line and the gateway serves `auto` from the trained weights.
 - [x] M6: Admin page, chaos and the overhead breakdown — admin JSON API on the loopback listener (keys, limits, spend, cache stats, router decisions, recent requests with trace links); React + TypeScript page embedded in the binary with Vitest tests; `chaos/run.sh` with the phased kill schedule and per-phase report; `make bench` extended to the per-feature breakdown. RESULTS.md answers Q1 in full and Q6. Done when the chaos run completes on a laptop with a report, the admin page shows a live fleet, and `make ui-check` is in CI.
 - [x] M7: Release readiness — `go install` path verified in a clean container, release archives, `release.yml` guarded by `v*` tags building the multi-arch image to GHCR, RELEASE.md with every maintainer step; README complete (what/why, demo GIF placeholder with capture instructions, quickstart for both SDKs, Mermaid architecture, design decisions and trade-offs, results table rendered from RESULTS.md, roadmap); RESULTS.md complete with every measured number, its method, cost and hardware, and every unmeasured one under "To measure" with its command. Done when a fresh clone runs the quickstart from the README alone and the release workflow dry-runs green.
-- [ ] M8: Budget grace under a flapping store — `make chaos-flap` on the Q6 fleet: Redis cut off and reconnected eight times with its state kept (`docker network disconnect`), one replica killed while degraded, phases fixed in PLAN.md before the full run, the flaky `TestAbandonedHedgedRequestIsChargedForEveryAttempt` fixed at its cause first (five consecutive `make check` runs green), and a per-phase reconciliation of the fake provider's ledger against Redis's `spent`; run once at the commit before the fix; then grace as a time-refilled allowance per replica and key (`grace_refill`, fake-clock unit tests, the doc comments in `budget/degrade.go` corrected) and the same run again. Done when RESULTS.md holds both runs side by side with each hypothesis answered (overshoot about $0.24 and linear in outages before; at most replica processes × grace × (1 + T / refill) after, whatever the outage count, a restarted replica counted as a new process; the killed replica's lost pending spend measured against its bound), both raw results are committed, the double-charge and expired-hold cases are listed under known problems with what was observed, and `make chaos` still reproduces Q6.
+- [x] M8: Budget grace under a flapping store — `make chaos-flap` on the Q6 fleet: Redis cut off and reconnected eight times with its state kept (`docker network disconnect`), one replica killed while degraded, phases fixed in PLAN.md before the full run, the flaky `TestAbandonedHedgedRequestIsChargedForEveryAttempt` fixed at its cause first (five consecutive `make check` runs green), and a per-phase reconciliation of the fake provider's ledger against Redis's `spent`; run once at the commit before the fix; then grace as a time-refilled allowance per replica and key (`grace_refill`, fake-clock unit tests, the doc comments in `budget/degrade.go` corrected) and the same run again. Done when RESULTS.md holds both runs side by side with each hypothesis answered (overshoot about $0.24 and linear in outages before; at most replica processes × grace × (1 + T / refill) after, whatever the outage count, a restarted replica counted as a new process; the killed replica's lost pending spend measured against its bound), both raw results are committed, the double-charge and expired-hold cases are listed under known problems with what was observed, and `make chaos` still reproduces Q6.
 - [ ] M9: Budgets that survive a Redis restart, and what the fsync costs — `REDIS_PERSIST=none|everysec|always` arms of `make chaos` with M8's reconciliation column and the replicas' logs kept; `make bench-persist` (Q1's limits-and-budget configuration at 200 requests per second against each mode, bootstrap intervals as in Q1); an integration test that a `LOADING` reply degrades like an unreachable store and recovers. Done when RESULTS.md holds overshoot, error rate, degraded seconds after the restart and hit rate of repeats per mode beside the added p50 and p99 per mode, each hypothesis is answered (`everysec` at most the live replicas' grace plus one second of spend, about $0.025, and under 0.1 ms, a difference inside Q1's run-to-run drift reported as unresolved rather than as held; `always` at most grace and under 0.2 ms p99, or by how much not), the cause of Q6's slow stretch after the Redis kill is read from the kept logs, the compose default is the mode the pre-stated rule picks, and the README's roadmap line on budgets is replaced by the finding.
 - [ ] M10: First-token timeout and a stalled provider — a stall switch on `switchboard fake-provider`; `resilience.first_token_timeout` per provider (off by default), per attempt, cancelled by the first event, counted by the breaker and retried like a timeout; `make bench-stall` with steady, stalled and recovered phases, run before and after. Done when RESULTS.md holds both runs with per-phase latency, error kinds, time until the breaker is open on the replica and until it closes, each hypothesis answered (0 opens and no completed request today; open within 3 s plus five failures, refusals p99 under 5 ms with `Retry-After`, closed within a cooldown plus 1 s, and 0 timeouts fired on Q4's hedging-off arm, reported with its largest TTFT beside the timeout), a stall after the first event listed under known problems as not covered, a trace of a timed-out attempt is committed beside M4's, and the README documents the setting and when not to use it.

@@ -15,24 +15,54 @@
 # `switchboard chaos report` turns them and the fake provider's ledger into
 # eval/results/q6-chaos/summary.json, and `make results` into RESULTS.md.
 #
+# SCHEDULE=flap is M8's run (`make chaos-flap`, PLAN.md M8): the same fleet
+# and streams for 150 s, with Redis cut off from the compose network and
+# reconnected eight times (`docker network disconnect` / `connect`, so it
+# keeps its state) once the budget is spent, replica 2 killed 3 s into the
+# fifth outage and started again 2 s after it ends:
+#
+#   50 + 12k s  disconnect Redis (k = 0..7)   58 + 12k s  connect Redis
+#   101 s       kill replica 2                108 s       start replica 2
+#
+# Just before each action, and once after the run, it reads the budgeted
+# key's balance from Redis (redis-cli inside the container, which works
+# while it is off the network) into snapshots.json, so the report can set
+# Redis's spent against the fake provider's ledger phase by phase.
+#
 #   chaos/run.sh                                  # the full run (make chaos, about 3 minutes)
 #   SCALE=0.25 OUT=/tmp/q6 chaos/run.sh           # a 30 s smoke: schedule and duration × 0.25
 #   KEEP=1 chaos/run.sh                           # leave the fleet up afterwards
+#   SCHEDULE=flap OUT=eval/results/m8-flap/before chaos/run.sh   # make chaos-flap RUN=before
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 scale=${SCALE:-1}
+sched=${SCHEDULE:-q6}
+case $sched in
+q6 | flap) ;;
+*)
+	echo "q6: SCHEDULE must be q6 or flap, got $sched" >&2
+	exit 2
+	;;
+esac
 main_rate=${MAIN_RATE:-200}
 limited_rate=${LIMITED_RATE:-30}
 budget_rate=${BUDGET_RATE:-10}
 out=${OUT:-eval/results/q6-chaos}
 command="make chaos"
+if [[ $sched == flap ]]; then
+	command="make chaos-flap RUN=$(basename "$out")"
+fi
 if [[ -n ${SCALE:-}${MAIN_RATE:-}${LIMITED_RATE:-}${BUDGET_RATE:-} ]]; then
-	command="SCALE=$scale MAIN_RATE=$main_rate LIMITED_RATE=$limited_rate BUDGET_RATE=$budget_rate chaos/run.sh"
+	command="SCHEDULE=$sched SCALE=$scale MAIN_RATE=$main_rate LIMITED_RATE=$limited_rate BUDGET_RATE=$budget_rate chaos/run.sh"
 fi
 scaled() { awk -v s="$scale" -v v="$1" 'BEGIN { printf "%.3f", s * v }'; }
-duration=$(scaled 120)
+if [[ $sched == flap ]]; then
+	duration=$(scaled 150)
+else
+	duration=$(scaled 120)
+fi
 
 project=switchboard-chaos
 compose=(docker compose -f chaos/compose.yaml -p "$project")
@@ -88,17 +118,40 @@ sleep_until() {
 	sleep "$d"
 }
 
+# snapshot <label>: the budgeted key's balance as Redis holds it, appended
+# to the snapshots file. Read inside the container, so it works while Redis
+# is off the network; a failed read is skipped, not invented.
+budget_key='sb:bud:{budget:total}:bal'
+snapshot() {
+	local t vals spent reserved
+	t=$(now)
+	if ! vals=$("${compose[@]}" exec -T redis redis-cli --raw HMGET "$budget_key" spent reserved 2>/dev/null); then
+		echo "q6: snapshot before $1 failed" >&2
+		return 0
+	fi
+	spent=$(sed -n 1p <<<"$vals")
+	reserved=$(sed -n 2p <<<"$vals")
+	printf '{"label": "%s", "unix": %s, "spent_nanodollars": %s, "reserved_nanodollars": %s}\n' \
+		"$1" "$t" "${spent:-0}" "${reserved:-0}" >>"$tmp/snapshots.jsonl"
+}
+
 # act <planned offset> <action> <service> <phase it starts>: runs the
-# docker action at t0 + offset and appends it to the events file.
+# docker action at t0 + offset and appends it to the events file. In the
+# flap schedule a snapshot of Redis is taken 0.5 s before the action.
 act() {
 	local planned=$1 action=$2 target=$3 phase=$4 issued done
+	if [[ $sched == flap ]]; then
+		sleep_until "$(awk -v t="$t0" -v o="$(scaled "$planned")" 'BEGIN { printf "%.6f", t + o - 0.5 }')"
+		snapshot "$action $target"
+	fi
 	sleep_until "$(awk -v t="$t0" -v o="$(scaled "$planned")" 'BEGIN { printf "%.6f", t + o }')"
 	issued=$(now)
-	if [[ $action == kill ]]; then
-		"${compose[@]}" kill -s SIGKILL "$target" >/dev/null 2>&1
-	else
-		"${compose[@]}" start "$target" >/dev/null 2>&1
-	fi
+	case $action in
+	kill) "${compose[@]}" kill -s SIGKILL "$target" >/dev/null 2>&1 ;;
+	start) "${compose[@]}" start "$target" >/dev/null 2>&1 ;;
+	disconnect) docker network disconnect "$network" "$(container "$target")" >/dev/null ;;
+	connect) docker network connect --alias "$target" "$network" "$(container "$target")" >/dev/null ;;
+	esac
 	done=$(now)
 	echo "q6: $(awk -v t="$t0" -v d="$done" 'BEGIN { printf "%6.2f", d - t }') s  $action $target" >&2
 	printf '{"name": "%s %s", "action": "%s", "target": "%s", "phase": "%s", "planned_seconds": %s, "issued_unix": %s, "done_unix": %s}\n' \
@@ -112,7 +165,33 @@ overview() {
 		rm -f "$tmp/overview-$1.json"
 }
 
+network=${project}_default
+container() { "${compose[@]}" ps -aq "$1"; }
+
+schedule_flap() {
+	local k at
+	for k in 0 1 2 3 4 5 6 7; do
+		at=$((50 + 12 * k))
+		act "$at" disconnect redis "outage $((k + 1))"
+		if [[ $k == 0 ]]; then
+			sleep_until "$(awk -v t="$t0" -v o="$(scaled 54)" 'BEGIN { printf "%.6f", t + o }')"
+			overview redis-down
+		fi
+		if [[ $k == 4 ]]; then
+			act 101 kill switchboard-2 "outage 5, replica 2 down"
+			act 106 connect redis "back 5, replica 2 down"
+			act 108 start switchboard-2 "back 5"
+		else
+			act $((at + 8)) connect redis "back $((k + 1))"
+		fi
+	done
+}
+
 schedule() {
+	if [[ $sched == flap ]]; then
+		schedule_flap
+		return
+	fi
 	act 30 kill switchboard-2 "replica down"
 	act 60 kill redis "replica and Redis down"
 	sleep_until "$(awk -v t="$t0" -v o="$(scaled 67.5)" 'BEGIN { printf "%.6f", t + o }')"
@@ -131,6 +210,7 @@ done
 wait_for "load balancer" curl -fsS "$lb/healthz"
 curl -fsS -X POST "$fake/ledger/reset" >/dev/null
 : >"$tmp/events.jsonl"
+: >"$tmp/snapshots.jsonl"
 
 echo "q6: ${duration} s of load, schedule × $scale" >&2
 t0=$(now)
@@ -154,6 +234,14 @@ cat "$tmp"/main.err "$tmp"/limited.err "$tmp"/budget.err >&2
 sleep 1
 overview end
 curl -fsS "$fake/ledger" | gzip -9n >"$tmp/ledger.json.gz"
+if [[ $sched == flap ]]; then
+	snapshot end
+	{
+		echo "["
+		sed '$!s/$/,/' "$tmp/snapshots.jsonl"
+		echo "]"
+	} >"$tmp/snapshots.json"
+fi
 
 {
 	echo "["
@@ -168,8 +256,9 @@ cat >"$tmp/meta.json" <<JSON
   "replicas": 3,
   "duration_seconds": $duration,
   "time_scale": $scale,
+  "schedule": "$sched",
   "limit": {"model": "fake-limited", "rate": 10, "period_seconds": 1},
-  "budget": {"model": "fake-budget", "usd": "0.20", "grace_usd": "0.01", "input_price": "3", "output_price": "15"},
+  "budget": {"model": "fake-budget", "usd": "0.20", "grace_usd": "0.01", "grace_refill": "1h", "input_price": "3", "output_price": "15"},
   "fake_provider": {"latency": "20ms", "tokens": 30, "token_interval": "5ms"}
 }
 JSON
@@ -178,6 +267,6 @@ mkdir -p "$out"
 rm -f "$out"/*.json "$out"/*.json.gz "$out"/*.jsonl.gz
 cp "$tmp"/meta.json "$tmp"/events.json "$tmp"/ledger.json.gz "$out"/
 cp "$tmp"/main.json "$tmp"/limited.json "$tmp"/budget.json "$tmp"/*.jsonl.gz "$out"/
-cp "$tmp"/overview-*.json "$out"/ 2>/dev/null || true
+cp "$tmp"/overview-*.json "$tmp"/snapshots.json "$out"/ 2>/dev/null || true
 "$bin" chaos report --dir "$out"
 echo "q6: results in $out. Run 'make results' to render RESULTS.md." >&2

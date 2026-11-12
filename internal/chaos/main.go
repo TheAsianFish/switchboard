@@ -94,6 +94,10 @@ func Load(dir string) (*Input, error) {
 		return nil, err
 	}
 	in.Ledger = ledger.Entries
+	err := readJSON(filepath.Join(dir, SnapshotsFile), &in.Snapshots)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
 	return in, nil
 }
 
@@ -166,6 +170,17 @@ func Describe(s *Summary) string {
 			r = fmt.Sprintf("%.3f s", *e.RecoverySeconds)
 		}
 		fmt.Fprintf(&b, "%-24s at %6.2f s: %s, %d errors before\n", e.Name, e.AtSeconds, r, e.ErrorsBeforeRecovery)
+	}
+	if f := s.Flap; f != nil {
+		for _, o := range f.Outages {
+			fmt.Fprintf(&b, "outage %d %6.1f-%6.1f s: %3d requests, %s spent, overshoot after %s\n",
+				o.N, o.FromSeconds, o.ToSeconds, o.Requests, o.Spent, o.OvershootAfter)
+		}
+		fmt.Fprintf(&b, "overshoot %s over T = %.1f s, %d processes; slope %s per outage (R² %.3f); per-outage bound %s, refill bound %s\n",
+			f.Overshoot, f.TSeconds, f.Processes, f.Slope, f.R2, f.PerOutageBound, f.RefillBound)
+		if k := f.Kill; k != nil {
+			fmt.Fprintf(&b, "%s killed %.1f s into an outage: %s never reached Redis (bound %s)\n", k.Target, k.IntoOutageSeconds, k.Lost, k.Bound)
+		}
 	}
 	return b.String()
 }

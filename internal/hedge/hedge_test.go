@@ -595,3 +595,59 @@ func TestHalfOpenRefusalCarriesRetryAfter(t *testing.T) {
 		t.Fatalf("retry after = %v, want 7s", got)
 	}
 }
+
+// waitsForCancel blocks every call until its context is cancelled, and
+// closes sent once the second call has arrived.
+type waitsForCancel struct {
+	calls atomic.Int32
+	sent  chan struct{}
+}
+
+func (w *waitsForCancel) wait(ctx context.Context) error {
+	if w.calls.Add(1) == 2 {
+		close(w.sent)
+	}
+	<-ctx.Done()
+	return core.Wrap(core.KindTimeout, ctx.Err(), "request cancelled")
+}
+
+func (w *waitsForCancel) Complete(ctx context.Context, _ *core.Request) (*core.Response, error) {
+	return nil, w.wait(ctx)
+}
+
+func (w *waitsForCancel) Stream(ctx context.Context, _ *core.Request) (core.Stream, error) {
+	return nil, w.wait(ctx)
+}
+
+// The caller's cancellation reaches the attempts as well, so their
+// failures race ctx.Done in the select; whichever arrives first, every
+// attempt sent is reported as cancelled. Repeated because the order is the
+// scheduler's choice.
+func TestCancelledAttemptsAreCountedWhicheverWakesFirst(t *testing.T) {
+	t.Parallel()
+	for i := range 300 {
+		stream := i%2 == 1
+		up := &waitsForCancel{sent: make(chan struct{})}
+		p := New("up", up, hedging(time.Millisecond))
+		ctx, rep := WithReport(context.Background())
+		ctx, cancel := context.WithCancel(ctx)
+		go func() {
+			<-up.sent
+			cancel()
+		}()
+		req := &core.Request{Model: "m", Stream: stream}
+		var err error
+		if stream {
+			_, err = p.Stream(ctx, req)
+		} else {
+			_, err = p.Complete(ctx, req)
+		}
+		cancel()
+		if err == nil {
+			t.Fatal("a cancelled request succeeded")
+		}
+		if s := rep.Snapshot(); s.Attempts != 2 || s.Cancelled != 2 {
+			t.Fatalf("run %d stream=%v: report = %+v, want 2 attempts, 2 cancelled", i, stream, s)
+		}
+	}
+}

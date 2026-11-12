@@ -1,0 +1,20 @@
+[
+{"name": "disconnect redis", "action": "disconnect", "target": "redis", "phase": "outage 1", "planned_seconds": 50.000, "issued_unix": 1794423843.565430676, "done_unix": 1794423843.703892920},
+{"name": "connect redis", "action": "connect", "target": "redis", "phase": "back 1", "planned_seconds": 58.000, "issued_unix": 1794423851.565744917, "done_unix": 1794423851.703414212},
+{"name": "disconnect redis", "action": "disconnect", "target": "redis", "phase": "outage 2", "planned_seconds": 62.000, "issued_unix": 1794423855.565285580, "done_unix": 1794423855.713162652},
+{"name": "connect redis", "action": "connect", "target": "redis", "phase": "back 2", "planned_seconds": 70.000, "issued_unix": 1794423863.565303328, "done_unix": 1794423863.711128018},
+{"name": "disconnect redis", "action": "disconnect", "target": "redis", "phase": "outage 3", "planned_seconds": 74.000, "issued_unix": 1794423867.566184929, "done_unix": 1794423867.718671990},
+{"name": "connect redis", "action": "connect", "target": "redis", "phase": "back 3", "planned_seconds": 82.000, "issued_unix": 1794423875.566441875, "done_unix": 1794423875.722851222},
+{"name": "disconnect redis", "action": "disconnect", "target": "redis", "phase": "outage 4", "planned_seconds": 86.000, "issued_unix": 1794423879.566467743, "done_unix": 1794423879.734981684},
+{"name": "connect redis", "action": "connect", "target": "redis", "phase": "back 4", "planned_seconds": 94.000, "issued_unix": 1794423887.566193217, "done_unix": 1794423887.727325565},
+{"name": "disconnect redis", "action": "disconnect", "target": "redis", "phase": "outage 5", "planned_seconds": 98.000, "issued_unix": 1794423891.565996042, "done_unix": 1794423891.732587641},
+{"name": "kill switchboard-2", "action": "kill", "target": "switchboard-2", "phase": "outage 5, replica 2 down", "planned_seconds": 101.000, "issued_unix": 1794423894.566176754, "done_unix": 1794423894.814395097},
+{"name": "connect redis", "action": "connect", "target": "redis", "phase": "back 5, replica 2 down", "planned_seconds": 106.000, "issued_unix": 1794423899.565426784, "done_unix": 1794423899.707976235},
+{"name": "start switchboard-2", "action": "start", "target": "switchboard-2", "phase": "back 5", "planned_seconds": 108.000, "issued_unix": 1794423901.565863882, "done_unix": 1794423901.867235012},
+{"name": "disconnect redis", "action": "disconnect", "target": "redis", "phase": "outage 6", "planned_seconds": 110.000, "issued_unix": 1794423903.565655076, "done_unix": 1794423903.718653945},
+{"name": "connect redis", "action": "connect", "target": "redis", "phase": "back 6", "planned_seconds": 118.000, "issued_unix": 1794423911.566110947, "done_unix": 1794423911.724790589},
+{"name": "disconnect redis", "action": "disconnect", "target": "redis", "phase": "outage 7", "planned_seconds": 122.000, "issued_unix": 1794423915.570268127, "done_unix": 1794423915.751188234},
+{"name": "connect redis", "action": "connect", "target": "redis", "phase": "back 7", "planned_seconds": 130.000, "issued_unix": 1794423923.565905284, "done_unix": 1794423923.727013613},
+{"name": "disconnect redis", "action": "disconnect", "target": "redis", "phase": "outage 8", "planned_seconds": 134.000, "issued_unix": 1794423927.565668190, "done_unix": 1794423927.736379009},
+{"name": "connect redis", "action": "connect", "target": "redis", "phase": "back 8", "planned_seconds": 142.000, "issued_unix": 1794423935.566105180, "done_unix": 1794423935.732981825}
+]

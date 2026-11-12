@@ -36,6 +36,7 @@ ratelimit:
   replicas: 1               # while Redis is down each replica enforces 1/replicas of every limit
 budget:
   grace_usd: 0.10           # per replica and key while Redis is down
+  grace_refill: 1h          # time for that allowance to refill; recovery does not reset it
 
 # Response cache. A request is cached only when it asks for deterministic
 # output (temperature at most max_temperature) or sends the header

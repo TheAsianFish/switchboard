@@ -58,6 +58,7 @@ the method, the intervals, the hardware and the cost of every row.
 | [Q4: hedging](RESULTS.md#q4-hedging) | TTFT p99 from 638.3 to 224.4 ms with hedging on, for +5.3% upstream requests (synthetic slow tail); against one local `qwen2.5:0.5b`: TTFT p99 +2.9 ms (+2%) | `make bench-hedge` |
 | [Q5: evaluated router](RESULTS.md#q5-evaluated-router) | `router` at its operating point: 72.2% (68.4–75.6) accuracy, gain over the random-mix line -0.8 points (95% CI -1.8 to +1.0), not clearly above the line | `make eval-router` |
 | [Q6: chaos](RESULTS.md#q6-chaos) | Replica kill: 6 errors (0.10%) in its phase; Redis down: 0 errors, p99 431.05 ms (steady 181.76 ms), 6 over-admissions (bound 6 per window), budget overshoot $0.0176 (grace bound $0.0200) | `make chaos` |
+| [M8: budget grace under a flapping store](RESULTS.md#m8-budget-grace-under-a-flapping-store) | Eight Redis outages on a spent budget: overshoot $0.2166 when grace reset every outage, $0.0362 with a refilled allowance (bound $0.0410); a replica killed while degraded lost $0.004185 before, $0 after | `make chaos-flap` |
 
 Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2
@@ -309,8 +310,12 @@ three replicas spending at once cannot together pass the budget, and a
 reservation held by a replica that dies expires instead of leaking. The
 token limit is charged on the same estimate and corrected afterwards. When
 Redis is unreachable, each replica falls back to a local limiter at a third
-of the limit, a small grace amount of budget, and a pending list of spend
-that is charged to Redis once it is back. Money is an integer count of
+of the limit, a small grace allowance of budget, and a pending list of spend
+that is charged to Redis once it is back. The allowance is a token bucket
+per key that refills over an hour and is not reset when Redis returns, so
+a store that flaps cannot hand it out again on every reconnect: before
+that fix, eight short outages let a spent key overshoot by more than its
+whole budget (`make chaos-flap`, RESULTS.md M8). Money is an integer count of
 nanodollars, so the gateway's ledger can be compared with the provider's to
 the cent.
 
@@ -444,6 +449,7 @@ How the streaming path is tested:
 | The fake provider is a real server | `bench` and, later, the chaos run measure across processes, the way production runs. | An in-process mock: hides the network hop the overhead number is about. |
 | Every limit and budget decision is one Lua script that reads Redis's clock | Atomic across replicas in one round trip; skewed replica clocks do not matter. | Read-modify-write from Go: races between replicas. Replica clocks: skew moves windows. |
 | Reserve the worst case, settle the real cost | Concurrent requests on any replica cannot together overspend; unsettled holds expire after a crash. | Charge after the reply: N replicas overspend by N requests' worth at the edge. |
+| Budget grace as a per-replica allowance that refills over `grace_refill` (1 h) | A flapping store's overshoot is bounded by replica processes × grace × (1 + T / refill), not by the number of outages; measured before and after in M8. | Fresh grace per outage (what shipped until M8): eight outages overshot a $0.20 budget by more than the budget itself. Grace shared in Redis: unreachable exactly when it is needed. |
 | Degrade to per-replica limits at rate ÷ replicas when Redis is down | The fleet stays near its limit during an outage instead of failing every request or admitting all of them. | Fail closed: a Redis blip becomes an outage. Fail open: unlimited spend. |
 | Exact key over the whole request, semantic match on the last user turn only within the same context hash | A cached reply can never cross a tenant, a system prompt, earlier turns or sampling parameters, and similarity is only asked of short texts, where embeddings work. | Embedding the whole conversation: multi-turn similarity is unreliable and a false hit serves another conversation's answer. |
 | Semantic threshold chosen by a rule fixed before the full run (Wilson upper bound of false hits ≤ 1% on every pair set) | A semantic cache with an unmeasured false-hit rate is a correctness bug; the rule makes the shipped number the eval's, and a test keeps them equal. | A vendor default (0.9–0.97) measured on someone else's traffic. |
@@ -478,9 +484,9 @@ command. `make check` is the per-PR gate (gofmt, go vet, golangci-lint,
 a real Redis 8, and `make ui-check` the admin page's typecheck, lint, tests
 and build. Each measured number has its own target: `make bench` (Q1),
 `make test-limits` (Q2), `make eval-cache` (Q3), `make bench-hedge` (Q4),
-`make eval-router` (Q5, offline from committed recordings) and `make chaos`
-(Q6); `make results` re-renders RESULTS.md and the table above. None of
-them runs on a push; `.github/workflows/measure.yml` runs some by hand.
+`make eval-router` (Q5, offline from committed recordings), `make chaos`
+(Q6) and `make chaos-flap` (M8); `make results` re-renders RESULTS.md and
+the table above. None of them runs on a push; `.github/workflows/measure.yml` runs some by hand.
 
 Releases: `make dist` builds the archives, `make check-install` checks the
 `go install` path in a clean container, and a `v*` tag runs
@@ -492,10 +498,14 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   tests and Lua slot are in; the implementation is not).
 - A reranking stage for semantic hits: Q3 shows embeddings alone cannot
   keep false hits under 1% at a useful hit rate on adversarial pairs.
+- Pending budget spend lives in each replica's memory: a replica killed
+  while Redis is down loses the cost it settled during the outage and had
+  not yet charged: at most one allowance, plus requests it had reserved on
+  Redis before the outage (RESULTS.md M8). A settle that times out
+  after Redis applied it is charged twice, and a hold whose replica died
+  while Redis was up expires without its cost reaching `spent`; neither
+  showed up in M8's runs.
 - Planned next (PLAN.md, evolution round 1):
-  - M8: budget grace under a store that flaps. Each outage hands every
-    replica its grace again today; measure it, then make grace a
-    time-refilled allowance.
   - M9: budgets that survive a Redis restart (Q6 shows a restart resets
     them), with what each fsync policy costs a request.
   - M10: a first-token timeout per attempt, so a provider that accepts

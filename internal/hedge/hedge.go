@@ -418,6 +418,17 @@ func (p *Provider) race(ctx context.Context, req *core.Request, streaming bool, 
 				p.win(a, primary, w, running, rep, results)
 				return a, nil
 			}
+			if ctx.Err() != nil {
+				// The caller left. Its cancellation reaches the attempts
+				// too, so their failures can arrive before ctx.Done is
+				// selected; each was sent, so each counts as cancelled
+				// like the ones still running.
+				p.breaker.Release()
+				rep.update(func(r *Report) { r.cancelled++ })
+				closeAttempt(a, "abandoned")
+				p.abandon(running, results, rep)
+				return nil, core.Wrap(core.KindTimeout, ctx.Err(), "request cancelled")
+			}
 			a.cancel()
 			endSpan(a.span, "error", a.err)
 			if !a.cancelled && countsAgainst(a.err) {

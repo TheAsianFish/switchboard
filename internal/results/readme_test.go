@@ -35,8 +35,8 @@ func copyTestdata(t *testing.T, dir, from, to string) {
 }
 
 // writeAll writes every section the renderer tests know: the Q1
-// breakdown, Q2's real run, the made-up Q3 and Q4 runs, and the Q5 and Q6
-// test summaries.
+// breakdown, Q2's real run, the made-up Q3 and Q4 runs, the Q5 and Q6
+// test summaries and the M8 flap runs.
 func writeAll(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -50,6 +50,9 @@ func writeAll(t *testing.T) string {
 	writeQ4(t, dir)
 	copyTestdata(t, dir, "q5-router", Q5Dir)
 	copyTestdata(t, dir, "q6-chaos", Q6Dir)
+	for _, run := range []string{M8Before, M8After, M8Q6Rerun} {
+		copyTestdata(t, dir, filepath.Join(M8Dir, run), filepath.Join(M8Dir, run))
+	}
 	return dir
 }
 

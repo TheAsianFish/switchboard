@@ -212,6 +212,8 @@ func TestDegradingFlushesOnce(t *testing.T) {
 	}
 }
 
+// A grace hold that settles after recovery is a plain charge on the
+// primary, and it still counts against the grace allowance.
 func TestDegradingStillLocalSettleAfterRecovery(t *testing.T) {
 	t.Parallel()
 	d, f, c, _ := newTestDegrading(t)
@@ -220,31 +222,251 @@ func TestDegradingStillLocalSettleAfterRecovery(t *testing.T) {
 	f.down.Store(false)
 	c.Set(t0.Add(time.Second))
 	mustBalance(t, d, "k", monthly) // recovers
+	if d.Degraded() {
+		t.Fatal("not recovered")
+	}
 	mustSettle(t, d, "k", monthly, local, 60)
 	wantPosition(t, mustBalance(t, d, "k", monthly), 60, 0)
+	f.mu.Lock()
+	charges := f.charges
+	f.mu.Unlock()
+	if charges != 1 {
+		t.Fatalf("plain charges on the primary = %d, want 1", charges)
+	}
+	// 100 − 80 + (80 − 60); one second of refill adds less than one.
+	if got := d.GraceRemaining("k"); got != 40 {
+		t.Fatalf("grace remaining = %v, want 40", got)
+	}
 }
 
-func TestDegradingFreshGracePerOutage(t *testing.T) {
+// recoverAt brings the primary back at time at and probes until the ledger
+// leaves degraded mode.
+func recoverAt(t *testing.T, d *Degrading, f *flaky, c *clock, at time.Time) {
+	t.Helper()
+	f.down.Store(false)
+	c.Set(at)
+	mustBalance(t, d, "k", monthly)
+	if d.Degraded() {
+		t.Fatalf("not recovered at %v", at.Sub(t0))
+	}
+}
+
+// Recovery does not reset the allowance: an outage straight after another
+// gets only what refilled in between.
+func TestDegradingGraceSurvivesRecovery(t *testing.T) {
 	t.Parallel()
 	d, f, c, s := newTestDegrading(t)
 	ctx := context.Background()
-	for outage := range 2 {
+
+	f.down.Store(true)
+	mustSettle(t, d, "k", monthly, mustReserve(t, d, "k", monthly, "o1", grace), grace)
+	recoverAt(t, d, f, c, t0.Add(time.Second))
+
+	// A quarter of the refill period later, a quarter of grace is back.
+	c.Set(t0.Add(15 * time.Minute))
+	f.down.Store(true)
+	if _, err := d.Reserve(ctx, "k", monthly, "big", grace/4+1); !errors.Is(err, ErrExhausted) {
+		t.Fatalf("second outage got more than the refill: err = %v", err)
+	}
+	mustReserve(t, d, "k", monthly, "o2", grace/4)
+	if _, err := d.Reserve(ctx, "k", monthly, "x", 1); !errors.Is(err, ErrExhausted) {
+		t.Fatalf("Reserve past the refill: err = %v", err)
+	}
+	s.want(t, true, false, true)
+}
+
+// However often the store flaps, the allowance admits at most
+// Grace × (1 + T / refill) over a stretch T, and it refills to exactly
+// Grace, never above.
+func TestDegradingFlapsAreBounded(t *testing.T) {
+	t.Parallel()
+	d, f, c, _ := newTestDegrading(t)
+	ctx := context.Background()
+	const (
+		flaps = 8
+		every = 10 * time.Minute
+	)
+	var admitted cost.Nanos
+	for i := range flaps {
+		at := t0.Add(time.Duration(i) * every)
+		c.Set(at)
 		f.down.Store(true)
-		c.Set(t0.Add(time.Duration(outage) * time.Hour))
-		r := mustReserve(t, d, "k", monthly, fmt.Sprintf("o%d", outage), grace)
-		if _, err := d.Reserve(ctx, "k", monthly, "x", 1); !errors.Is(err, ErrExhausted) {
-			t.Fatalf("outage %d: Reserve past grace: err = %v", outage, err)
+		// Take everything on offer, in one reservation if possible.
+		if amount := d.GraceRemaining("k"); amount > 0 {
+			r := mustReserve(t, d, "k", monthly, fmt.Sprintf("f%d", i), amount)
+			mustSettle(t, d, "k", monthly, r, amount)
+			admitted += amount
 		}
-		mustSettle(t, d, "k", monthly, r, grace)
-		f.down.Store(false)
-		c.Set(t0.Add(time.Duration(outage)*time.Hour + time.Second))
-		mustBalance(t, d, "k", monthly)
-		if d.Degraded() {
-			t.Fatalf("outage %d: not recovered", outage)
+		if _, err := d.Reserve(ctx, "k", monthly, fmt.Sprintf("x%d", i), 1); !errors.Is(err, ErrExhausted) {
+			t.Fatalf("flap %d: Reserve past the allowance: err = %v", i, err)
+		}
+		recoverAt(t, d, f, c, at.Add(time.Second))
+	}
+	stretch := time.Duration(flaps-1) * every
+	refill := DefaultGraceRefill
+	// admitted ≤ grace × (1 + stretch / refill), without division.
+	if int64(admitted)*int64(refill) > int64(grace)*int64(refill+stretch) {
+		t.Fatalf("admitted %v over %v, bound grace × (1 + %v / %v)", admitted, stretch, stretch, refill)
+	}
+	// Grace up front plus 70 minutes of refill, rounded down; a reset per
+	// outage would have admitted flaps × grace.
+	if want := cost.Nanos(grace + grace*70/60); admitted != want {
+		t.Fatalf("admitted %v, want %v", admitted, want)
+	}
+
+	last := t0.Add(stretch)
+	for _, after := range []time.Duration{refill, refill + time.Second, 10 * refill} {
+		c.Set(last.Add(after))
+		if got := d.GraceRemaining("k"); got != grace {
+			t.Fatalf("%v after the last flap: grace remaining = %v, want %v", after, got, grace)
 		}
 	}
-	wantPosition(t, mustBalance(t, d, "k", monthly), 2*grace, 0)
-	s.want(t, true, false, true, false)
+}
+
+// Settling a grace hold gives back hold − actual; a cost above the hold
+// drives the allowance negative and refill pays it back first.
+func TestDegradingGraceSettleAdjusts(t *testing.T) {
+	t.Parallel()
+	d, f, c, _ := newTestDegrading(t)
+	ctx := context.Background()
+	f.down.Store(true)
+
+	r := mustReserve(t, d, "k", monthly, "a", 60)
+	mustSettle(t, d, "k", monthly, r, 20)
+	if got := d.GraceRemaining("k"); got != 80 {
+		t.Fatalf("after settling 20 of 60: grace remaining = %v, want 80", got)
+	}
+	r = mustReserve(t, d, "k", monthly, "b", 80)
+	mustSettle(t, d, "k", monthly, r, 130)
+	if got := d.GraceRemaining("k"); got != -50 {
+		t.Fatalf("after settling 130 of 80: grace remaining = %v, want -50", got)
+	}
+	tests := []struct {
+		after  time.Duration
+		amount cost.Nanos
+		left   cost.Nanos // before the reservation
+		ok     bool
+	}{
+		{0, 0, -50, false},
+		{29 * time.Minute, 1, -2, false},
+		{30 * time.Minute, 0, 0, false}, // nothing left: zero is refused
+		{30*time.Minute + 36*time.Second, 0, 1, true},
+		{time.Hour, 50, 50, true},
+		{time.Hour, 1, 0, false},
+	}
+	for i, tt := range tests {
+		c.Set(t0.Add(tt.after))
+		if got := d.GraceRemaining("k"); got != tt.left {
+			t.Fatalf("step %d at %v: grace remaining = %v, want %v", i, tt.after, got, tt.left)
+		}
+		_, err := d.Reserve(ctx, "k", monthly, fmt.Sprintf("s%d", i), tt.amount)
+		if tt.ok && err != nil {
+			t.Fatalf("step %d: Reserve(%v): %v", i, tt.amount, err)
+		}
+		if !tt.ok && !errors.Is(err, ErrExhausted) {
+			t.Fatalf("step %d: Reserve(%v): err = %v, want ErrExhausted", i, tt.amount, err)
+		}
+	}
+}
+
+// The allowance lives in process memory: a restarted replica starts full.
+func TestDegradingRestartStartsFull(t *testing.T) {
+	t.Parallel()
+	d, f, c, _ := newTestDegrading(t)
+	f.down.Store(true)
+	mustReserve(t, d, "k", monthly, "a", grace)
+	if got := d.GraceRemaining("k"); got != 0 {
+		t.Fatalf("grace remaining = %v, want 0", got)
+	}
+	restarted := NewDegrading(f, DegradeOptions{Grace: grace, Now: c.Now})
+	if got := restarted.GraceRemaining("k"); got != grace {
+		t.Fatalf("restarted: grace remaining = %v, want %v", got, grace)
+	}
+	mustReserve(t, restarted, "k", monthly, "b", grace)
+}
+
+func TestDegradingGraceRefusals(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		grace   cost.Nanos
+		spend   cost.Nanos // reserved for "k" before the check
+		key     string
+		amount  cost.Nanos
+		wantErr bool
+	}{
+		{name: "zero grace refuses", grace: 0, key: "k", amount: 1, wantErr: true},
+		{name: "zero grace refuses zero", grace: 0, key: "k", amount: 0, wantErr: true},
+		{name: "spent key refused", grace: grace, spend: grace, key: "k", amount: 1, wantErr: true},
+		{name: "other key untouched", grace: grace, spend: grace, key: "other", amount: grace},
+		{name: "zero while some is left", grace: grace, spend: grace - 1, key: "k", amount: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := &clock{t: t0}
+			f := newFlaky(c)
+			f.down.Store(true)
+			d := NewDegrading(f, DegradeOptions{Grace: tt.grace, Now: c.Now})
+			if tt.spend > 0 {
+				mustReserve(t, d, "k", monthly, "spend", tt.spend)
+			}
+			_, err := d.Reserve(context.Background(), tt.key, monthly, "a", tt.amount)
+			if tt.wantErr != (err != nil) || (err != nil && !errors.Is(err, ErrExhausted)) {
+				t.Fatalf("Reserve(%s, %v): err = %v, want error %v", tt.key, tt.amount, err, tt.wantErr)
+			}
+			if !d.Degraded() {
+				t.Fatal("not degraded")
+			}
+		})
+	}
+}
+
+func TestGraceBucketRefill(t *testing.T) {
+	t.Parallel()
+	const big = MaxExact - 1
+	tests := []struct {
+		name    string
+		grace   cost.Nanos
+		period  time.Duration
+		tokens  cost.Nanos
+		elapsed time.Duration
+		want    cost.Nanos
+	}{
+		{"partial", 100, time.Hour, 0, 30 * time.Minute, 50},
+		{"capped", 100, time.Hour, 90, 30 * time.Minute, 100},
+		{"clock backwards", 100, time.Hour, 10, -time.Minute, 10},
+		{"debt over whole periods", 100, time.Hour, -250, 2 * time.Hour, -50},
+		{"debt repaid", 100, time.Hour, -250, 3*time.Hour + 30*time.Minute, 100},
+		{"huge grace, no overflow", big, time.Hour, 0, 59 * time.Minute, cost.Nanos(uint64(big) * 59 / 60)},
+		{"huge gap", big, time.Nanosecond, -big, 290 * 365 * 24 * time.Hour, big},
+		{"zero grace", 0, time.Hour, 0, time.Hour, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			g := &graceBucket{tokens: tt.tokens, last: t0}
+			g.refill(t0.Add(tt.elapsed), tt.grace, tt.period)
+			if g.tokens != tt.want {
+				t.Fatalf("tokens = %v, want %v", g.tokens, tt.want)
+			}
+		})
+	}
+}
+
+// Refilling in many small steps adds what one step over the same time
+// would: the remainder carries, so frequent access does not starve it.
+func TestGraceBucketRefillCarriesRemainder(t *testing.T) {
+	t.Parallel()
+	g := &graceBucket{last: t0}
+	at := t0
+	for range 3600 {
+		at = at.Add(time.Second)
+		g.refill(at, 100, time.Hour)
+	}
+	if g.tokens != 100 {
+		t.Fatalf("tokens after an hour of one-second refills = %v, want 100", g.tokens)
+	}
 }
 
 func TestDegradingFlushFailureKeepsPending(t *testing.T) {

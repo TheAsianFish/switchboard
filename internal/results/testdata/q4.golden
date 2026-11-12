@@ -116,6 +116,15 @@ Command: `make chaos` (`chaos/run.sh`), raw files in `eval/results/q6-chaos/`
 
 Not measured yet. Run `make chaos`, then `make results`.
 
+## M8: budget grace under a flapping store
+
+Does Q6's outage bound survive a Redis that comes and goes? Command:
+`make chaos-flap RUN=before|after` (`SCHEDULE=flap chaos/run.sh`), raw
+files in `eval/results/m8-flap/before/` and `eval/results/m8-flap/after/`.
+
+Not measured yet. Run `make chaos-flap RUN=before` at the commit before
+the grace fix and `make chaos-flap RUN=after`, then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -130,6 +139,17 @@ cover every client × backend translation. TTFT is one sample, measured in
 the client, and says nothing about the gateway's overhead (Q1 does).
 
 Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `make results`.
+
+## Known problems
+
+Measured weaknesses and cases the runs could not reach, each with what was
+observed.
+
+- Budget reconciliation under a flapping store: not measured yet
+  (`make chaos-flap`).
+- **Budgets reset on a Redis restart.** Redis runs without persistence,
+  so the ledger comes back empty (Q6's overshoot after the restart); M9
+  measures what an append-only file costs.
 
 ## To measure
 

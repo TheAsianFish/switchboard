@@ -1,6 +1,9 @@
 // Package chaos analyses the Q6 chaos run (`make chaos`, chaos/run.sh):
 // three replicas behind nginx under load while a replica and Redis are
-// killed and restarted. It reads the raw files the run leaves under
+// killed and restarted. The same analysis reads M8's flap run (`make
+// chaos-flap`), in which Redis is cut off from the network and reconnected
+// eight times with its state kept, and reconciles the fake provider's
+// ledger with the budget Redis recorded. It reads the raw files the run leaves under
 // eval/results/q6-chaos/ (the bench results and per-request logs of three
 // load streams, the fake provider's ledger and the times of the docker
 // actions) and writes summary.json: per phase the main stream's error
@@ -20,6 +23,10 @@ const (
 	EventsFile  = "events.json"
 	LedgerFile  = "ledger.json.gz"
 	SummaryFile = "summary.json"
+	// SnapshotsFile holds the budgeted key's balance as Redis held it,
+	// read just before each docker action and once after the run; only
+	// the flap run writes it.
+	SnapshotsFile = "snapshots.json"
 )
 
 // Stream names: each is a `switchboard bench` run with its result in
@@ -30,10 +37,20 @@ const (
 	StreamBudget  = "budget"
 )
 
-// Event actions.
+// Event actions. Kill and start act on a container's process;
+// disconnect and connect take it off the compose network and put it back
+// (`docker network disconnect` / `connect`), so a store keeps its state.
 const (
-	ActionKill  = "kill"
-	ActionStart = "start"
+	ActionKill       = "kill"
+	ActionStart      = "start"
+	ActionDisconnect = "disconnect"
+	ActionConnect    = "connect"
+)
+
+// Schedules chaos/run.sh knows.
+const (
+	ScheduleQ6   = "q6"
+	ScheduleFlap = "flap"
 )
 
 // RedisTarget is the compose service name of Redis; any other target is
@@ -55,6 +72,9 @@ type Meta struct {
 	// TimeScale multiplies the PLAN schedule's offsets and the duration;
 	// 1 for the full run.
 	TimeScale float64 `json:"time_scale"`
+	// Schedule is the kill schedule: "q6" (or empty, from runs before
+	// M8) or "flap".
+	Schedule string `json:"schedule,omitempty"`
 	// Limit is the rate-limited key's request limit.
 	Limit struct {
 		Model         string  `json:"model"`
@@ -68,6 +88,10 @@ type Meta struct {
 		// replica's allowance per key while Redis is unreachable.
 		USD      string `json:"usd"`
 		GraceUSD string `json:"grace_usd"`
+		// GraceRefill is how long a replica's grace allowance takes to
+		// refill from empty, as a Go duration; empty for builds in which
+		// grace is reset after every outage instead.
+		GraceRefill string `json:"grace_refill,omitempty"`
 		// Prices in dollars per million tokens.
 		InputPrice  string `json:"input_price"`
 		OutputPrice string `json:"output_price"`
@@ -130,6 +154,9 @@ type Summary struct {
 	Events  []EventResult  `json:"events"`
 	Phases  []PhaseResult  `json:"phases"`
 	Buckets []BucketResult `json:"buckets"`
+	// Flap summarises the budget across the Redis outages; nil for a run
+	// without a disconnect.
+	Flap *FlapResult `json:"flap,omitempty"`
 }
 
 // Reference is the baseline for the steady-state rule.
@@ -268,6 +295,118 @@ type BudgetPhase struct {
 	// policy's bound on what the phase may spend past the budget; 0 with
 	// Redis up.
 	GraceBound cost.Nanos `json:"grace_bound_nanodollars"`
+	// Reconciliation at the phase's end, when the run took a snapshot of
+	// Redis then (the flap run does, just before each docker action).
+	Reconcile *Reconcile `json:"reconcile,omitempty"`
+}
+
+// Snapshot is the budgeted key's balance as Redis held it at one moment,
+// read with redis-cli inside the Redis container, so it works while the
+// container is off the network.
+type Snapshot struct {
+	// Label says which action the snapshot preceded, or "end".
+	Label string  `json:"label"`
+	Unix  float64 `json:"unix"`
+	// Spent and Reserved are the balance hash's fields in nanodollars.
+	Spent    cost.Nanos `json:"spent_nanodollars"`
+	Reserved cost.Nanos `json:"reserved_nanodollars"`
+}
+
+// Reconcile sets what the provider was asked for against what Redis
+// recorded, at one snapshot.
+type Reconcile struct {
+	AtSeconds float64 `json:"at_seconds"`
+	// Ledger prices the budgeted key's provider requests that arrived
+	// before the snapshot.
+	Ledger cost.Nanos `json:"ledger_nanodollars"`
+	// RedisSpent and RedisReserved are the snapshot's balance.
+	RedisSpent    cost.Nanos `json:"redis_spent_nanodollars"`
+	RedisReserved cost.Nanos `json:"redis_reserved_nanodollars"`
+	// Unreconciled is Ledger − RedisSpent: spend Redis has not seen
+	// (pending on a replica, in flight, or lost with a replica). Negative
+	// means Redis counted more than the provider served: a double charge.
+	Unreconciled cost.Nanos `json:"unreconciled_nanodollars"`
+}
+
+// FlapResult is the budget across a run's Redis outages. An outage is a
+// run of consecutive phases with Redis down.
+type FlapResult struct {
+	Outages []Outage `json:"outages"`
+	// FirstOutageSeconds and LastOutageEndSeconds bound the stretch T over
+	// which the outages happened.
+	FirstOutageSeconds   float64 `json:"first_outage_seconds"`
+	LastOutageEndSeconds float64 `json:"last_outage_end_seconds"`
+	TSeconds             float64 `json:"t_seconds"`
+	// Processes counts the replica processes that could spend grace in T:
+	// those up when the first outage began plus every replica start
+	// before the last outage ended.
+	Processes int `json:"processes"`
+	// Overshoot is the key's spend past its budget at the end of the run;
+	// OutageSpend is what the provider served it during the outages.
+	Overshoot   cost.Nanos `json:"overshoot_nanodollars"`
+	OutageSpend cost.Nanos `json:"outage_spend_nanodollars"`
+	// Slope and Intercept fit the overshoot after each outage against
+	// the outage's number by least squares; R2 is the fit's R².
+	Slope     cost.Nanos `json:"slope_nanodollars"`
+	Intercept cost.Nanos `json:"intercept_nanodollars"`
+	R2        float64    `json:"r2"`
+	// PerOutageBound is the bound when grace is reset after every outage:
+	// the sum over outages of the replicas up at its start × grace, plus
+	// a grace for each replica started during an outage.
+	PerOutageBound cost.Nanos `json:"per_outage_bound_nanodollars"`
+	// RefillBound is processes × grace × (1 + T / refill) when the run's
+	// build refills grace with time; 0 otherwise.
+	RefillBound cost.Nanos `json:"refill_bound_nanodollars,omitempty"`
+	// Kill is the replica killed while Redis was down, if one was.
+	Kill *FlapKill `json:"kill,omitempty"`
+	// MaxControlGap is the largest |Unreconciled| at the end of a phase
+	// with Redis up that starts at or after the first outage and ends
+	// before Kill (the last replica killed during an outage, if any): what
+	// the reconciliation reads when nothing is lost. The phase before the
+	// first outage is left out; its gap is in the phase table.
+	MaxControlGap cost.Nanos `json:"max_control_gap_nanodollars"`
+	// MinGap is the most negative Unreconciled at any snapshot after
+	// Redis came back (a double charge shows up as a negative gap).
+	MinGap cost.Nanos `json:"min_gap_nanodollars"`
+}
+
+// Outage is one stretch with Redis unreachable.
+type Outage struct {
+	N           int     `json:"n"`
+	FromSeconds float64 `json:"from_seconds"`
+	ToSeconds   float64 `json:"to_seconds"`
+	// ReplicasUp is the count when the outage began; ReplicaKilled is
+	// true if a replica was killed during it.
+	ReplicasUp    int  `json:"replicas_up"`
+	ReplicaKilled bool `json:"replica_killed,omitempty"`
+	// Spent is what the provider served the budgeted key during the
+	// outage; Requests is how many of its requests that was.
+	Spent    cost.Nanos `json:"spent_nanodollars"`
+	Requests int        `json:"requests"`
+	// OvershootAfter is the key's spend past the budget once the outage
+	// ended.
+	OvershootAfter cost.Nanos `json:"overshoot_after_nanodollars"`
+	// SecondsToExhaust is from the outage's start to its last served
+	// request, a rough time for the fleet to use up what it could admit.
+	SecondsToExhaust float64 `json:"seconds_to_exhaust"`
+}
+
+// FlapKill is the replica killed while Redis was down, and what the
+// reconciliation says it took with it.
+type FlapKill struct {
+	Target    string  `json:"target"`
+	AtSeconds float64 `json:"at_seconds"`
+	// IntoOutageSeconds is how long Redis had been down at the kill.
+	IntoOutageSeconds float64 `json:"into_outage_seconds"`
+	// Lost is Unreconciled at the run's end: spend the provider served
+	// that Redis never recorded. Bound is one replica's grace allowance.
+	Lost  cost.Nanos `json:"lost_nanodollars"`
+	Bound cost.Nanos `json:"bound_nanodollars"`
+	// EstimatedPending is the outage's spend before the kill divided by
+	// the replicas up: the killed replica's share if the load balancer
+	// spread the key's requests evenly. The ledger does not say which
+	// replica sent a request.
+	EstimatedPending cost.Nanos `json:"estimated_pending_nanodollars"`
 }
 
 // BucketResult is one second of the main stream, by the time each

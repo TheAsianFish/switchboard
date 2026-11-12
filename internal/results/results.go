@@ -66,7 +66,9 @@ type Data struct {
 	Q4ClaudeEstimate *Q4ClaudeEstimate
 	Q5               *Q5
 	Q6               *Q6
-	SDK              *SDK
+	// M8 is the flapping-store runs, before and after the grace fix.
+	M8  *M8
+	SDK *SDK
 }
 
 // Q1 is the gateway overhead section.
@@ -171,6 +173,10 @@ func Load(resultsDir string) (Data, error) {
 	if err != nil {
 		return Data{}, err
 	}
+	m8, err := loadM8(filepath.Join(resultsDir, M8Dir), filepath.Join(resultsDir, Q6Dir))
+	if err != nil {
+		return Data{}, err
+	}
 	if q4 != nil {
 		for _, live := range []*Q4Live{q4o, q4c} {
 			if live != nil {
@@ -178,7 +184,7 @@ func Load(resultsDir string) (Data, error) {
 			}
 		}
 	}
-	return Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q4Claude: q4c, Q4ClaudeEstimate: q4cEst, Q5: q5, Q6: q6, SDK: sdk}, nil
+	return Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q4Claude: q4c, Q4ClaudeEstimate: q4cEst, Q5: q5, Q6: q6, M8: m8, SDK: sdk}, nil
 }
 
 // Execute runs the template at templatePath on d.

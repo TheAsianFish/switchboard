@@ -34,6 +34,9 @@ ratelimit:
 budget:
   # Per replica and key while Redis is down: about 20 fake replies.
   grace_usd: 0.01
+  # The allowance refills over an hour and is not reset when Redis comes
+  # back, so a flapping store cannot hand out grace again and again (M8).
+  grace_refill: 1h
 cache:
   # Exact only: the semantic layer ships off (RESULTS.md, Q3), so the run
   # needs no embedding model. The main key's requests send
