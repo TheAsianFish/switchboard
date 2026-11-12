@@ -216,6 +216,52 @@ insufficient_quota` or Anthropic's `402 billing_error`. Per-key requests,
 tokens and dollars are on `/metrics`, served on a separate loopback
 listener (`admin_listen`, default `127.0.0.1:9090`).
 
+A provider that accepts connections and then sends nothing is the one
+failure the breaker cannot see by itself: no error ever comes back, so
+every request waits for the provider's whole-call `timeout` (10 minutes by
+default, since it has to cover the longest reply) or for its client to
+give up, and a client leaving is not the provider's fault. A first-token
+timeout turns that silence into a failure:
+
+```yaml
+providers:
+  - name: claude
+    type: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    resilience:
+      first_token_timeout: 5s   # off (0) by default
+```
+
+Each streamed attempt gets its own timer from the moment it is sent; the
+first token stops it. If it fires, the attempt fails as a timeout: the
+breaker counts it, and the request is retried like any other timeout, so
+after five in a row (`breaker.failures`) the breaker opens and later
+requests are refused at once with `503` and `Retry-After` until a probe
+gets a token again.
+`switchboard_provider_first_token_timeouts_total` counts the firings, and
+the attempt's span ends with outcome `first_token_timeout`. RESULTS.md
+(M10) measures a stall before and after.
+
+When not to use it:
+
+- **A cold local model.** Ollama loads a model's weights on the first
+  request after it starts or after the model was unloaded, and that first
+  token waits for the load. Any timeout short enough to catch a stall
+  fails those requests and can open the breaker in front of a backend that
+  is merely warming up. Leave it off for local backends, or
+  set it above the slowest cold start you accept.
+- **Long prompts on a slow backend.** The first token comes after the
+  whole prompt is read, so time to first token grows with prompt length.
+  Set it from the slowest first token you see on real traffic (the hedge
+  delay on `/providers` shows the recent p95), with a wide margin, not
+  from the median.
+- **Non-streamed requests.** Their reply arrives whole, so there is no
+  first token to time; the setting does not apply to them, and only the
+  provider's `timeout` bounds them.
+- **A stream that stalls after its first token.** Once a token has
+  arrived the timer is gone; a provider that stops halfway through a reply
+  is not caught.
+
 The same listener serves the admin page at http://127.0.0.1:9090/: every
 replica in the fleet with its rate, errors, latency, cache hit rate,
 degraded components and breaker states; every key with its limits and its
@@ -383,6 +429,9 @@ charged at its prompt estimate, since the provider may have billed it.
 Failures before the first token are retried with jittered backoff; after a
 token reaches the client nothing is retried. A breaker per provider fails
 fast after consecutive provider failures and probes after a cooldown.
+With `first_token_timeout` set, an attempt that sends nothing in time is
+one of those failures, which is what lets the breaker see a provider that
+accepts connections and never answers (RESULTS.md, M10).
 `make bench-hedge` measures the trade on a synthetic slow tail, and
 `eval/hedge/ollama.sh` repeats it against a real model on local Ollama.
 RESULTS.md (Q4) has both. Every stage, and both attempts of a hedge, are
@@ -533,9 +582,15 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   about two seconds after Redis is back, since go-redis's dial backoff
   and the gateway's probe wait one after the other. One retry timer
   instead of two would halve that.
-- Planned next (PLAN.md, evolution round 1): M10, a first-token timeout
-  per attempt, so a provider that accepts connections and never answers
-  opens the breaker.
+- A provider that stalls (M10): before `first_token_timeout`, a provider
+  that accepted connections and never answered was invisible to the
+  breaker, and every request waited for its client to give up; with it,
+  the breaker opens at the fifth timed-out attempt and the rest of the
+  stall is refused at once, apart from one probe per cooldown
+  (RESULTS.md, M10). What is left: a stream that
+  stalls after its first token, and non-streamed requests, which only the
+  provider's whole-call `timeout` bounds; an idle-gap timeout between
+  tokens would cover the first.
 - Q4 against Claude, and the router's Claude candidates (both need an API
   key; RESULTS.md lists the commands and the estimated cost).
 - Pass `traceparent` on to providers.
