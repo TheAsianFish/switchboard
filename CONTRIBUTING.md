@@ -28,7 +28,7 @@ make check
 | Command | What it does | Where it runs |
 |---------|--------------|---------------|
 | `make check` | `gofmt`, `go vet`, `golangci-lint`, `go test -race ./...` (offline, under 2 minutes) | every PR |
-| `make test-integration` | Lua and vector-index tests against a real `redis:8` (`$SWITCHBOARD_TEST_REDIS_URL`, or a throwaway container) | every PR (service container) |
+| `make test-integration` | Lua, vector-index and LOADING-degrade tests against a real `redis:8` (`$SWITCHBOARD_TEST_REDIS_URL`, or throwaway containers from `scripts/with-redis.sh`) | every PR |
 | `make ui-check` | typecheck, lint and Vitest for `web/` | every PR from M6 |
 | `make dev` | `docker compose up` with one replica and Ollama (Redis from M2, Jaeger and Prometheus from M4) | local |
 | `make fleet` | the same with three replicas behind the load balancer | local |

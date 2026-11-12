@@ -51,21 +51,14 @@ jobs:
       - name: build
         run: make build
 
+  # No service container: make test-integration starts its own redis:8
+  # containers through scripts/with-redis.sh, a shared one and one started
+  # with --enable-debug-command yes for the LOADING tests (a service
+  # container cannot be given server arguments, and a DEBUG RELOAD on the
+  # shared server would fail the other packages' tests running alongside).
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    services:
-      redis:
-        image: redis:8
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 2s
-          --health-timeout 2s
-          --health-retries 15
-    env:
-      SWITCHBOARD_TEST_REDIS_URL: redis://127.0.0.1:6379/0
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

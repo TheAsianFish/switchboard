@@ -40,7 +40,10 @@ ui-check: ## typecheck, lint, test and rebuild the admin page; fails if the comm
 		echo "untracked files in internal/admin/ui/dist: run make ui and commit internal/admin/ui/dist"; exit 1; \
 	fi
 
-test-integration: ## Lua scripts against a real redis:8 ($$SWITCHBOARD_TEST_REDIS_URL, or a throwaway container)
+# With SWITCHBOARD_TEST_REDIS_URL set, the LOADING tests (internal/redistest)
+# also need SWITCHBOARD_TEST_REDIS_LOADING_URL, a second Redis started with
+# --enable-debug-command yes, and skip without it; with-redis.sh starts both.
+test-integration: ## Lua scripts against a real redis:8 ($$SWITCHBOARD_TEST_REDIS_URL, or throwaway containers)
 	@if [ -n "$$SWITCHBOARD_TEST_REDIS_URL" ]; then \
 		go test -race -count=1 -tags integration ./...; \
 	else \
