@@ -94,16 +94,24 @@ type counts struct {
 	retries map[string]int
 	hedges  map[string]int
 	states  []int
+	ftt     int
 }
 
 func newCounts() *counts { return &counts{retries: map[string]int{}, hedges: map[string]int{}} }
 
-func (c *counts) Retry(_, kind string) { c.mu.Lock(); c.retries[kind]++; c.mu.Unlock() }
-func (c *counts) Hedge(_, ev string)   { c.mu.Lock(); c.hedges[ev]++; c.mu.Unlock() }
+func (c *counts) Retry(_, kind string)     { c.mu.Lock(); c.retries[kind]++; c.mu.Unlock() }
+func (c *counts) Hedge(_, ev string)       { c.mu.Lock(); c.hedges[ev]++; c.mu.Unlock() }
+func (c *counts) FirstTokenTimeout(string) { c.mu.Lock(); c.ftt++; c.mu.Unlock() }
 func (c *counts) BreakerState(_ string, s int) {
 	c.mu.Lock()
 	c.states = append(c.states, s)
 	c.mu.Unlock()
+}
+
+func (c *counts) timeouts() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ftt
 }
 
 func (c *counts) hedge(ev string) int {

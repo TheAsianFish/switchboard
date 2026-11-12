@@ -1,0 +1,5 @@
+{
+  "arm": "before",
+  "gateway_commit": "ed0dedf",
+  "config": "eval/stall/before.yaml"
+}

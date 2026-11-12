@@ -1,0 +1,9 @@
+{
+  "commit": "9efa1df",
+  "date": "2026-11-12T10:01:05Z",
+  "command": "scripts/trace-check.sh --local --stall --save eval/results/m10-trace",
+  "jaeger_image": "jaegertracing/jaeger:2.23.0",
+  "config": "eval/trace/stall.yaml",
+  "fake_provider": {"latency": "20ms", "tokens": 30, "token_interval": "5ms", "stalled_at_start": true},
+  "expected_spans": "auth route ratelimit budget.reserve cache.lookup provider provider.attempt settle cache.fill"
+}

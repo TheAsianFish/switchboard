@@ -50,6 +50,7 @@ type sample struct {
 	// gateway's cache status header, "" if absent.
 	status     int
 	cache      string
+	retryAfter string    // the Retry-After header, "" if absent
 	sent       time.Time // handed to the HTTP client
 	firstToken time.Time // first generated text; zero if none arrived
 	done       time.Time // reply complete (or failed)
@@ -148,6 +149,7 @@ func send(parent context.Context, client *http.Client, cfg *Config, i int) sampl
 	}
 	defer resp.Body.Close()
 	s.status, s.cache = resp.StatusCode, resp.Header.Get(CacheStatusHeader)
+	s.retryAfter = resp.Header.Get("Retry-After")
 
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))

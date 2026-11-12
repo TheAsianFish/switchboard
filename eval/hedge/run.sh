@@ -28,7 +28,7 @@ fake_addr=127.0.0.1:9101
 gateway_addr=127.0.0.1:8080
 admin_addr=127.0.0.1:9190
 out=${OUT:-eval/results/q4-hedge}
-command="RATE=$rate DURATION=$duration WARMUP=$warmup SEED=$fake_seed eval/hedge/run.sh"
+command="${ARMS:+ARMS='$arms' }${OUT:+OUT=$out }RATE=$rate DURATION=$duration WARMUP=$warmup SEED=$fake_seed eval/hedge/run.sh"
 
 logs=$(mktemp -d "${TMPDIR:-/tmp}/switchboard-q4.XXXXXX")
 pids=()
@@ -115,7 +115,7 @@ for arm in $arms; do
 	# give the provider a moment to record them before reading the ledger.
 	sleep 1
 	curl -fsS "http://$fake_addr/ledger" | bin/switchboard eval hedge-ledger >"$out/$arm-ledger.json"
-	curl -fsS "http://$admin_addr/metrics" | grep -E '^switchboard_provider_(hedges|retries)_total' >"$out/$arm-metrics.prom" || true
+	curl -fsS "http://$admin_addr/metrics" | grep -E '^switchboard_provider_(hedges|retries|first_token_timeouts)_total' >"$out/$arm-metrics.prom" || true
 	curl -fsS "http://$admin_addr/providers" >"$out/$arm-providers.json"
 	stop_gateway
 done

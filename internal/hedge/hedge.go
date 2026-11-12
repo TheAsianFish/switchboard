@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -43,8 +44,17 @@ type Config struct {
 	// MaxRetryAfter is the longest Retry-After the gateway waits out
 	// itself; a longer one is returned to the client to wait instead.
 	MaxRetryAfter time.Duration
-	Hedge         HedgeConfig
-	Breaker       BreakerConfig
+	// FirstTokenTimeout, when positive, bounds how long one streamed
+	// attempt may go without its first token (the first event after the
+	// stream's start). The timer starts when the attempt is sent and stops
+	// at that token; if it fires, the attempt fails as a timeout, which
+	// the breaker counts and which is retried like any other timeout. It
+	// does not apply to non-streamed requests, whose reply arrives whole,
+	// nor to a stream that stalls after its first token. Zero (the
+	// default) disables it.
+	FirstTokenTimeout time.Duration
+	Hedge             HedgeConfig
+	Breaker           BreakerConfig
 }
 
 // HedgeConfig sets when a second attempt is sent.
@@ -90,6 +100,9 @@ type Observer interface {
 	Hedge(provider, event string)
 	// BreakerState reports a breaker transition.
 	BreakerState(provider string, state int)
+	// FirstTokenTimeout counts an attempt that the first-token timeout
+	// failed.
+	FirstTokenTimeout(provider string)
 }
 
 // Provider is a core.Provider with retries, hedging and a circuit breaker
@@ -101,6 +114,7 @@ type Provider struct {
 	breaker *Breaker
 	budgets *Budgets
 	obs     Observer
+	log     *slog.Logger
 	tracer  trace.Tracer
 	now     func() time.Time
 
@@ -114,6 +128,10 @@ type Option func(*Provider)
 
 // WithObserver sends the layer's counts to obs.
 func WithObserver(obs Observer) Option { return func(p *Provider) { p.obs = obs } }
+
+// WithLogger logs every breaker transition at warn level, so both ends of
+// a provider's outage are on record.
+func WithLogger(log *slog.Logger) Option { return func(p *Provider) { p.log = log } }
 
 // WithClock replaces time.Now, for tests.
 func WithClock(now func() time.Time) Option { return func(p *Provider) { p.now = now } }
@@ -141,6 +159,9 @@ func New(name string, inner core.Provider, cfg Config, opts ...Option) *Provider
 	p.breaker = NewBreaker(cfg.Breaker, p.now, func(s State) {
 		if p.obs != nil {
 			p.obs.BreakerState(p.name, int(s))
+		}
+		if p.log != nil {
+			p.log.Warn("provider breaker state changed", slog.String("provider", p.name), slog.String("state", s.String()))
 		}
 	})
 	if p.obs != nil {
@@ -292,6 +313,10 @@ func countsAgainst(err error) bool {
 // open.
 var ErrOpen = errors.New("circuit breaker open")
 
+// ErrFirstToken is the cause of the error an attempt fails with when the
+// first-token timeout fires before its first token.
+var ErrFirstToken = errors.New("no first token before the first-token timeout")
+
 // backoff returns the wait before retry try, or false if the request
 // should not be retried: the provider asked for a longer wait than the
 // gateway holds a request for, or the wait would outlast the deadline.
@@ -381,11 +406,15 @@ func (p *Provider) race(ctx context.Context, req *core.Request, streaming bool, 
 				r.hedged = true
 			}
 		})
-		actx, span := p.tracer.Start(ctx, "provider.attempt", trace.WithAttributes(
+		attrs := []attribute.KeyValue{
 			attribute.String("switchboard.provider", p.name),
 			attribute.Int("switchboard.attempt", n),
 			attribute.Bool("switchboard.hedge", hedge),
-		))
+		}
+		if streaming && p.cfg.FirstTokenTimeout > 0 {
+			attrs = append(attrs, attribute.Int64("switchboard.first_token_timeout_ms", p.cfg.FirstTokenTimeout.Milliseconds()))
+		}
+		actx, span := p.tracer.Start(ctx, "provider.attempt", trace.WithAttributes(attrs...))
 		actx, cancel := context.WithCancel(actx)
 		a := &attempt{n: n, hedge: hedge, start: p.now(), cancel: cancel, span: span}
 		running = append(running, a)
@@ -430,7 +459,11 @@ func (p *Provider) race(ctx context.Context, req *core.Request, streaming bool, 
 				return nil, core.Wrap(core.KindTimeout, ctx.Err(), "request cancelled")
 			}
 			a.cancel()
-			endSpan(a.span, "error", a.err)
+			outcome := "error"
+			if errors.Is(a.err, ErrFirstToken) {
+				outcome = "first_token_timeout"
+			}
+			endSpan(a.span, outcome, a.err)
 			if !a.cancelled && countsAgainst(a.err) {
 				p.breaker.Failure()
 			} else {
@@ -521,6 +554,12 @@ func (p *Provider) observeHedge(event string) {
 
 // send runs one attempt until it has a first token (or a whole reply),
 // fails, or is cancelled, and delivers it exactly once.
+//
+// A streamed attempt under a first-token timeout runs on a context of its
+// own that the timer cancels with ErrFirstToken as the cause. The
+// attempt's own context (ctx) is left alone, so a.cancelled still means
+// that someone else cancelled it (the caller left, or a hedge won) and a
+// timeout is the provider's failure.
 func (p *Provider) send(ctx context.Context, a *attempt, req *core.Request, streaming bool, out chan<- *attempt) {
 	defer func() {
 		a.cancelled = ctx.Err() != nil
@@ -531,9 +570,33 @@ func (p *Provider) send(ctx context.Context, a *attempt, req *core.Request, stre
 		a.first = p.now().Sub(a.start)
 		return
 	}
-	s, err := p.inner.Stream(ctx, req)
+	sctx := ctx
+	var timer *time.Timer
+	if d := p.cfg.FirstTokenTimeout; d > 0 {
+		var cancel context.CancelCauseFunc
+		sctx, cancel = context.WithCancelCause(ctx)
+		timer = time.AfterFunc(d, func() { cancel(ErrFirstToken) })
+		// The stream outlives this function: ctx's cancellation (the
+		// attempt's cancel) releases sctx when the attempt ends.
+	}
+	// timedOut reports whether the timer fired, and replaces the attempt's
+	// error with the timeout if it did: whatever the upstream call
+	// returned after its context was cancelled is a symptom.
+	timedOut := func() bool {
+		if timer == nil || ctx.Err() != nil || !errors.Is(context.Cause(sctx), ErrFirstToken) {
+			return false
+		}
+		a.err = core.Wrap(core.KindTimeout, ErrFirstToken,
+			fmt.Sprintf("provider %q sent no first token within %s", p.name, p.cfg.FirstTokenTimeout))
+		if p.obs != nil {
+			p.obs.FirstTokenTimeout(p.name)
+		}
+		return true
+	}
+	s, err := p.inner.Stream(sctx, req)
 	if err != nil {
 		a.err = err
+		timedOut()
 		return
 	}
 	for {
@@ -544,10 +607,18 @@ func (p *Provider) send(ctx context.Context, a *attempt, req *core.Request, stre
 				err = core.Errorf(core.KindUpstream, "upstream stream ended before its first token")
 			}
 			a.err = err
+			timedOut()
 			return
 		}
 		a.events = append(a.events, ev)
 		if ev.Kind != core.EventStart {
+			if timer != nil && !timer.Stop() && timedOut() {
+				// The token and the timer crossed: the stream's
+				// context is already cancelled, so it cannot be used.
+				_ = s.Close()
+				a.events = nil
+				return
+			}
 			a.first = p.now().Sub(a.start)
 			a.stream = s
 			return

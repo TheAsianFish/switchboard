@@ -1161,6 +1161,124 @@ below).
 Not measured yet. Run `make chaos-persist` and `make bench-persist`, then
 `make results`.
 {{end}}
+## M10: a stalled provider and the first-token timeout
+
+Does a provider that stops answering ever open the breaker? Commands:
+`make bench-stall` (`eval/stall/run.sh`) and, as a sanity check,
+`ARMS=off-ftt OUT=eval/results/m10-stall/q4-off-ftt eval/hedge/run.sh`;
+raw files in `eval/results/m10-stall/<arm>/` and
+`eval/results/m10-stall/q4-off-ftt/`, summarised by
+`switchboard eval stall`.
+{{with .M10}}
+**Method.** One gateway per arm and a fresh fake provider with Q4's
+latency shape, streamed, {{.Rate}} requests per second open-loop: {{.Steady}} s steady,
+{{.Stall}} s stalled (the provider accepts every request and never answers
+it, even after the stall ends, until its caller gives up), {{.Recover}} s
+recovered, client timeout {{.ClientTimeout}}, no warm-up. `before` is the gateway built
+from the commit before this milestone; `after` is this tree with a
+{{.Timeout}} `first_token_timeout`. Both keep the defaults otherwise (two retries,
+a breaker that opens after five failures in a row for a {{.Cooldown}} s cooldown,
+no hedging). Phases are assigned by each request's scheduled time against
+the stall's on and off times as the fake provider recorded them. Breaker
+state is read every {{.PollInterval}} ms from the admin listener's `/providers` (a median
+of {{.PollGap}} ms between reads, with curl's own time) and, where the gateway logs
+its transitions (`after`), from its warn lines, which are used when present.
+Refusals are the 503 replies to requests scheduled in the stalled phase
+while the breaker was open or half-open; probes are those of them that
+waited out the timeout because the breaker let them through. The rules for
+every number below were written in PLAN.md (M10) before the full runs.
+
+**Per phase.** Errors are the bench's outcomes; TTFT is the completed
+requests' (scheduled time to first token); failure p99 is the failed
+requests' latency to the error; upstream is the fake provider's ledger by
+arrival, with the requests the stall held.
+
+| Phase | Window (s) |{{range .Arms}} {{.Label}}: requests | ok | errors | ok TTFT p50 / p99 (ms) | failure p99 (ms) | upstream |{{end}}
+|-------|------------|{{range .Arms}}-----:|-----:|------|-----:|-----:|-----:|{{end}}
+{{- range .Phases}}
+| {{.Name}} | {{.Window}} |{{range .Cells}} {{.Requests}} | {{.OK}} | {{.Errors}} | {{.TTFT}} | {{.FailureP99}} | {{.Upstream}} |{{end}}
+{{- end}}
+
+**The breaker.** Offsets are seconds from the bench's first scheduled
+request.
+
+| |{{range .Arms}} {{.Label}} |{{end}}
+|-|{{range .Arms}}------:|{{end}}
+{{- range .Breaker}}
+| {{.Name}} |{{range .Values}} {{.}} |{{end}}
+{{- end}}
+{{with .Refusals}}
+**Refusals** (`after`, stalled phase): {{.Count}}, p50 {{.P50}} ms, p99 {{.P99}} ms, max {{.Max}} ms;
+{{.RetryAfter}} carry `Retry-After`. {{.Probes}} of them ({{.ProbeShare}}) are probes that waited out the
+timeout before their retry was refused; they are in the percentiles and
+the maximum.
+{{end}}
+**Hypotheses (PLAN.md, M10) against the runs.**
+
+| Hypothesis | Bound | Measured | Held |
+|------------|-------|----------|------|
+{{- range .Checks}}
+| {{.Hypothesis}} | {{.Bound}} | {{.Measured}} | {{.Held}} |
+{{- end}}
+
+**Reading the runs.**
+
+- Before, the breaker opened {{.BeforeOpens}} times: a stalled attempt never
+  fails until its caller gives up, and a cancellation is not counted as
+  the provider's failure, so every request in the stall waited for the
+  client timeout.
+- After, the breaker opened {{.TimeToOpen}} s into the stall and refusals answered
+  in {{.RefusalP99}} ms at p99. The last probe in the stall went out {{.LastProbe}} s
+  before its end; the next half-open came {{.HalfOpenAfterEnd}} s after the end, and the
+  breaker closed {{.TimeToClose}} s after the end. The worst case written down before the
+  run, a stall ending just after a probe went out, is one cooldown plus
+  the timeout plus one arrival gap, about {{.WorstClose}} s.
+{{with .Aligned}}
+**A stall that ends just after a probe.** The run above ended its stall
+late in an open window, so the close bound was not tested at its edge. A
+third run, `make bench-stall`'s `after` arm with the stall cut to {{.Meta.StallSeconds}} s
+(`eval/results/m10-stall-aligned/`), was stated in PLAN.md before it ran:
+the stall ends just after a probe went out, the probe is held and fails,
+and the close comes about one cooldown plus the timeout later, over the
+{{.Bound}} s bound. Measured: closed {{.Close}} s after the stall's end against
+{{.Predicted}} s predicted from its last probe; over the bound as predicted: {{.OverAsPredicted}}.
+So the main run's close met the 11 s bound only because its stall ended late in an
+open window; PLAN.md withdraws "within a cooldown plus 1 s" as a guarantee.
+The bound is one cooldown plus the timeout plus one arrival gap and the
+probe's own reply.
+
+| | Main run (`after`) | Aligned run |
+|-|------:|------:|
+{{- range .Rows}}
+| {{.Name}} |{{range .Values}} {{.}} |{{end}}
+{{- end}}
+{{end}}{{with .Sanity}}
+**Sanity check.** Q4's hedging-off arm again ({{.Requests}} requests), with the
+{{.Timeout}} first-token timeout (`eval/hedge/off-ftt.yaml`): the timeout fired {{.Fired}} times{{.FiredNote}},
+and the fake provider's ledger received {{.Upstream}} requests for the {{.Sent}} the bench sent
+(warm-up included), so no attempt was retried.
+The largest TTFT was {{.TTFTMax}} ms (p99.9 {{.TTFTP999}} ms, p99 {{.TTFTP99}} ms); Q4's committed
+hedging-off arm (`{{.Q4Commit}}`) had {{.Q4TTFTMax}} ms and {{.Q4TTFTP999}} ms. The fake provider's tail is
+built to stay under the timeout, so this checks that the setting does not
+misfire on a legitimate tail; it does not test the setting.
+{{end}}{{with .Trace}}
+**In a trace.** `{{.Command}}` (config `{{.Config}}`, raw
+trace in `eval/results/m10-trace/`) sends one streamed request to a
+stalled fake provider and lifts the stall while the first attempt is
+held:{{range .Attempts}} attempt {{.N}} ended `{{.Outcome}}` after {{.DurationMS}} ms;{{end}} the
+first-token timeout was {{.TimeoutMS}} ms and the request's TTFT {{.TTFT}} ms. Commit
+`{{.Commit}}`, {{.Date}}.
+{{end}}
+{{range .Arms}}- `{{.Name}}`: gateway at `{{.Commit}}` (`{{.Config}}`); {{.Hardware}}.
+{{end}}- Run: commit `{{.Summary.Meta.Commit}}`, {{.Summary.Meta.Date}}, `{{.Summary.Meta.Command}}`.
+{{with .Aligned}}- Aligned run: commit `{{.Meta.Commit}}`, {{.Meta.Date}}, `{{.Meta.Command}}`; {{.Hardware}}.
+{{end}}{{with .Sanity}}- Sanity check: commit `{{.Meta.Commit}}`, {{.Meta.Date}}, `{{.Meta.Command}}`; {{.Hardware}}.
+{{end}}- Cost: $0 (fake provider).
+{{else}}
+Not measured yet. Run `make bench-stall` and
+`ARMS=off-ftt OUT=eval/results/m10-stall/q4-off-ftt eval/hedge/run.sh`,
+then `make results`.
+{{end}}
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -1222,6 +1340,12 @@ observed.
   forgets up to about a second of its writes, and no run here produces
   one. With no append-only file (`REDIS_PERSIST=none`, Q6) a restart
   forgets every budget.
+- **A first-token timeout cannot see a stall after the first token.**
+  A provider that sends its first token and then stops holds the request
+  until the provider's whole-call `timeout` (10 minutes by default) or the
+  client gives up, and the breaker never hears of it. Non-streamed
+  requests are not covered either: their reply arrives whole, so only the
+  provider's `timeout` bounds them. Neither case is measured.
 - **A `LOADING` Redis was not reached under load.** M9's append-only file
   loaded in tens of milliseconds and no replica called during it; the integration
   test shows a `LOADING` reply degrades like an unreachable store and
@@ -1241,6 +1365,9 @@ observed.
 {{- end}}
 {{- if not .Q4}}
 - Q4 hedging on the synthetic tail: `make bench-hedge`.
+{{- end}}
+{{- if not .M10}}
+- M10 stalled provider: `make bench-stall`, then `make results`.
 {{- end}}
 {{- if not .Q4Claude}}
 - Q4 against Claude:{{with .Q4ClaudeEstimate}}

@@ -11,6 +11,7 @@
 //	switchboard eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
 //	switchboard eval router      Q5: build, label and cross-validate the router
 //	switchboard eval hedge-ledger Q4: summarise the fake provider's ledger (stdin)
+//	switchboard eval stall        M10: summarise a `make bench-stall` run
 //	switchboard chaos report      Q6: per-phase report of a chaos run
 //	switchboard version           print the build version
 package main
@@ -44,6 +45,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/results"
 	"github.com/TheAsianFish/switchboard/internal/routereval"
 	"github.com/TheAsianFish/switchboard/internal/server"
+	"github.com/TheAsianFish/switchboard/internal/stalleval"
 	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
 
@@ -61,6 +63,7 @@ commands:
   eval cache-index  Q3: FLAT against HNSW query latency (needs Redis 8)
   eval router       Q5: data | label | embed | run (the router eval)
   eval hedge-ledger Q4: summarise the fake provider's ledger read on stdin
+  eval stall        M10: summarise a make bench-stall run as JSON
   chaos report      Q6: per-phase report of a chaos run (chaos/run.sh)
   version           print the build version
 `
@@ -93,6 +96,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && args[1] == "hedge-ledger" {
 			return results.LedgerMain(os.Stdin, stdout, stderr)
 		}
+		if len(args) > 1 && args[1] == "stall" {
+			return stalleval.Main(args[2:], stdout, stderr)
+		}
 		if len(args) > 1 && (args[1] == "limits" || args[1] == "budget") {
 			return limitseval.Main(ctx, args[1:], stdout, stderr)
 		}
@@ -102,7 +108,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && (args[1] == "cache-data" || args[1] == "cache" || args[1] == "cache-index") {
 			return cacheeval.Main(ctx, args[1:], stdout, stderr)
 		}
-		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache|cache-index|router|hedge-ledger [flags]")
+		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache|cache-index|router|hedge-ledger|stall [flags]")
 		return 2
 	case "version":
 		_, _ = fmt.Fprintln(stdout, version())
@@ -198,9 +204,10 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 			continue
 		}
 		rc := resilienceConfig(p.Resilience)
-		h := hedge.New(p.Name, prov, rc, hedge.WithObserver(metrics))
+		h := hedge.New(p.Name, prov, rc, hedge.WithObserver(metrics), hedge.WithLogger(log))
 		log.Info("provider resilience", slog.String("provider", p.Name), slog.Int("retries", rc.Retries),
-			slog.Int("breaker_failures", rc.Breaker.Failures), slog.Bool("hedge", rc.Hedge.Enabled),
+			slog.Int("breaker_failures", rc.Breaker.Failures), slog.Duration("first_token_timeout", rc.FirstTokenTimeout),
+			slog.Bool("hedge", rc.Hedge.Enabled),
 			slog.Duration("hedge_delay", rc.Hedge.Delay), slog.Float64("hedge_budget", rc.Hedge.Budget))
 		built[p.Name] = h
 		health = append(health, h)
@@ -270,6 +277,7 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	slowFraction := fs.Float64("slow-fraction", 0, "share of requests whose first byte is -slow-factor times slower")
 	slowFactor := fs.Float64("slow-factor", 10, "how much slower a slow request is")
 	seed := fs.Uint64("seed", 1, "seed for the latency draws")
+	stalled := fs.Bool("stalled", false, "start stalled: accept requests and never answer them (POST /stall/off to recover, /stall/on to stall again)")
 	logLevel := fs.String("log-level", envOr("SWITCHBOARD_LOG_LEVEL", "warn"), "log level; warn by default so a benchmark measures serving, not logging")
 	logFormat := fs.String("log-format", envOr("SWITCHBOARD_LOG_FORMAT", "json"), "json or text")
 	if err := parse(fs, args); err != nil {
@@ -281,10 +289,13 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	fp := fake.New(fake.Config{Latency: *latency, Tokens: *tokens, TokenInterval: *interval,
 		LatencySigma: *sigma, SlowFraction: *slowFraction, SlowFactor: *slowFactor, Seed: *seed})
+	fp.SetStalled(*stalled)
 	gw := pipeline.Open{Provider: fp, Names: []string{"fake"}}
 	mux := http.NewServeMux()
 	mux.Handle("/ledger", fp.LedgerHandler())
 	mux.Handle("/ledger/", fp.LedgerHandler())
+	mux.Handle("/stall", fp.StallHandler())
+	mux.Handle("/stall/", fp.StallHandler())
 	mux.Handle("/", server.Handler(gw, log))
 	log.Warn("fake provider starting", slog.String("listen", *listen), slog.Duration("latency", *latency),
 		slog.Int("tokens", *tokens), slog.Duration("token_interval", *interval),

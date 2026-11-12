@@ -258,6 +258,19 @@ What does it cost to make a budget survive a Redis restart? Commands:
 Not measured yet. Run `make chaos-persist` and `make bench-persist`, then
 `make results`.
 
+## M10: a stalled provider and the first-token timeout
+
+Does a provider that stops answering ever open the breaker? Commands:
+`make bench-stall` (`eval/stall/run.sh`) and, as a sanity check,
+`ARMS=off-ftt OUT=eval/results/m10-stall/q4-off-ftt eval/hedge/run.sh`;
+raw files in `eval/results/m10-stall/<arm>/` and
+`eval/results/m10-stall/q4-off-ftt/`, summarised by
+`switchboard eval stall`.
+
+Not measured yet. Run `make bench-stall` and
+`ARMS=off-ftt OUT=eval/results/m10-stall/q4-off-ftt eval/hedge/run.sh`,
+then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -292,6 +305,12 @@ observed.
   forgets up to about a second of its writes, and no run here produces
   one. With no append-only file (`REDIS_PERSIST=none`, Q6) a restart
   forgets every budget.
+- **A first-token timeout cannot see a stall after the first token.**
+  A provider that sends its first token and then stops holds the request
+  until the provider's whole-call `timeout` (10 minutes by default) or the
+  client gives up, and the breaker never hears of it. Non-streamed
+  requests are not covered either: their reply arrives whole, so only the
+  provider's `timeout` bounds them. Neither case is measured.
 - **A `LOADING` Redis was not reached under load.** M9's append-only file
   loaded in tens of milliseconds and no replica called during it; the integration
   test shows a `LOADING` reply degrades like an unreachable store and
@@ -306,6 +325,7 @@ observed.
   is implemented (`internal/ratelimit/gcra.go`; its contract tests skip
   until then).
 - Q4 hedging on the synthetic tail: `make bench-hedge`.
+- M10 stalled provider: `make bench-stall`, then `make results`.
 - Q4 against Claude:
   `ANTHROPIC_API_KEY=... eval/hedge/claude.sh`, then `make results` (no
   cost estimate yet: it is computed from the local run,

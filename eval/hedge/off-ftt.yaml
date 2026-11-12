@@ -1,0 +1,23 @@
+# Gateway config for M10's sanity check on Q4's hedging-off arm: off.yaml
+# plus a 2 s first-token timeout. Run with
+# `ARMS=off-ftt OUT=eval/results/m10-stall/q4-off-ftt eval/hedge/run.sh`;
+# the timeout should never fire on the fake provider's legitimate tail.
+listen: 127.0.0.1:8080
+admin_listen: 127.0.0.1:9190
+log:
+  format: json
+  level: warn
+providers:
+  - name: fake
+    type: openaicompat
+    base_url: http://127.0.0.1:9101/v1
+    timeout: 30s
+    resilience:
+      hedge: {enabled: false}
+      first_token_timeout: 2s
+models:
+  - name: fake
+    provider: fake
+keys:
+  - name: bench
+    key: sk-bench

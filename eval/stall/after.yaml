@@ -1,0 +1,19 @@
+# Gateway config for `make bench-stall` (M10), the "after" arm: the same
+# as before.yaml plus a 2 s first-token timeout on the provider.
+listen: 127.0.0.1:8080
+admin_listen: 127.0.0.1:9190
+log:
+  format: json
+  level: warn
+providers:
+  - name: fake
+    type: openaicompat
+    base_url: http://127.0.0.1:9101/v1
+    resilience:
+      first_token_timeout: 2s
+models:
+  - name: fake
+    provider: fake
+keys:
+  - name: bench
+    key: sk-bench

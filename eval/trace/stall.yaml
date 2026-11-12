@@ -1,0 +1,35 @@
+# Gateway config for `scripts/trace-check.sh --local --stall` (M10): every
+# pipeline stage on as in switchboard.yaml, hedging off, a 300 ms
+# first-token timeout and one retry. The fake provider starts stalled and
+# the script lifts the stall 150 ms after sending, so the first attempt is
+# held until its timer fires and the retry is answered: the trace shows a
+# timed-out attempt next to the one that won.
+listen: 127.0.0.1:8080
+admin_listen: 127.0.0.1:9090
+log:
+  format: json
+  level: info
+tracing:
+  endpoint: http://localhost:4318
+providers:
+  - name: fake
+    type: openaicompat
+    base_url: http://127.0.0.1:9101/v1
+    timeout: 30s
+    resilience:
+      retries: 1
+      backoff_base: 10ms
+      backoff_max: 20ms
+      first_token_timeout: 300ms
+cache:
+  mode: exact
+models:
+  - name: fake
+    provider: fake
+    price: {input: 1, output: 2}
+keys:
+  - name: trace
+    key: sk-trace
+    limits:
+      requests: {rate: 100, per: 1m, burst: 100}
+    budget: {usd: 1, period: total}

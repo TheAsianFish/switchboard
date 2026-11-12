@@ -8,6 +8,7 @@ type resilience struct {
 	retries *prometheus.CounterVec
 	hedges  *prometheus.CounterVec
 	breaker *prometheus.GaugeVec
+	ftt     *prometheus.CounterVec
 }
 
 func newResilience(reg *prometheus.Registry) resilience {
@@ -24,8 +25,12 @@ func newResilience(reg *prometheus.Registry) resilience {
 			Name: "switchboard_provider_breaker_state",
 			Help: "Each provider's circuit breaker: 0 closed, 1 half-open (probing), 2 open (failing fast).",
 		}, []string{"provider"}),
+		ftt: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "switchboard_provider_first_token_timeouts_total",
+			Help: "Streamed attempts failed by the provider's first-token timeout (resilience.first_token_timeout): no first token arrived in time.",
+		}, []string{"provider"}),
 	}
-	reg.MustRegister(r.retries, r.hedges, r.breaker)
+	reg.MustRegister(r.retries, r.hedges, r.breaker, r.ftt)
 	return r
 }
 
@@ -51,4 +56,12 @@ func (m *Metrics) BreakerState(provider string, state int) {
 		return
 	}
 	m.breaker.WithLabelValues(provider).Set(float64(state))
+}
+
+// FirstTokenTimeout counts an attempt failed by the first-token timeout.
+func (m *Metrics) FirstTokenTimeout(provider string) {
+	if m == nil {
+		return
+	}
+	m.ftt.WithLabelValues(provider).Inc()
 }

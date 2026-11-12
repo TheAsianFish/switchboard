@@ -1,0 +1,5 @@
+{
+  "arm": "after",
+  "gateway_commit": "9efa1df",
+  "config": "eval/stall/after.yaml"
+}

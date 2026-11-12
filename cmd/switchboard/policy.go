@@ -230,6 +230,7 @@ func resilienceConfig(r config.Resilience) hedge.Config {
 	if r.MaxRetryAfter > 0 {
 		c.MaxRetryAfter = r.MaxRetryAfter
 	}
+	c.FirstTokenTimeout = r.FirstTokenTimeout
 	if r.Breaker.Failures != nil {
 		c.Breaker.Failures = *r.Breaker.Failures
 	}

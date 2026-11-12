@@ -628,6 +628,67 @@ What the numbers and the code say:
   minutes): steady, stalled, recovered, through one gateway, before and
   after, per-phase latency, error kinds and breaker state from
   `/providers`.
+- *How each number is read and each hypothesis judged (fixed before the
+  full runs).* `make bench-stall` (`eval/stall/run.sh`) runs two arms
+  against a fresh fake provider (Q4's shape: 50 ms median first byte,
+  σ 0.3, 5% of requests 10× slower) and one fresh gateway each, streamed,
+  20 requests per second open-loop, 20 s steady, 60 s stalled, 40 s
+  recovered, client timeout 30 s, no warm-up. `before` is the gateway
+  built from the commit before this milestone (`ed0dedf`), so "today" is
+  today's code and not the new code with the setting off; `after` is this
+  tree with `first_token_timeout: 2s`. Both keep the defaults otherwise:
+  two retries, a breaker that opens after five failures in a row for a
+  10 s cooldown, no hedging, and the provider's whole-call timeout at its
+  10 minute default. The stall holds every request that arrives during it
+  until its caller gives up, even after the stall ends (a black-holed
+  upstream; a stall that answered its held requests on recovery would be
+  kinder to the breaker).
+  - *Phases* are assigned by each request's scheduled time against the
+    stall's on and off times as the fake provider recorded them.
+  - *Breaker state* is read every 50 ms from the admin listener's
+    `/providers` (both arms) and, where the gateway logs transitions
+    (`after`), from its warn lines. *Opens* counts transitions to open.
+    *Time to open* is from the stall's start to the first open; *time to
+    close* is from the stall's end to the first transition to closed
+    after it.
+  - *Refusals* are the 503 replies to requests scheduled in the stalled
+    phase while the breaker was open or half-open. Their latency is the
+    bench's (scheduled time to the error), reported at p50, p99 and max,
+    with the share that carries `Retry-After`. The few requests let
+    through as half-open probes wait out the timeout first; they are
+    counted beside the refusals and are under 1% of them, so they cannot
+    move the p99.
+  - *Before* holds if the breaker opens 0 times in the run and 0 requests
+    scheduled in the stalled phase complete.
+  - *After* holds part by part. Open: within 3.0 s of the stall's start,
+    and within 0.1 s of the fifth stalled upstream request's arrival
+    (fake provider's ledger) plus the 2 s timeout, which is what "plus its
+    five failures" predicts. Refusals: p99 under 5 ms and 100% with
+    `Retry-After`. Close: within 11 s (one cooldown plus 1 s) of the
+    stall's end. Written down before the run: with a black-holed stall the
+    worst case is longer, one cooldown plus the timeout plus one arrival
+    gap (about 12.05 s), when the stall ends just after a probe went out;
+    the run's alignment decides which case it measures, and the time from
+    the last probe to the stall's end is reported with it.
+  - *The sanity check* runs Q4's hedging-off arm again with the timeout
+    (`ARMS=off-ftt OUT=eval/results/m10-stall/q4-off-ftt
+    eval/hedge/run.sh`, `eval/hedge/off-ftt.yaml`): it holds if the
+    gateway's `switchboard_provider_first_token_timeouts_total` is 0,
+    reported with that arm's largest TTFT beside the 2 s timeout.
+  - *Error kinds* per phase are the bench's outcomes (`ok`, `http_503`,
+    `http_504`, client `timeout`, ...), with the gateway's first-token
+    timeouts and retries from its metrics and the upstream attempts from
+    the fake provider's ledger.
+- *What the runs changed (after the runs).* Every pre-stated part held on
+  the main runs, and the open landed on the fifth stalled arrival plus
+  the timeout to within a millisecond. The close bound held only because
+  the main run's stall ended late in an open window; the aligned run
+  stated afterwards (below, under "Changes made while building") ended
+  the stall just after a probe and closed over the bound, as predicted,
+  so "within a cooldown plus 1 s" is withdrawn as a guarantee: the bound
+  is one cooldown plus the timeout plus one arrival gap and the probe's
+  own reply. The polls ran about every 63 ms, not 50 ms; the breaker
+  times come from the gateway's log, so they are unaffected.
 
 ### Considered and not chosen
 
@@ -1119,6 +1180,41 @@ Changes made while building:
     up to one more grace, because settling a hold admitted before it gives
     the over-estimate back; `budget/degrade.go` says so.
 
+- **M10.**
+  - "Cancelled by the first event" is read as the first token: the first
+    event after the stream's start, the moment the hedge layer already
+    times as TTFT. A provider that sends its start event and then nothing
+    is therefore caught too; what is not caught is a stall after the
+    first token.
+  - The setting applies to streamed attempts only. A non-streamed reply
+    arrives whole, so a timer on it would be a whole-reply timeout, and
+    a short one would fail every long answer; the provider's `timeout`
+    remains the only bound there, and the README says so.
+  - The timer runs on a context of its own under the attempt's, so a
+    hedge winning or the caller leaving still reads as a cancellation
+    (not counted by the breaker), and only the timer's own firing reads
+    as the provider's timeout. A token and the timer that cross are
+    settled by `Timer.Stop`: if the timer already fired, the attempt
+    failed.
+  - The fake provider's stall is a black hole: requests that arrive
+    during it are held until their caller gives up, even after the stall
+    ends. A stall that answered them on recovery would let an in-flight
+    half-open probe close the breaker at once, which is the kinder case.
+  - The `before` arm runs the gateway built from the commit before this
+    milestone, not the new code with the setting off, so "today" is
+    measured on today's code.
+  - Added after the main runs and before it ran: the main `after` run's
+    stall ended late in an open window, the kind alignment, so the close
+    bound was not tested at its edge. A third run, `make bench-stall`'s
+    `after` arm with `STALL=37` into `eval/results/m10-stall-aligned/`,
+    ends the stall 0.64 s after the third half-open probe went out
+    (probes 12.26, 24.34 and 36.36 s into the stall in the main run). That
+    probe is held and fails, so the prediction is a close about 11.4 s
+    after the stall's end (probe + 2 s timeout + 10 s cooldown + at most
+    one 50 ms arrival gap, minus the stall's end), over the 11 s bound.
+    It is reported beside the main run; the main run's verdict stands as
+    measured.
+
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
 - [x] M3: Exact and semantic cache — canonical request hash cache; `embed` client for Ollama `/api/embed` with a fake; vector index interface with Redis HNSW/FLAT and in-memory FLAT implementations; cacheability rules (temperature, explicit header, context hash) and tenant namespacing; cached streams replayed in the client's wire format; `make eval-cache` with the PAWS-Wiki and GSM8K-perturbation pair sets, the threshold sweep and the FLAT vs HNSW latency check; RESULTS.md cache section answering Q3. Done when the cross-tenant and cross-context leak tests pass, the eval runs end to end on a laptop with Ollama, and the chosen threshold is the one the eval produced.
@@ -1128,4 +1224,4 @@ Changes made while building:
 - [x] M7: Release readiness — `go install` path verified in a clean container, release archives, `release.yml` guarded by `v*` tags building the multi-arch image to GHCR, RELEASE.md with every maintainer step; README complete (what/why, demo GIF placeholder with capture instructions, quickstart for both SDKs, Mermaid architecture, design decisions and trade-offs, results table rendered from RESULTS.md, roadmap); RESULTS.md complete with every measured number, its method, cost and hardware, and every unmeasured one under "To measure" with its command. Done when a fresh clone runs the quickstart from the README alone and the release workflow dry-runs green.
 - [x] M8: Budget grace under a flapping store — `make chaos-flap` on the Q6 fleet: Redis cut off and reconnected eight times with its state kept (`docker network disconnect`), one replica killed while degraded, phases fixed in PLAN.md before the full run, the flaky `TestAbandonedHedgedRequestIsChargedForEveryAttempt` fixed at its cause first (five consecutive `make check` runs green), and a per-phase reconciliation of the fake provider's ledger against Redis's `spent`; run once at the commit before the fix; then grace as a time-refilled allowance per replica and key (`grace_refill`, fake-clock unit tests, the doc comments in `budget/degrade.go` corrected) and the same run again. Done when RESULTS.md holds both runs side by side with each hypothesis answered (overshoot about $0.24 and linear in outages before; at most replica processes × grace × (1 + T / refill) after, whatever the outage count, a restarted replica counted as a new process; the killed replica's lost pending spend measured against its bound), both raw results are committed, the double-charge and expired-hold cases are listed under known problems with what was observed, and `make chaos` still reproduces Q6.
 - [x] M9: Budgets that survive a Redis restart, and what the fsync costs — `REDIS_PERSIST=none|everysec|always` arms of `make chaos` with M8's reconciliation column and the replicas' logs kept; `make bench-persist` (Q1's limits-and-budget configuration at 200 requests per second against each mode, bootstrap intervals as in Q1); an integration test that a `LOADING` reply degrades like an unreachable store and recovers. Done when RESULTS.md holds overshoot, error rate, degraded seconds after the restart and hit rate of repeats per mode beside the added p50 and p99 per mode, each hypothesis is answered (`everysec` at most the live replicas' grace plus one second of spend, about $0.025, and under 0.1 ms, a difference inside Q1's run-to-run drift reported as unresolved rather than as held; `always` at most grace and under 0.2 ms p99, or by how much not), the cause of Q6's slow stretch after the Redis kill is read from the kept logs, the compose default is the mode the pre-stated rule picks, and the README's roadmap line on budgets is replaced by the finding.
-- [ ] M10: First-token timeout and a stalled provider — a stall switch on `switchboard fake-provider`; `resilience.first_token_timeout` per provider (off by default), per attempt, cancelled by the first event, counted by the breaker and retried like a timeout; `make bench-stall` with steady, stalled and recovered phases, run before and after. Done when RESULTS.md holds both runs with per-phase latency, error kinds, time until the breaker is open on the replica and until it closes, each hypothesis answered (0 opens and no completed request today; open within 3 s plus five failures, refusals p99 under 5 ms with `Retry-After`, closed within a cooldown plus 1 s, and 0 timeouts fired on Q4's hedging-off arm, reported with its largest TTFT beside the timeout), a stall after the first event listed under known problems as not covered, a trace of a timed-out attempt is committed beside M4's, and the README documents the setting and when not to use it.
+- [x] M10: First-token timeout and a stalled provider — a stall switch on `switchboard fake-provider`; `resilience.first_token_timeout` per provider (off by default), per attempt, cancelled by the first event, counted by the breaker and retried like a timeout; `make bench-stall` with steady, stalled and recovered phases, run before and after. Done when RESULTS.md holds both runs with per-phase latency, error kinds, time until the breaker is open on the replica and until it closes, each hypothesis answered (0 opens and no completed request today; open within 3 s plus five failures, refusals p99 under 5 ms with `Retry-After`, closed within a cooldown plus 1 s, and 0 timeouts fired on Q4's hedging-off arm, reported with its largest TTFT beside the timeout), a stall after the first event listed under known problems as not covered, a trace of a timed-out attempt is committed beside M4's, and the README documents the setting and when not to use it.

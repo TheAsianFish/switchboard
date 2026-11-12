@@ -9,6 +9,12 @@
 #       gateway from this tree (eval/trace/switchboard.yaml) against a Jaeger
 #       already listening on localhost:4318 and :16686, send one streamed and
 #       one non-streamed request, and write both raw traces and meta.json to DIR
+#   scripts/trace-check.sh --local --stall --save DIR
+#                                              # the same with the fake provider
+#       stalled and eval/trace/stall.yaml (a 300 ms first-token timeout, one
+#       retry): one streamed request whose first attempt is held and timed
+#       out while the stall is lifted behind it, so the retry answers; the
+#       trace must show the timed-out attempt
 #
 # Environment: GATEWAY (http://localhost:8080), JAEGER (http://localhost:16686),
 # KEY (sk-switchboard-dev), MODEL (fake), EXPECT (the span names that must be
@@ -23,6 +29,7 @@ key=${KEY:-sk-switchboard-dev}
 model=${MODEL:-fake}
 expect=${EXPECT:-auth route cache.lookup provider settle}
 local=false
+stall=false
 streams=(false)
 save=""
 
@@ -30,12 +37,13 @@ while [[ $# -gt 0 ]]; do
 	case $1 in
 	--stream) streams=(true) ;;
 	--local) local=true ;;
+	--stall) stall=true ;;
 	--save)
 		save=$2
 		shift
 		;;
 	*)
-		echo "usage: $0 [--stream] [--local] [--save DIR]" >&2
+		echo "usage: $0 [--stream] [--local [--stall]] [--save DIR]" >&2
 		exit 2
 		;;
 	esac
@@ -89,11 +97,18 @@ if $local; then
 	gateway=http://127.0.0.1:8080
 	streams=(true false)
 	expect="auth route ratelimit budget.reserve cache.lookup provider provider.attempt settle cache.fill"
+	config=eval/trace/switchboard.yaml
+	fake_flags=()
+	if $stall; then
+		config=eval/trace/stall.yaml
+		fake_flags=(--stalled)
+		streams=(true)
+	fi
 	go build -o bin/switchboard ./cmd/switchboard
 	bin/switchboard fake-provider --listen 127.0.0.1:9101 --latency 20ms --tokens 30 --token-interval 5ms \
-		>"$work/fake-provider.log" 2>&1 &
+		${fake_flags[@]+"${fake_flags[@]}"} >"$work/fake-provider.log" 2>&1 &
 	pids+=($!)
-	SWITCHBOARD_CONFIG=eval/trace/switchboard.yaml bin/switchboard serve >"$work/gateway.log" 2>&1 &
+	SWITCHBOARD_CONFIG=$config bin/switchboard serve >"$work/gateway.log" 2>&1 &
 	pids+=($!)
 	wait_healthy fake-provider http://127.0.0.1:9101
 	wait_healthy gateway "$gateway"
@@ -154,6 +169,13 @@ hedged() {
 		| .tags[] | select(.key == "switchboard.hedge" and .value == true)] | length > 0' "$1" >/dev/null
 }
 
+# timed_out <trace.json>: succeeds when some attempt span ended on the
+# first-token timeout.
+timed_out() {
+	jq -e '[.data[0].spans[] | select(.operationName == "provider.attempt")
+		| .tags[] | select(.key == "switchboard.outcome" and .value == "first_token_timeout")] | length > 0' "$1" >/dev/null
+}
+
 # Each request asks something nobody has asked before, so the cache misses
 # and every stage runs.
 status=0
@@ -161,8 +183,18 @@ for stream in "${streams[@]}"; do
 	nonce=$(date +%s%N)
 	body=$(jq -nc --arg m "$model" --arg p "Trace check $nonce: name three primary colours." --argjson s "$stream" \
 		'{model: $m, temperature: 0, max_tokens: 32, stream: $s, messages: [{role: "user", content: $p}]}')
+	if $stall; then
+		# The first attempt reaches a stalled provider and is held; the
+		# stall is lifted behind it, before its timer fires, so only the
+		# retry is answered.
+		(sleep 0.15 && curl -fsS -X POST http://127.0.0.1:9101/stall/off) &
+		lifter=$!
+	fi
 	curl -fsS -o "$work/body" -D "$work/headers" -H "Authorization: Bearer $key" \
 		-H "Content-Type: application/json" -d "$body" "$gateway/v1/chat/completions"
+	if $stall; then
+		wait "$lifter"
+	fi
 	id=$(awk 'tolower($1) == "x-trace-id:" { print $2 }' "$work/headers" | tr -d '\r')
 	if [[ -z $id ]]; then
 		echo "trace-check: no X-Trace-Id in the response; is tracing on (tracing.endpoint)?" >&2
@@ -178,7 +210,15 @@ for stream in "${streams[@]}"; do
 		echo "trace-check: missing spans: $absent" >&2
 		status=1
 	fi
-	if hedged "$work/trace.json"; then
+	if $stall; then
+		if timed_out "$work/trace.json"; then
+			echo "an attempt timed out waiting for its first token"
+		else
+			echo "trace-check: no provider.attempt with outcome=first_token_timeout" >&2
+			status=1
+		fi
+		label=first-token-timeout
+	elif hedged "$work/trace.json"; then
 		echo "a hedge attempt is present"
 	else
 		echo "trace-check: no provider.attempt with hedge=true; the hedge is not in the trace" >&2
@@ -201,10 +241,10 @@ if [[ -n $save ]]; then
 {
   "commit": "$commit",
   "date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "command": "scripts/trace-check.sh --local --save $save",
+  "command": "scripts/trace-check.sh --local$($stall && echo " --stall") --save $save",
   "jaeger_image": "$jaeger_image",
-  "config": "eval/trace/switchboard.yaml",
-  "fake_provider": {"latency": "20ms", "tokens": 30, "token_interval": "5ms"},
+  "config": "${config:-eval/trace/switchboard.yaml}",
+  "fake_provider": {"latency": "20ms", "tokens": 30, "token_interval": "5ms", "stalled_at_start": $stall},
   "expected_spans": "$expect"
 }
 JSON
