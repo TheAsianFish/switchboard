@@ -198,9 +198,10 @@ func serve(ctx context.Context, args []string, stderr io.Writer) error {
 			continue
 		}
 		rc := resilienceConfig(p.Resilience)
-		h := hedge.New(p.Name, prov, rc, hedge.WithObserver(metrics))
+		h := hedge.New(p.Name, prov, rc, hedge.WithObserver(metrics), hedge.WithLogger(log))
 		log.Info("provider resilience", slog.String("provider", p.Name), slog.Int("retries", rc.Retries),
-			slog.Int("breaker_failures", rc.Breaker.Failures), slog.Bool("hedge", rc.Hedge.Enabled),
+			slog.Int("breaker_failures", rc.Breaker.Failures), slog.Duration("first_token_timeout", rc.FirstTokenTimeout),
+			slog.Bool("hedge", rc.Hedge.Enabled),
 			slog.Duration("hedge_delay", rc.Hedge.Delay), slog.Float64("hedge_budget", rc.Hedge.Budget))
 		built[p.Name] = h
 		health = append(health, h)

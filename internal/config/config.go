@@ -98,8 +98,13 @@ type Resilience struct {
 	BackoffBase   time.Duration `yaml:"backoff_base"`
 	BackoffMax    time.Duration `yaml:"backoff_max"`
 	MaxRetryAfter time.Duration `yaml:"max_retry_after"`
-	Breaker       Breaker       `yaml:"breaker"`
-	Hedge         Hedge         `yaml:"hedge"`
+	// FirstTokenTimeout fails a streamed attempt that has sent no first
+	// token after this long, as a timeout the breaker counts and the
+	// retries repeat (default 0: off). A cold local model loading its
+	// weights legitimately takes longer than any useful value.
+	FirstTokenTimeout time.Duration `yaml:"first_token_timeout"`
+	Breaker           Breaker       `yaml:"breaker"`
+	Hedge             Hedge         `yaml:"hedge"`
 }
 
 // Breaker configures a provider's circuit breaker.
@@ -370,7 +375,7 @@ func (r Resilience) validate(provider string) []error {
 	if r.Retries != nil && (*r.Retries < 0 || *r.Retries > 10) {
 		bad("retries must be between 0 and 10")
 	}
-	if r.BackoffBase < 0 || r.BackoffMax < 0 || r.MaxRetryAfter < 0 || r.Breaker.Cooldown < 0 || r.Hedge.Delay < 0 {
+	if r.BackoffBase < 0 || r.BackoffMax < 0 || r.MaxRetryAfter < 0 || r.Breaker.Cooldown < 0 || r.Hedge.Delay < 0 || r.FirstTokenTimeout < 0 {
 		bad("durations must not be negative")
 	}
 	if r.BackoffBase > 0 && r.BackoffMax > 0 && r.BackoffMax < r.BackoffBase {

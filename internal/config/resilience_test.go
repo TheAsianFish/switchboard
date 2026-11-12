@@ -15,6 +15,7 @@ providers:
     resilience:
       retries: 0
       backoff_base: 50ms
+      first_token_timeout: 2s
       breaker: {failures: 3, cooldown: 5s}
       hedge: {enabled: true, quantile: 0.9, budget: 0.05}
 models: [{name: m, provider: up}]
@@ -26,6 +27,9 @@ models: [{name: m, provider: up}]
 	r := cfg.Providers[0].Resilience
 	if r.Retries == nil || *r.Retries != 0 {
 		t.Errorf("retries = %v, want an explicit 0", r.Retries)
+	}
+	if r.FirstTokenTimeout != 2*time.Second {
+		t.Errorf("first_token_timeout = %v, want 2s", r.FirstTokenTimeout)
 	}
 	if r.BackoffBase != 50*time.Millisecond || *r.Breaker.Failures != 3 || r.Breaker.Cooldown != 5*time.Second {
 		t.Errorf("resilience = %+v", r)
@@ -44,6 +48,7 @@ func TestResilienceValidation(t *testing.T) {
 		{"hedge: {window: 10, min_samples: 20}", "min_samples exceeds"},
 		{"backoff_base: 2s\n      backoff_max: 1s", "backoff_max is below"},
 		{"breaker: {cooldown: -1s}", "must not be negative"},
+		{"first_token_timeout: -1s", "must not be negative"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			t.Parallel()
