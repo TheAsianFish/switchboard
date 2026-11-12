@@ -8,6 +8,7 @@
 | [Q5: evaluated router](RESULTS.md#q5-evaluated-router) | `router` at its operating point: 63.2% (59.2–66.9) accuracy, gain over the random-mix line +3.7 points (95% CI +0.8 to +6.2), above the line | `make eval-router` |
 | [Q6: chaos](RESULTS.md#q6-chaos) | Replica kill: 12 errors (0.20%) in its phase; Redis down: 0 errors, p99 430.72 ms (steady 197.02 ms), 3 over-admissions (bound 6 per window), budget overshoot $0.0176 (grace bound $0.0200) | `make chaos` |
 | [M8: budget grace under a flapping store](RESULTS.md#m8-budget-grace-under-a-flapping-store) | Eight Redis outages on a spent budget: overshoot $0.2166 when grace reset every outage, $0.0362 with a refilled allowance (bound $0.0410); a replica killed while degraded lost $0.004185 before, $0 after | `make chaos-flap` |
+| [M9: budgets across a Redis restart](RESULTS.md#m9-budgets-across-a-redis-restart) | Not measured yet | `make chaos-persist`, `make bench-persist` |
 
 Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2

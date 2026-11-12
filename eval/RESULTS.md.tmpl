@@ -802,8 +802,9 @@ means the first whole second after the event already met the rule.
   when its cache comes out of a one-second bypass wait it out, then the
   cache is bypassed again. That the slow stretch ends while Redis is still
   down suggests the calls then fail at once instead of timing out (Docker
-  removes the dead container's name and address); the replicas' logs are
-  not kept, so this is the likely cause rather than a measured one.
+  removes the dead container's name and address). The replicas' logs
+  were not kept in this run; M9 keeps them and confirms it: timeouts on
+  the connections open at the kill, then fast DNS failures.
 - A Redis restart is a reset. Redis has no persistence here (as in
   `deploy/compose.yaml`), so the cache, the limit counters and the budget
   ledger all come back empty: the hit rate climbs back as the pool prompts
@@ -941,6 +942,225 @@ touch:
 Not measured yet. Run `make chaos-flap RUN=before` at the commit before
 the grace fix and `make chaos-flap RUN=after`, then `make results`.
 {{end}}
+## M9: budgets across a Redis restart
+
+What does it cost to make a budget survive a Redis restart? Commands:
+`make chaos-persist` (`REDIS_PERSIST=none|everysec|always make chaos`) and
+`make bench-persist` (`eval/bench/persist.sh`), raw files in
+`eval/results/m9-persist/chaos-<mode>/` and
+`eval/results/m9-persist/bench/<mode>/`.
+{{with .M9}}
+**Method.** Q6's schedule, fleet and streams (three replicas behind nginx,
+Redis 8, the fake provider; the budgeted key has {{.Budget}} in total and each
+replica may let it spend {{.Grace}} while Redis is unreachable), run once per
+append-only mode for {{.DurationSeconds}} s{{if ne .TimeScale "1"}} (schedule scaled by {{.TimeScale}}){{end}}: `none` (no file, Q6's
+configuration), `everysec` (`appendfsync everysec`) and `always`
+(`appendfsync always`). Each run starts Redis in a fresh container whose
+append-only file lives on the container's own filesystem
+(`{{.DataFS}}`; `redis:8` declares no volume), so the SIGKILL and `docker start` in the schedule
+replay whatever the file holds. Half a second before every docker action
+and once after the run, the script reads the budgeted key's `spent` and
+`reserved` from Redis, as in M8. The gap (ledger minus Redis's `spent`)
+at the snapshot that ends the phase `replica down, Redis back`, 0.5 s
+before replica 2 starts, is spend Redis forgot, since pending grace
+charges have been flushed by then.
+The replicas' and Redis's logs are kept with each run (`logs/`), and
+`switchboard chaos report` reads from them the store errors after the
+kill, Redis's load and ready lines after the start, and when each live
+replica's budget, limiter and cache logged their recovery. The rules for
+every number below were written in PLAN.md (M9) before the full runs.
+
+Latency is Q1's breakdown method for the `budget` config (both limiters
+and the budget through Redis on every request) at {{.BenchRate}} requests per
+second, {{.BenchWindow}}, against a fresh Redis per mode (data on
+`{{.BenchDataFS}}`), each gateway run between two direct runs, non-streaming
+total and streaming TTFT. Added latency is the gateway run minus the
+pooled direct runs; a mode's cost is its added latency minus `none`'s at
+the same percentile, with a 95% interval from {{.Resamples}} bootstrap resamples of
+all four sample sets. The drift is the largest spread between the two
+direct runs of any mode, per metric and percentile: total {{.DriftTotalP50}} ms at p50
+and {{.DriftTotalP99}} ms at p99, TTFT {{.DriftTTFTP50}} and {{.DriftTTFTP99}} ms (Q1's committed figure:
+{{.Q1DriftP50}} ms at p50, {{.Q1DriftP99}} ms at p99). A cost no larger than the drift is
+unresolved.
+
+**Per mode.**
+
+|  |{{range .Modes}} `{{.}}` |{{end}}
+|--|{{range .Modes}}------:|{{end}}
+{{- range .ChaosRows}}
+| {{.Name}} |{{range .Values}} {{.}} |{{end}}
+{{- end}}
+{{- range .BenchRows}}
+| {{.Name}} |{{range .Values}} {{.}} |{{end}}
+{{- end}}
+
+**Q6's slow stretch after the Redis kill**, from the `none` arm's logs (the
+Q6 configuration). Lines count every replica and component; pool lines
+are go-redis's connection pool reporting a failed dial; times are seconds
+after the kill.
+{{if .Slow}}
+`{{.SlowEvent}}`, Redis down for {{.SlowWindow}}:
+
+| Class | Lines | of which pool lines | First (s) | Last (s) | Example |
+|-------|------:|--------------------:|----------:|---------:|---------|
+{{- range .Slow}}
+| {{.Class}} | {{.Lines}} | {{.PoolLines}} | {{.First}} | {{.Last}} | `{{.Example}}` |
+{{- end}}
+{{else}}
+Not available: no `none` arm with logs yet.
+{{end}}
+**The restart, per mode.** Seconds from `docker start` of Redis; a
+recovery is a replica component's recovery line.
+{{if .Restarts}}
+| Mode | Redis started at (s) | Ready | AOF loaded in | Degraded for | Recoveries per replica (s) | Store errors after the start |
+|------|---------------------:|------:|--------------:|-------------:|----------------------------|------------------------------|
+{{- range .Restarts}}
+| `{{.Mode}}` | {{.At}} | {{.Ready}} | {{.AOFLoaded}} | {{.Degraded}} | {{.Recoveries}} | {{.Errors}} |
+{{- end}}
+{{else}}
+Not available: no chaos run with logs yet.
+{{end}}
+**Hypotheses (PLAN.md, M9) against the runs.** A grace bound is the
+replicas up at the Redis kill ({{.ReplicasAtKill}}) × {{.Grace}}; one second of spend is the
+budget stream's {{.BudgetRate}} req/s × {{.PricePerReply}} per reply (the steady phase's spend over
+its ledger requests); the `everysec` bound is {{.EverysecBound}}.
+
+| Hypothesis | Observed | Held |
+|------------|----------|------|
+{{- range .Checks}}
+| {{.Hypothesis}} | {{.Observed}} | {{.Held}} |
+{{- end}}
+
+**The compose default.** The rule, fixed in PLAN.md before the runs: in
+the order `none`, `everysec`, `always`, the first mode whose overshoot is
+within the bound and whose larger p99 cost of the two metrics is under
+0.5 ms; an unresolved cost passes only if the drift is under 0.5 ms;
+`none` costs 0 by definition; if no mode passes, the default stays
+`none`.
+
+| Mode | Overshoot | Within the bound | p99 cost against `none` | Under 0.5 ms | Passes |
+|------|-----------|------------------|-------------------------|--------------|--------|
+{{- range .Rule}}
+| `{{.Mode}}` | {{.Overshoot}} | {{.OvershootOK}} | {{.Cost}} | {{.CostOK}} | {{.Passes}} |
+{{- end}}
+
+{{if .Decided}}The rule picks `{{.Default}}`: {{.DefaultReason}}.{{else}}The rule is {{.DefaultReason}}.{{end}}
+{{$m9 := .}}{{with .Second}}
+**A second bench pass.** `make bench-persist` run again on the same
+machine into `eval/results/m9-persist/bench-repeat/`, so each mode's
+gateway run can be set against the same mode's gateway run in another
+pass, which the direct runs the checks above use as their drift cannot
+do. Each cell is pass 1 / pass 2 (point estimates; pass 1's intervals
+are in the table above).
+
+|  | `none` | `everysec` | `always` |
+|--|------:|------:|------:|
+{{- range .Rows}}
+| {{.Name}} |{{range .Values}} {{.}} |{{end}}
+{{- end}}
+
+How far a mode's added latency moved between the passes (the gateway
+drift), against the direct runs' largest spread within a pass
+({{$m9.DriftMax}} ms):
+
+| Metric | Gateway drift (ms) | Largest for | Per mode (ms) |
+|--------|-------------------:|-------------|---------------|
+{{- range .Moves}}
+| {{.Metric}} | {{.Largest}} | `{{.Mode}}` | {{.PerMode}} |
+{{- end}}
+
+The latency hypotheses read with both passes (a cost no larger than the
+gateway drift in either pass is unresolved, and so are two passes on
+either side of the threshold):
+
+| Cost | Pass 1 | Pass 2 | Gateway drift | Threshold | Reading |
+|------|-------:|-------:|--------------:|----------:|---------|
+{{- range .Checks}}
+| `{{.Mode}}` {{.Metric}} | {{.Pass1}} ms | {{.Pass2}} ms | {{.Drift}} ms | {{.Threshold}} ms | {{.Reading}} |
+{{- end}}
+
+The checks in the hypotheses table above are the pre-stated ones and
+stand as written; this pass was run after them and changes no verdict
+there. It does change what the `everysec` verdict means (see the reading
+below).
+{{end}}{{if .Reading}}
+**Reading the runs.**
+
+{{range .Reading}}- {{.}}
+{{end}}{{if .Complete}}{{$n := (.Run "none").Chaos}}{{$e := (.Run "everysec").Chaos}}{{$a := (.Run "always").Chaos}}{{$eb := (.Run "everysec").Bench}}{{$ab := (.Run "always").Bench}}
+- An append-only file turns the restart from a reset into a non-event
+  for the budget. Without one, Redis came back without {{$n.Lost}} of the
+  key's spend and the key spent its budget a second time (overshoot
+  {{$n.Overshoot}}). With either fsync policy Redis forgot {{$e.Lost}}, and the
+  overshoot at the end ({{$e.Overshoot}}) is what the outage spent on grace
+  ({{$e.OutageSpent}}, bound {{$e.OutageBound}}): the restart added nothing.
+  `everysec` hands each write to the kernel before Redis replies and
+  fsyncs once a second, so a killed Redis process, which is what this
+  schedule's SIGKILL is, loses nothing it acknowledged: the bytes are in
+  the kernel's page cache and the restarted Redis reads them back. What
+  `everysec` risks is a crash of the machine or its kernel, which can
+  lose the last second or so of writes, and writes Redis holds back while
+  an earlier fsync is late (its delayed-fsync count). A container kill
+  produces neither, so the one-second term in the bound was never
+  exercised: the hypothesis held without being tested at its edge.
+- How long the fleet stays degraded after a restart is set by two retry
+  timers, not by loading the file. Redis replayed its append-only file
+  (which held {{$e.AOFSize}} by the end of the run, less at the restart) in
+  {{$e.AOFLoaded}}, at the end of the {{$e.Ready}} from `docker start` to ready, and no
+  replica's call landed in that window, so none read a `LOADING` reply
+  (the integration test is what covers that path). Every mode, the one
+  without a file included, then stayed degraded for about two seconds
+  ({{$n.Degraded}}, {{$e.Degraded}}, {{$a.Degraded}}), and the replicas went on logging the
+  outage's DNS error after Redis was ready. After enough failed dials
+  go-redis's connection pool stops dialling, returns its last dial error
+  to every caller and retries once a second in the background; the
+  gateway's limiter, budget and cache each probe Redis once per one-second
+  retry interval; the two waits add up. The
+  cache is bypassed until its probe succeeds, which is why the hit rate
+  of repeats after the restart was {{$e.RepeatHitRate}} with `everysec` rather than
+  the 95% expected: the entries had survived in Redis, but the replicas
+  were not asking yet. The hypothesis assumed the replicas would use
+  Redis again as soon as it answered.
+- `always` costs about {{$ab.CostTotalP50.Point}} ms at p50 and {{$ab.CostTotalP99.Point}} ms at p99 on the
+  non-streaming total: with `appendfsync always` Redis writes and fsyncs
+  the file before it replies, and each request's limiter and budget calls
+  wait for that, here on the container's overlay filesystem, far past the
+  0.2 ms hoped for at p99. Redis counts delayed fsyncs only under
+  `everysec`; under `always` a slow disk shows up only as this wait.
+- `everysec`'s latency hypothesis is judged "no" by the check fixed
+  before the run, on its streaming TTFT costs ({{$eb.CostTTFTP50.Point}} ms at p50, {{$eb.CostTTFTP99.Point}} ms
+  at p99), which exceed 0.1 ms by a few hundredths (the compose-default
+  rule, which allows 0.5 ms, passes it). The same run puts its
+  non-streaming p50 cost at {{$eb.CostTotalP50.Point}} ms, a saving `everysec` cannot cause and
+  larger than either excess. The direct runs, which the check uses as the
+  drift, moved by no more than {{.DriftMax}} ms; the gateway runs move between runs by more
+  than that. So the honest reading is that `everysec`'s cost is not
+  resolved from zero at the 0.1 to 0.15 ms level by one run per mode, not
+  that it was measured above 0.1 ms.{{with .Second}} The second pass bears
+  this out: there `everysec`'s TTFT costs read {{(index .Checks 2).Pass2}} and {{(index .Checks 3).Pass2}} ms, under
+  0.1 ms, and a mode's added total p99 moved by up to
+  {{(index .Moves 1).Largest}} ms between passes, so at 0.1 ms the
+  hypothesis is unresolved, not failed. `always`'s cost, milliseconds,
+  is far outside that movement in both passes.{{end}} Either way
+  `everysec` is far under the 0.5 ms the rule allows, and the rule picks
+  it in both passes.
+{{with .SlowClass "timeout"}}- Q6's slow stretch after the Redis kill, now read from the logs:
+  calls on connections the replicas had open to Redis timed out
+  ({{.Lines}} lines, from {{.First}} s to {{.Last}} s after the kill), each waiting out its
+  store timeout{{end}}{{with .SlowClass "dns"}}. From {{.First}} s Docker no longer resolved the name, so
+  every new connection failed at once with a DNS error ({{.Lines}} lines to
+  the end of the outage, {{.PoolLines}} of them from go-redis's pool). The stretch
+  ends when the last connection opened before the kill has timed out;
+  after that the outage costs no latency, only fast failures.{{end}}
+{{end}}{{end}}
+{{range .Runs}}{{$mode := .Mode}}{{with .Chaos}}- `{{$mode}}` chaos: commit `{{.Meta.Commit}}`, run {{.Meta.Date}}, `{{.Meta.Command}}`; {{.Hardware}}.
+{{end}}{{with .Bench}}- `{{$mode}}` bench: commit `{{.Meta.Commit}}`, run {{.Meta.Date}}, `{{.Meta.Command}}`{{if .RedisArgs}} (Redis `{{.RedisArgs}}`){{end}}; {{.Hardware}}.
+{{end}}{{end}}{{with .Second}}{{range .Runs}}{{$mode := .Mode}}{{with .Bench}}- `{{$mode}}` bench, second pass: commit `{{.Meta.Commit}}`, run {{.Meta.Date}}, `{{.Meta.Command}}`{{if .RedisArgs}} (Redis `{{.RedisArgs}}`){{end}}; {{.Hardware}}.
+{{end}}{{end}}{{end}}- Cost: $0 (fake provider; the budget's dollars are its made-up price).
+{{else}}
+Not measured yet. Run `make chaos-persist` and `make bench-persist`, then
+`make results`.
+{{end}}
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -990,9 +1210,22 @@ observed.
 {{else}}
 - Budget reconciliation under a flapping store: not measured yet
   (`make chaos-flap`).
-{{end}}- **Budgets reset on a Redis restart.** Redis runs without persistence,
-  so the ledger comes back empty (Q6's overshoot after the restart); M9
-  measures what an append-only file costs.
+{{end}}- **About two seconds degraded after Redis comes back.** go-redis's
+  dial backoff and the gateway's one-second probe run one after the
+  other, so a replica keeps using its local limits, grace and no cache for
+  about two seconds after Redis is ready (M9, every mode). The cache is
+  the visible cost: hits lost, not wrong answers.
+- **`everysec` can lose the last second of charges to a machine crash.**
+  A killed Redis process loses nothing it acknowledged (the kernel holds
+  the written bytes), which is the case M9's container kill tested; a
+  crash of the machine or kernel in the middle of a key's spending
+  forgets up to about a second of its writes, and no run here produces
+  one. With no append-only file (`REDIS_PERSIST=none`, Q6) a restart
+  forgets every budget.
+- **A `LOADING` Redis was not reached under load.** M9's append-only file
+  loaded in tens of milliseconds and no replica called during it; the integration
+  test shows a `LOADING` reply degrades like an unreachable store and
+  recovers, but no chaos run has a Redis that loads for seconds.
 
 ## To measure
 
@@ -1042,6 +1275,24 @@ observed.
 - Q6 with GCRA: set `ratelimit.algorithm: gcra` in `chaos/switchboard.yaml`
   and run `make chaos` once the GCRA limiter is implemented
   (`internal/ratelimit/gcra.go`).
+{{- if not .M9}}
+- M9 budgets across a Redis restart per append-only mode: `make chaos-persist`
+  and `make bench-persist`, then `make results`.
+{{- else}}{{range .M9.ToMeasure}}
+- {{.}}
+{{- end}}{{end}}
+{{- if not (and .M9 .M9.Second)}}
+- M9's `everysec` cost against the gateway's own run-to-run drift: a
+  second `bench-persist` pass
+  (`OUT_ROOT=eval/results/m9-persist/bench-repeat make bench-persist`)
+  sets each mode against itself across passes, which the direct runs
+  cannot (about 11 minutes, $0).
+{{- else}}
+- M9's `everysec` cost resolved at 0.1 ms: two passes disagree and the
+  gateway's p99 moves by about a millisecond between passes, so it needs
+  several passes per mode, interleaved, and a test on their spread
+  rather than on one run's bootstrap interval.
+{{- end}}
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with
   `claude-haiku-5-5`).

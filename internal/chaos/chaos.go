@@ -75,6 +75,13 @@ type Meta struct {
 	// Schedule is the kill schedule: "q6" (or empty, from runs before
 	// M8) or "flap".
 	Schedule string `json:"schedule,omitempty"`
+	// RedisPersist is the append-only file's mode (M9): "none",
+	// "everysec" or "always"; empty for runs from before M9, which had
+	// none.
+	RedisPersist string `json:"redis_persist,omitempty"`
+	// Redis is how Redis ran: its append-only settings, the filesystem
+	// type of its /data directory and the file's size at the end.
+	Redis *RedisMeta `json:"redis,omitempty"`
 	// Limit is the rate-limited key's request limit.
 	Limit struct {
 		Model         string  `json:"model"`
@@ -101,6 +108,14 @@ type Meta struct {
 		Tokens        int    `json:"tokens"`
 		TokenInterval string `json:"token_interval"`
 	} `json:"fake_provider"`
+}
+
+// RedisMeta is how Redis ran in a chaos run.
+type RedisMeta struct {
+	AppendOnly  string `json:"appendonly"`
+	AppendFsync string `json:"appendfsync"`
+	DataFS      string `json:"data_fs"`
+	AOFBytes    int64  `json:"aof_bytes_at_end"`
 }
 
 // Event is one docker action of the kill schedule, as chaos/run.sh
@@ -157,6 +172,9 @@ type Summary struct {
 	// Flap summarises the budget across the Redis outages; nil for a run
 	// without a disconnect.
 	Flap *FlapResult `json:"flap,omitempty"`
+	// Store is what the replicas' and Redis's logs say about each Redis
+	// outage and restart; nil for a run that kept no logs.
+	Store *StoreLog `json:"store,omitempty"`
 }
 
 // Reference is the baseline for the steady-state rule.

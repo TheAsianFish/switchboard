@@ -29,7 +29,20 @@
 # while it is off the network) into snapshots.json, so the report can set
 # Redis's spent against the fake provider's ledger phase by phase.
 #
+# REDIS_PERSIST=none|everysec|always is M9's arm of the Q6 schedule
+# (`make chaos-persist`, PLAN.md M9): Redis runs with the append-only file
+# off, or on with that fsync policy, in a fresh /data volume, so the
+# restart at 75 s replays what the file holds. Without REDIS_PERSIST the
+# run is Q6's (no file) and writes eval/results/q6-chaos/; with it, the
+# results go to eval/results/m9-persist/chaos-<mode>/.
+#
+# Every run keeps each replica's and Redis's log (docker's timestamps
+# prefixed) under logs/ in the results directory, so the report can read
+# when each replica's limiter, budget and cache gave up on Redis and when
+# they found it again, and with what error.
+#
 #   chaos/run.sh                                  # the full run (make chaos, about 3 minutes)
+#   REDIS_PERSIST=everysec chaos/run.sh           # M9's everysec arm
 #   SCALE=0.25 OUT=/tmp/q6 chaos/run.sh           # a 30 s smoke: schedule and duration × 0.25
 #   KEEP=1 chaos/run.sh                           # leave the fleet up afterwards
 #   SCHEDULE=flap OUT=eval/results/m8-flap/before chaos/run.sh   # make chaos-flap RUN=before
@@ -46,16 +59,32 @@ q6 | flap) ;;
 	exit 2
 	;;
 esac
+persist=${REDIS_PERSIST:-}
+case $persist in
+"") appendonly=no fsync=everysec ;;
+none) appendonly=no fsync=everysec ;;
+everysec | always) appendonly=yes fsync=$persist ;;
+*)
+	echo "q6: REDIS_PERSIST must be none, everysec or always, got $persist" >&2
+	exit 2
+	;;
+esac
+export REDIS_APPENDONLY=$appendonly REDIS_APPENDFSYNC=$fsync
 main_rate=${MAIN_RATE:-200}
 limited_rate=${LIMITED_RATE:-30}
 budget_rate=${BUDGET_RATE:-10}
-out=${OUT:-eval/results/q6-chaos}
+default_out=eval/results/q6-chaos
 command="make chaos"
+if [[ -n $persist ]]; then
+	default_out=eval/results/m9-persist/chaos-$persist
+	command="REDIS_PERSIST=$persist make chaos"
+fi
+out=${OUT:-$default_out}
 if [[ $sched == flap ]]; then
 	command="make chaos-flap RUN=$(basename "$out")"
 fi
 if [[ -n ${SCALE:-}${MAIN_RATE:-}${LIMITED_RATE:-}${BUDGET_RATE:-} ]]; then
-	command="SCHEDULE=$sched SCALE=$scale MAIN_RATE=$main_rate LIMITED_RATE=$limited_rate BUDGET_RATE=$budget_rate chaos/run.sh"
+	command="SCHEDULE=$sched SCALE=$scale MAIN_RATE=$main_rate LIMITED_RATE=$limited_rate BUDGET_RATE=$budget_rate${persist:+ REDIS_PERSIST=$persist} chaos/run.sh"
 fi
 scaled() { awk -v s="$scale" -v v="$1" 'BEGIN { printf "%.3f", s * v }'; }
 if [[ $sched == flap ]]; then
@@ -82,7 +111,7 @@ cleanup() {
 		"${compose[@]}" logs --tail 20 switchboard-1 switchboard-2 switchboard-3 lb >&2 || true
 	fi
 	if [[ -z ${KEEP:-} ]]; then
-		"${compose[@]}" down --remove-orphans >/dev/null 2>&1 || true
+		"${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
 	fi
 	exit "$status"
 }
@@ -136,14 +165,13 @@ snapshot() {
 }
 
 # act <planned offset> <action> <service> <phase it starts>: runs the
-# docker action at t0 + offset and appends it to the events file. In the
-# flap schedule a snapshot of Redis is taken 0.5 s before the action.
+# docker action at t0 + offset and appends it to the events file. A
+# snapshot of Redis is taken 0.5 s before the action (none while Redis is
+# killed: there is no process to ask).
 act() {
 	local planned=$1 action=$2 target=$3 phase=$4 issued done
-	if [[ $sched == flap ]]; then
-		sleep_until "$(awk -v t="$t0" -v o="$(scaled "$planned")" 'BEGIN { printf "%.6f", t + o - 0.5 }')"
-		snapshot "$action $target"
-	fi
+	sleep_until "$(awk -v t="$t0" -v o="$(scaled "$planned")" 'BEGIN { printf "%.6f", t + o - 0.5 }')"
+	snapshot "$action $target"
 	sleep_until "$(awk -v t="$t0" -v o="$(scaled "$planned")" 'BEGIN { printf "%.6f", t + o }')"
 	issued=$(now)
 	case $action in
@@ -202,7 +230,9 @@ schedule() {
 
 go build -o "$bin" ./cmd/switchboard
 "${compose[@]}" build switchboard-1 >/dev/null
-"${compose[@]}" up -d --force-recreate >/dev/null 2>&1
+# A fresh anonymous /data volume for Redis, so an append-only file from an
+# earlier run is never replayed into this one.
+"${compose[@]}" up -d --force-recreate --renew-anon-volumes >/dev/null 2>&1
 wait_for "fake provider" curl -fsS "$fake/healthz"
 for port in 29091 29092 29093; do
 	wait_for "replica admin on $port" curl -fsS "http://127.0.0.1:$port/metrics"
@@ -234,14 +264,21 @@ cat "$tmp"/main.err "$tmp"/limited.err "$tmp"/budget.err >&2
 sleep 1
 overview end
 curl -fsS "$fake/ledger" | gzip -9n >"$tmp/ledger.json.gz"
-if [[ $sched == flap ]]; then
-	snapshot end
-	{
-		echo "["
-		sed '$!s/$/,/' "$tmp/snapshots.jsonl"
-		echo "]"
-	} >"$tmp/snapshots.json"
-fi
+snapshot end
+{
+	echo "["
+	sed '$!s/$/,/' "$tmp/snapshots.jsonl"
+	echo "]"
+} >"$tmp/snapshots.json"
+# Each service's whole log, both lives of a restarted container included,
+# every line prefixed with docker's receive time.
+mkdir -p "$tmp/logs"
+for svc in switchboard-1 switchboard-2 switchboard-3 redis; do
+	"${compose[@]}" logs --no-color --no-log-prefix --timestamps "$svc" 2>/dev/null | gzip -9n >"$tmp/logs/$svc.log.gz"
+done
+# Where the append-only file lives, and on what filesystem.
+data_fs=$("${compose[@]}" exec -T redis stat -f -c %T /data 2>/dev/null || echo unknown)
+aof_bytes=$("${compose[@]}" exec -T redis sh -c 'du -sb /data/appendonlydir 2>/dev/null | cut -f1' 2>/dev/null || true)
 
 {
 	echo "["
@@ -257,6 +294,8 @@ cat >"$tmp/meta.json" <<JSON
   "duration_seconds": $duration,
   "time_scale": $scale,
   "schedule": "$sched",
+  "redis_persist": "${persist:-none}",
+  "redis": {"appendonly": "$appendonly", "appendfsync": "$fsync", "data_fs": "$data_fs", "aof_bytes_at_end": ${aof_bytes:-0}},
   "limit": {"model": "fake-limited", "rate": 10, "period_seconds": 1},
   "budget": {"model": "fake-budget", "usd": "0.20", "grace_usd": "0.01", "grace_refill": "1h", "input_price": "3", "output_price": "15"},
   "fake_provider": {"latency": "20ms", "tokens": 30, "token_interval": "5ms"}
@@ -265,8 +304,10 @@ JSON
 
 mkdir -p "$out"
 rm -f "$out"/*.json "$out"/*.json.gz "$out"/*.jsonl.gz
+rm -rf "$out/logs"
 cp "$tmp"/meta.json "$tmp"/events.json "$tmp"/ledger.json.gz "$out"/
 cp "$tmp"/main.json "$tmp"/limited.json "$tmp"/budget.json "$tmp"/*.jsonl.gz "$out"/
 cp "$tmp"/overview-*.json "$tmp"/snapshots.json "$out"/ 2>/dev/null || true
+cp -r "$tmp/logs" "$out/"
 "$bin" chaos report --dir "$out"
 echo "q6: results in $out. Run 'make results' to render RESULTS.md." >&2

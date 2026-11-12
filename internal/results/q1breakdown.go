@@ -43,9 +43,15 @@ type BreakdownMeta struct {
 	// "" if the generator could not send one.
 	CacheDirective string `json:"cache_directive"`
 	// Redis and Jaeger are the container images used, "" if none was.
-	Redis  string      `json:"redis"`
-	Jaeger string      `json:"jaeger"`
-	Ollama *OllamaMeta `json:"ollama"`
+	Redis  string `json:"redis"`
+	Jaeger string `json:"jaeger"`
+	// RedisPersist is Redis's append-only mode (M9's bench-persist): "none",
+	// "everysec" or "always"; RedisArgs the server's arguments and
+	// RedisDataFS the filesystem type of its /data. Empty before M9.
+	RedisPersist string      `json:"redis_persist"`
+	RedisArgs    string      `json:"redis_args"`
+	RedisDataFS  string      `json:"redis_data_fs"`
+	Ollama       *OllamaMeta `json:"ollama"`
 	// Configs lists every configuration, measured or not.
 	Configs []ConfigMeta `json:"configs"`
 }
@@ -119,6 +125,9 @@ type Q1Breakdown struct {
 	Resamples int
 
 	machines []string
+	// driftP50 and driftP99 are the largest spread between two direct runs
+	// at one rate and mode, ms; 0 without a rate and mode run twice.
+	driftP50, driftP99 float64
 }
 
 // Est is a difference in ms with its bootstrap 95% interval.
@@ -260,6 +269,22 @@ func (q *Q1Breakdown) hardware() []string {
 
 // loadBreakdown reads dir. Without breakdown result files it returns nil.
 func loadBreakdown(dir string, meta *BreakdownMeta) (*Q1Breakdown, error) {
+	runs, err := loadBreakdownRuns(dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(runs) == 0 {
+		return nil, nil
+	}
+	if meta == nil {
+		return nil, fmt.Errorf("results: %s has runs but meta.json has no breakdown", dir)
+	}
+	return buildBreakdown(*meta, runs)
+}
+
+// loadBreakdownRuns reads every breakdown result file in dir, in name
+// order; a missing dir gives none.
+func loadBreakdownRuns(dir string) ([]*bkRun, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -279,13 +304,7 @@ func loadBreakdown(dir string, meta *BreakdownMeta) (*Q1Breakdown, error) {
 		}
 		runs = append(runs, r)
 	}
-	if len(runs) == 0 {
-		return nil, nil
-	}
-	if meta == nil {
-		return nil, fmt.Errorf("results: %s has runs but meta.json has no breakdown", dir)
-	}
-	return buildBreakdown(*meta, runs)
+	return runs, nil
 }
 
 // loadBreakdownRun reads <name>.json, named <config>-<mode>-<rate> or
@@ -728,6 +747,7 @@ func buildBreakdown(meta BreakdownMeta, runs []*bkRun) (*Q1Breakdown, error) {
 			q.Checks = append(q.Checks, c)
 		}
 	}
+	q.driftP50, q.driftP99 = maxSpread50, maxSpread99
 	q.Reading = reading(q, steps, maxSpread50, maxSpread99, cacheNotes)
 	if len(ollamaNotes) > 0 {
 		// Ollama's CPU per request tells how many embeddings a request

@@ -199,7 +199,9 @@ func (d *Degrading) recover(ctx context.Context, seen uint64) {
 		return
 	}
 	d.degraded = false
-	telemetry.Logger(ctx).Info("rate limit store recovered, using shared limits")
+	// Warn like the failure: a fleet logging at warn records both ends of
+	// every outage.
+	telemetry.Logger(ctx).Warn("rate limit store recovered, using shared limits")
 	if d.OnState != nil {
 		d.OnState(false)
 	}

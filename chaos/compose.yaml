@@ -28,9 +28,12 @@ x-replica-env: &replica-env
 services:
   redis:
     image: redis:8
-    # No persistence, as in deploy/compose.yaml: a killed Redis comes back
-    # empty, without the cache, the limit counters or the budget ledger.
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # No snapshots. The append-only file is off unless chaos/run.sh sets
+    # REDIS_PERSIST (M9): with it off a killed Redis comes back empty,
+    # without the cache, the limit counters or the budget ledger; with it
+    # on, Redis replays the file from its /data volume when it starts
+    # again, and answers LOADING until it has.
+    command: ["redis-server", "--save", "", "--appendonly", "${REDIS_APPENDONLY:-no}", "--appendfsync", "${REDIS_APPENDFSYNC:-everysec}"]
     restart: "no"
 
   fake-provider:

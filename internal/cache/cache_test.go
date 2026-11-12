@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"sync"
@@ -14,6 +16,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/cache"
 	"github.com/TheAsianFish/switchboard/internal/core"
 	"github.com/TheAsianFish/switchboard/internal/embed"
+	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
 
 // target is the route every test request is looked up under.
@@ -433,6 +436,148 @@ func TestStoreOutageBypasses(t *testing.T) {
 	clk.add(time.Second)
 	if l := c.Lookup(context.Background(), "a", target, cache.ModeExact, r); l.Status != cache.StatusMiss {
 		t.Errorf("after the interval: %+v", l)
+	}
+}
+
+// logBuffer collects log output written from several goroutines.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// The first store call that succeeds after a failure logs, at warn like the
+// failure, that the store is back; later ones do not.
+func TestStoreRecoveryLogged(t *testing.T) {
+	t.Parallel()
+	const recovered = `level=WARN msg="cache store reachable again"`
+	tests := []struct {
+		name string
+		// outage takes the store down, lets the bypass pass and brings it
+		// back. It is given a lookup made before the outage.
+		outage bool
+		// fillFirst fills the lookup made before the outage once the store
+		// is back, so the first call to succeed is a Set.
+		fillFirst bool
+		wantOp    string
+	}{
+		{name: "no outage logs nothing"},
+		{name: "get after an outage", outage: true, wantOp: "get"},
+		{name: "set after an outage", outage: true, fillFirst: true, wantOp: "set"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			logs := &logBuffer{}
+			ctx := telemetry.WithRequest(context.Background(), slog.New(slog.NewTextHandler(logs, nil)), "req_test")
+			clk := &clock{t: time.Unix(1_700_000_000, 0)}
+			kv := &failingKV{KV: cache.NewMemoryKV(10, clk.now)}
+			c := cache.New(cache.Options{KV: kv, TTL: time.Hour, RetryInterval: time.Second, Now: clk.now})
+			before := c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", "before"))
+			if before.Status != cache.StatusMiss {
+				t.Fatalf("lookup before the outage: %+v", before)
+			}
+			if tt.outage {
+				kv.set(true)
+				if l := c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", "during")); l.Status != cache.StatusError {
+					t.Fatalf("lookup in the outage: %+v", l)
+				}
+				kv.set(false)
+				clk.add(time.Second)
+			}
+			if tt.fillFirst {
+				c.Fill(ctx, before, answer)
+				c.Wait()
+			}
+			for i := range 3 {
+				l := c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", fmt.Sprintf("after %d", i)))
+				if l.Status != cache.StatusMiss {
+					t.Fatalf("lookup after the outage: %+v", l)
+				}
+				c.Fill(ctx, l, answer)
+				c.Wait()
+			}
+			out := logs.String()
+			want := 0
+			if tt.wantOp != "" {
+				want = 1
+			}
+			if n := strings.Count(out, recovered); n != want {
+				t.Fatalf("%d recovery lines, want %d; logs:\n%s", n, want, out)
+			}
+			if want == 1 && !strings.Contains(out, recovered+" request_id=req_test op="+tt.wantOp) {
+				t.Errorf("recovery line without op=%s; logs:\n%s", tt.wantOp, out)
+			}
+		})
+	}
+}
+
+// slowKV holds the first Get until released, so a call can be in flight
+// while another one fails.
+type slowKV struct {
+	*failingKV
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *slowKV) Get(ctx context.Context, k string) ([]byte, bool, error) {
+	first := false
+	s.once.Do(func() { first = true })
+	if first {
+		close(s.entered)
+		<-s.release
+		return s.KV.Get(ctx, k)
+	}
+	return s.failingKV.Get(ctx, k)
+}
+
+// A call that was in flight when the store failed, and succeeds afterwards,
+// says nothing about the store now: it must not log a recovery in the middle
+// of the outage. The first call that starts after the failure and succeeds
+// does.
+func TestStoreRecoveryIgnoresCallsFromBeforeTheFailure(t *testing.T) {
+	t.Parallel()
+	const recovered = `level=WARN msg="cache store reachable again"`
+	logs := &logBuffer{}
+	ctx := telemetry.WithRequest(context.Background(), slog.New(slog.NewTextHandler(logs, nil)), "req_test")
+	clk := &clock{t: time.Unix(1_700_000_000, 0)}
+	kv := &slowKV{failingKV: &failingKV{KV: cache.NewMemoryKV(10, clk.now)}, entered: make(chan struct{}), release: make(chan struct{})}
+	c := cache.New(cache.Options{KV: kv, TTL: time.Hour, Timeout: time.Minute, RetryInterval: time.Second, Now: clk.now})
+
+	done := make(chan *cache.Lookup)
+	go func() { done <- c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", "in flight")) }()
+	<-kv.entered
+	kv.set(true)
+	if l := c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", "fails")); l.Status != cache.StatusError {
+		t.Fatalf("lookup in the outage: %+v", l)
+	}
+	close(kv.release)
+	if l := <-done; l.Status != cache.StatusMiss {
+		t.Fatalf("lookup in flight: %+v", l)
+	}
+	if n := strings.Count(logs.String(), recovered); n != 0 {
+		t.Fatalf("%d recovery lines from a call that started before the failure, want 0; logs:\n%s", n, logs.String())
+	}
+
+	kv.set(false)
+	clk.add(time.Second)
+	if l := c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", "after")); l.Status != cache.StatusMiss {
+		t.Fatalf("lookup after the outage: %+v", l)
+	}
+	if n := strings.Count(logs.String(), recovered); n != 1 {
+		t.Fatalf("%d recovery lines after the outage, want 1; logs:\n%s", n, logs.String())
 	}
 }
 

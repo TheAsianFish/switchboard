@@ -40,10 +40,16 @@ x-replica-env: &replica-env
 services:
   redis:
     image: redis:8
-    # No persistence: limits and budgets live in memory, so killing Redis
-    # loses them. The degrade policy and Q2's outage run are about exactly
-    # that case.
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # An append-only file fsynced every second, so a restarted Redis
+    # replays the budgets, limit counters and cache instead of coming back
+    # empty (without it a restart hands every spent key its budget again).
+    # everysec is what M9's rule, fixed before its runs, picked: always
+    # added milliseconds at p99 on a container filesystem, everysec nothing
+    # resolvable at 0.5 ms (RESULTS.md, M9). The file lives in a named
+    # volume, so it also survives `docker compose down`.
+    command: ["redis-server", "--save", "", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis-data:/data
     ports:
       - "127.0.0.1:6379:6379"
 
@@ -130,3 +136,4 @@ services:
 
 volumes:
   ollama:
+  redis-data:

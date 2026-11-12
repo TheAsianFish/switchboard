@@ -82,6 +82,13 @@ type Cache struct {
 	downUntil      atomic.Int64
 	embedDownUntil atomic.Int64
 	indexDownUntil atomic.Int64
+	// storeDown is set by a store failure and cleared, with a log line, by
+	// the first store call that succeeds after it, so the end of an outage
+	// is recorded as well as its start. storeFailures counts the failures:
+	// a call that started before the latest one says nothing about the
+	// store now, as in budget.Degrading.
+	storeDown     atomic.Bool
+	storeFailures atomic.Uint64
 
 	// fillMu orders Fill's Add against Close's Wait: a WaitGroup must not
 	// gain work while someone waits on it.
@@ -177,6 +184,7 @@ func (c *Cache) Lookup(ctx context.Context, tenant string, up Upstream, mode Mod
 	l := &Lookup{Status: StatusMiss, keys: keys, mode: mode, tools: tools}
 
 	start := c.opts.Now()
+	seen := c.storeFailures.Load()
 	sctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	raw, found, err := c.opts.KV.Get(sctx, exactKey(keys))
 	cancel()
@@ -185,6 +193,7 @@ func (c *Cache) Lookup(ctx context.Context, tenant string, up Upstream, mode Mod
 		c.storeFailed(ctx, "get", err)
 		return c.record(&Lookup{Status: StatusError, Reason: "store unavailable"})
 	}
+	c.storeAnswered(ctx, "get", seen)
 	if found {
 		if e, err := decode(raw); err == nil {
 			l.Status, l.Response = StatusExact, e.response()
@@ -323,12 +332,14 @@ func (c *Cache) Fill(ctx context.Context, l *Lookup, resp *core.Response) {
 		defer func() { telemetry.EndSpan(span, spanErr) }()
 		fctx, cancel := context.WithTimeout(sctx, c.opts.Timeout)
 		defer cancel()
+		seen := c.storeFailures.Load()
 		if err := c.opts.KV.Set(fctx, exactKey(l.keys), raw, c.opts.TTL); err != nil {
 			spanErr = err
 			c.opts.Metrics.CacheFill("error")
 			c.storeFailed(ctx, "set", err)
 			return
 		}
+		c.storeAnswered(ctx, "set", seen)
 		if l.mode == ModeSemantic && l.vec != nil {
 			idx, err := c.indexFor(len(l.vec))
 			if err == nil {
@@ -385,8 +396,25 @@ func (c *Cache) storeFailed(ctx context.Context, op string, err error) {
 		return
 	}
 	c.downUntil.Store(c.opts.Now().Add(c.opts.RetryInterval).UnixNano())
+	c.storeFailures.Add(1)
+	c.storeDown.Store(true)
 	telemetry.Logger(ctx).Warn("cache store failed; bypassing the cache", slog.String("op", op),
 		slog.String("error", err.Error()), slog.Duration("for", c.opts.RetryInterval))
+}
+
+// storeAnswered runs after a store call that succeeded; seen is the failure
+// count when the call started. The first one after a failure logs that the
+// store is back, at the failure's level, so a fleet logging at warn records
+// both ends of every outage. A call that started before the latest failure
+// (one in flight when the store went away) does not count: its success
+// would announce a recovery in the middle of the outage.
+func (c *Cache) storeAnswered(ctx context.Context, op string, seen uint64) {
+	if c.storeFailures.Load() != seen {
+		return
+	}
+	if c.storeDown.Load() && c.storeDown.CompareAndSwap(true, false) {
+		telemetry.Logger(ctx).Warn("cache store reachable again", slog.String("op", op))
+	}
 }
 
 // indexFailed bypasses the semantic layer for RetryInterval after a vector

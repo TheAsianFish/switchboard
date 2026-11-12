@@ -532,6 +532,77 @@ What the numbers and the code say:
   numbers, by a rule written here before the run: the cheapest mode whose
   overshoot is within the grace bound plus one second of spend and whose
   added p99 is under 0.5 ms.
+- *How each number is read and each hypothesis judged (fixed before the
+  full runs).* `make chaos-persist` runs Q6's schedule and streams once per
+  mode (`REDIS_PERSIST=none|everysec|always make chaos`), Redis in a fresh
+  container whose append-only file lives on the container's own
+  filesystem, since `redis:8` declares no volume (`stat -f` reports
+  overlayfs in the smoke run). Snapshots of the budgeted key are taken
+  before every docker action, as in M8.
+  - *Overshoot* is Q6's: the provider ledger's spend for the key from the
+    start to the end of the run, minus $0.20. `everysec` holds at
+    $0.02465 or less (two live replicas' grace at the kill, $0.0200, plus
+    one second of the stream's offered spend, 10 × $0.000465); `always`
+    holds at $0.0200 or less.
+  - *What the restart lost* is the reconciliation gap (ledger minus
+    Redis `spent`) at the snapshot 0.5 s before replica 2 starts, 14.5 s
+    after Redis did: by then pending grace charges have been flushed, so
+    a gap is spend Redis forgot.
+  - *Errors while Redis answers `LOADING`*: the main stream's error rate
+    and the other two streams' errors other than 429 and 402 in the phase
+    after the restart, beside the number of replica log lines that carry a
+    `LOADING` error. If no replica logged one, the run did not exercise the
+    `LOADING` path and that part of the hypothesis rests on the integration
+    test; it is reported as such, not as held.
+  - *Hit rate of repeats* in the phase after the restart; holds at 95% or
+    more.
+  - *Degraded seconds after the restart*: from the start of Redis until the
+    last live replica's budget, limiter and cache logged their recovery
+    (the replicas' logs at warn level, kept with the run). Reported, with
+    no threshold.
+  - *Latency* (`make bench-persist`): per mode, Q1's breakdown method for
+    the `budget` config (limits and budget on) at 200 requests per second,
+    30 s after 2 s warm-up, non-streaming total and streaming TTFT, each
+    against the pooled direct runs before and after it, with Q1's 1,000
+    resample bootstrap intervals. A mode's *cost* is its added latency
+    minus `none`'s at the same percentile, with an interval from
+    resampling all four sample sets. The *drift* is the largest spread
+    between the two direct runs of any mode at that percentile in the same
+    run (Q1's committed figure, 0.09 ms at p50 and 0.12 ms at p99, is
+    shown beside it). A cost no larger than the drift is *unresolved*;
+    otherwise it holds if it is under the threshold (0.1 ms at p50 and p99
+    for `everysec`, 0.2 ms at p99 for `always`) and fails by the excess if
+    not. Both metrics must hold for the hypothesis to hold.
+  - *The rule.* Modes in the order `none`, `everysec`, `always`; the
+    default is the first whose overshoot is at most $0.02465 and whose
+    larger p99 cost (of the two metrics) is under 0.5 ms; an unresolved
+    cost passes only if the drift itself is under 0.5 ms. `none` costs 0
+    by definition. If no mode passes, the default stays `none` and the
+    README says so.
+  - *Q6's slow stretch* is read from the `none` arm's logs (the Q6
+    configuration): the store errors each replica logged after the kill,
+    by class (timeout, DNS, refused, `LOADING`, closed) and by when they
+    started and stopped, including go-redis's own connection-pool lines.
+- *What the runs changed (after the runs).* The rule picked `everysec`,
+  now the default in `deploy/compose.yaml` (with a named volume). Three
+  readings differ from the hypotheses and are recorded as such in
+  RESULTS.md rather than reworded: no replica saw `LOADING` (the file
+  loaded in tens of milliseconds, before any call arrived), so the
+  `LOADING` path rests on the integration test; the hit rate of repeats
+  after the restart missed 95% because the replicas stay degraded about
+  two seconds after Redis is ready (go-redis's dial backoff, then the
+  gateway's one-second probe), not because entries were lost; and
+  `everysec`'s TTFT cost exceeded 0.1 ms by a few hundredths while its
+  non-streaming p50 cost was negative by more, so the drift the rule
+  used (the direct runs' spread) understates how much gateway runs move.
+  A second `bench-persist` pass, run afterwards and rendered beside the
+  first without changing the pre-stated verdicts, confirms it: there
+  `everysec`'s TTFT costs read +0.07 and +0.08 ms and `none`'s added
+  total p99 moved by 1.04 ms between passes, so `everysec` at 0.1 ms is
+  unresolved; `always` is over in both passes and the rule picks
+  `everysec` in both. Also, a container SIGKILL cannot lose what
+  `everysec` acknowledged (the bytes are in the page cache), so the
+  bound's one-second term was never exercised.
 
 **M10. Does a provider that stops answering ever open the breaker?**
 
@@ -1056,5 +1127,5 @@ Changes made while building:
 - [x] M6: Admin page, chaos and the overhead breakdown — admin JSON API on the loopback listener (keys, limits, spend, cache stats, router decisions, recent requests with trace links); React + TypeScript page embedded in the binary with Vitest tests; `chaos/run.sh` with the phased kill schedule and per-phase report; `make bench` extended to the per-feature breakdown. RESULTS.md answers Q1 in full and Q6. Done when the chaos run completes on a laptop with a report, the admin page shows a live fleet, and `make ui-check` is in CI.
 - [x] M7: Release readiness — `go install` path verified in a clean container, release archives, `release.yml` guarded by `v*` tags building the multi-arch image to GHCR, RELEASE.md with every maintainer step; README complete (what/why, demo GIF placeholder with capture instructions, quickstart for both SDKs, Mermaid architecture, design decisions and trade-offs, results table rendered from RESULTS.md, roadmap); RESULTS.md complete with every measured number, its method, cost and hardware, and every unmeasured one under "To measure" with its command. Done when a fresh clone runs the quickstart from the README alone and the release workflow dry-runs green.
 - [x] M8: Budget grace under a flapping store — `make chaos-flap` on the Q6 fleet: Redis cut off and reconnected eight times with its state kept (`docker network disconnect`), one replica killed while degraded, phases fixed in PLAN.md before the full run, the flaky `TestAbandonedHedgedRequestIsChargedForEveryAttempt` fixed at its cause first (five consecutive `make check` runs green), and a per-phase reconciliation of the fake provider's ledger against Redis's `spent`; run once at the commit before the fix; then grace as a time-refilled allowance per replica and key (`grace_refill`, fake-clock unit tests, the doc comments in `budget/degrade.go` corrected) and the same run again. Done when RESULTS.md holds both runs side by side with each hypothesis answered (overshoot about $0.24 and linear in outages before; at most replica processes × grace × (1 + T / refill) after, whatever the outage count, a restarted replica counted as a new process; the killed replica's lost pending spend measured against its bound), both raw results are committed, the double-charge and expired-hold cases are listed under known problems with what was observed, and `make chaos` still reproduces Q6.
-- [ ] M9: Budgets that survive a Redis restart, and what the fsync costs — `REDIS_PERSIST=none|everysec|always` arms of `make chaos` with M8's reconciliation column and the replicas' logs kept; `make bench-persist` (Q1's limits-and-budget configuration at 200 requests per second against each mode, bootstrap intervals as in Q1); an integration test that a `LOADING` reply degrades like an unreachable store and recovers. Done when RESULTS.md holds overshoot, error rate, degraded seconds after the restart and hit rate of repeats per mode beside the added p50 and p99 per mode, each hypothesis is answered (`everysec` at most the live replicas' grace plus one second of spend, about $0.025, and under 0.1 ms, a difference inside Q1's run-to-run drift reported as unresolved rather than as held; `always` at most grace and under 0.2 ms p99, or by how much not), the cause of Q6's slow stretch after the Redis kill is read from the kept logs, the compose default is the mode the pre-stated rule picks, and the README's roadmap line on budgets is replaced by the finding.
+- [x] M9: Budgets that survive a Redis restart, and what the fsync costs — `REDIS_PERSIST=none|everysec|always` arms of `make chaos` with M8's reconciliation column and the replicas' logs kept; `make bench-persist` (Q1's limits-and-budget configuration at 200 requests per second against each mode, bootstrap intervals as in Q1); an integration test that a `LOADING` reply degrades like an unreachable store and recovers. Done when RESULTS.md holds overshoot, error rate, degraded seconds after the restart and hit rate of repeats per mode beside the added p50 and p99 per mode, each hypothesis is answered (`everysec` at most the live replicas' grace plus one second of spend, about $0.025, and under 0.1 ms, a difference inside Q1's run-to-run drift reported as unresolved rather than as held; `always` at most grace and under 0.2 ms p99, or by how much not), the cause of Q6's slow stretch after the Redis kill is read from the kept logs, the compose default is the mode the pre-stated rule picks, and the README's roadmap line on budgets is replaced by the finding.
 - [ ] M10: First-token timeout and a stalled provider — a stall switch on `switchboard fake-provider`; `resilience.first_token_timeout` per provider (off by default), per attempt, cancelled by the first event, counted by the breaker and retried like a timeout; `make bench-stall` with steady, stalled and recovered phases, run before and after. Done when RESULTS.md holds both runs with per-phase latency, error kinds, time until the breaker is open on the replica and until it closes, each hypothesis answered (0 opens and no completed request today; open within 3 s plus five failures, refusals p99 under 5 ms with `Retry-After`, closed within a cooldown plus 1 s, and 0 timeouts fired on Q4's hedging-off arm, reported with its largest TTFT beside the timeout), a stall after the first event listed under known problems as not covered, a trace of a timed-out attempt is committed beside M4's, and the README documents the setting and when not to use it.

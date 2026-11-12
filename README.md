@@ -59,6 +59,7 @@ the method, the intervals, the hardware and the cost of every row.
 | [Q5: evaluated router](RESULTS.md#q5-evaluated-router) | `router` at its operating point: 72.2% (68.4–75.6) accuracy, gain over the random-mix line -0.8 points (95% CI -1.8 to +1.0), not clearly above the line | `make eval-router` |
 | [Q6: chaos](RESULTS.md#q6-chaos) | Replica kill: 6 errors (0.10%) in its phase; Redis down: 0 errors, p99 431.05 ms (steady 181.76 ms), 6 over-admissions (bound 6 per window), budget overshoot $0.0176 (grace bound $0.0200) | `make chaos` |
 | [M8: budget grace under a flapping store](RESULTS.md#m8-budget-grace-under-a-flapping-store) | Eight Redis outages on a spent budget: overshoot $0.2166 when grace reset every outage, $0.0362 with a refilled allowance (bound $0.0410); a replica killed while degraded lost $0.004185 before, $0 after | `make chaos-flap` |
+| [M9: budgets across a Redis restart](RESULTS.md#m9-budgets-across-a-redis-restart) | Budget across a Redis restart: overshoot $0.198040 with no append-only file, $0.017620 with `everysec`, $0.017620 with `always`; `everysec` adds +0.07 ms at p99 (non-streaming total, against none; -1.06 ms in a second pass); `always` adds +6.18 ms at p99 (non-streaming total, against none; +5.83 ms in a second pass); compose default by the pre-stated rule: `everysec` | `make chaos-persist`, `make bench-persist` |
 
 Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2
@@ -315,7 +316,12 @@ that is charged to Redis once it is back. The allowance is a token bucket
 per key that refills over an hour and is not reset when Redis returns, so
 a store that flaps cannot hand it out again on every reconnect: before
 that fix, eight short outages let a spent key overshoot by more than its
-whole budget (`make chaos-flap`, RESULTS.md M8). Money is an integer count of
+whole budget (`make chaos-flap`, RESULTS.md M8). A restart is the other
+way to lose a budget: a Redis without persistence comes back empty and
+hands every spent key its budget again. The compose file therefore runs
+Redis with an append-only file fsynced every second, the mode a rule
+written before the runs picked once `make chaos-persist` and
+`make bench-persist` had measured all three (RESULTS.md M9). Money is an integer count of
 nanodollars, so the gateway's ledger can be compared with the provider's to
 the cent.
 
@@ -426,7 +432,17 @@ nginx's strict round robin aliased with fixed-rate load and piled one
 key's requests onto one replica, so the chaos fleet picks replicas at
 random. And a Redis restart without persistence resets every budget, so
 a key can spend its budget a second time; the outage itself stays within
-the grace bound. RESULTS.md (Q1 and Q6) has the tables.
+the grace bound. M9 ran the same schedule with Redis's append-only file
+off, fsynced every second and fsynced on every write, and kept every
+replica's log. With the file on, Redis forgot nothing at the restart and
+the overshoot was the outage's grace alone; fsyncing every write cost
+milliseconds at p99, every second nothing the bench could resolve. The
+logs also explained two things: Q6's slow stretch after a Redis kill is
+calls on connections open at the kill waiting out their timeouts, after
+which failures are instant, and the fleet stays degraded for about two
+seconds after Redis is back because go-redis's dial backoff and the
+gateway's own probe interval run one after the other. RESULTS.md (Q1, Q6
+and M9) has the tables.
 
 How the streaming path is tested:
 
@@ -450,6 +466,7 @@ How the streaming path is tested:
 | Every limit and budget decision is one Lua script that reads Redis's clock | Atomic across replicas in one round trip; skewed replica clocks do not matter. | Read-modify-write from Go: races between replicas. Replica clocks: skew moves windows. |
 | Reserve the worst case, settle the real cost | Concurrent requests on any replica cannot together overspend; unsettled holds expire after a crash. | Charge after the reply: N replicas overspend by N requests' worth at the edge. |
 | Budget grace as a per-replica allowance that refills over `grace_refill` (1 h) | A flapping store's overshoot is bounded by replica processes × grace × (1 + T / refill), not by the number of outages; measured before and after in M8. | Fresh grace per outage (what shipped until M8): eight outages overshot a $0.20 budget by more than the budget itself. Grace shared in Redis: unreachable exactly when it is needed. |
+| Redis with an append-only file, fsynced every second (`deploy/compose.yaml`) | A restart replays budgets, counters and cache; picked by a rule fixed before M9's runs, from the overshoot and the p99 cost of each mode. | No persistence: a restart gives every spent key its budget again. `appendfsync always`: milliseconds at p99 per request on a container filesystem, to save at most a second of writes, and only from a machine crash. |
 | Degrade to per-replica limits at rate ÷ replicas when Redis is down | The fleet stays near its limit during an outage instead of failing every request or admitting all of them. | Fail closed: a Redis blip becomes an outage. Fail open: unlimited spend. |
 | Exact key over the whole request, semantic match on the last user turn only within the same context hash | A cached reply can never cross a tenant, a system prompt, earlier turns or sampling parameters, and similarity is only asked of short texts, where embeddings work. | Embedding the whole conversation: multi-turn similarity is unreliable and a false hit serves another conversation's answer. |
 | Semantic threshold chosen by a rule fixed before the full run (Wilson upper bound of false hits ≤ 1% on every pair set) | A semantic cache with an unmeasured false-hit rate is a correctness bug; the rule makes the shipped number the eval's, and a test keeps them equal. | A vendor default (0.9–0.97) measured on someone else's traffic. |
@@ -505,11 +522,20 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   after Redis applied it is charged twice, and a hold whose replica died
   while Redis was up expires without its cost reaching `spent`; neither
   showed up in M8's runs.
-- Planned next (PLAN.md, evolution round 1):
-  - M9: budgets that survive a Redis restart (Q6 shows a restart resets
-    them), with what each fsync policy costs a request.
-  - M10: a first-token timeout per attempt, so a provider that accepts
-    connections and never answers opens the breaker.
+- Budgets across a Redis restart (M9): with the append-only file the
+  compose file now ships, a restarted Redis forgot no spend and the
+  overshoot was the outage's grace alone, at a p99 cost the bench could
+  not tell from zero; `always` costs milliseconds and buys at most a
+  second of writes. What is left: a killed Redis process loses nothing
+  `everysec` acknowledged (the kernel holds the bytes), but a machine
+  crash mid-spend can still lose about a second of charges, a case the
+  container kill could not test; and the replicas stay degraded for
+  about two seconds after Redis is back, since go-redis's dial backoff
+  and the gateway's probe wait one after the other. One retry timer
+  instead of two would halve that.
+- Planned next (PLAN.md, evolution round 1): M10, a first-token timeout
+  per attempt, so a provider that accepts connections and never answers
+  opens the breaker.
 - Q4 against Claude, and the router's Claude candidates (both need an API
   key; RESULTS.md lists the commands and the estimated cost).
 - Pass `traceparent` on to providers.

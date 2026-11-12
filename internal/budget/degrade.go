@@ -305,7 +305,9 @@ func (d *Degrading) succeeded(ctx context.Context, seen uint64) {
 	}
 	if d.degraded && len(d.pending) == 0 {
 		d.degraded = false
-		telemetry.Logger(ctx).Info("budget store recovered", "flushed", flushed.String())
+		// Warn like the failure: a fleet logging at warn records both
+		// ends of every outage.
+		telemetry.Logger(ctx).Warn("budget store recovered", "flushed", flushed.String())
 		d.onState(false)
 	}
 }

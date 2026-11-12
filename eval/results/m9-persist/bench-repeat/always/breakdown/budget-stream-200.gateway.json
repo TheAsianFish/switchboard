@@ -1,0 +1,15 @@
+{
+  "config": "budget",
+  "window_seconds": 30.085,
+  "gateway_cpu_seconds": 15.89,
+  "gateway_peak_rss_kb": 43856,
+  "redis_cpu_seconds": 3.896,
+  "ollama_cpu_seconds": null,
+  "probe": {
+    "http_status": 200,
+    "cache_status": "",
+    "trace_id": "",
+    "trace_in_jaeger": null,
+    "model": "fake"
+  }
+}
