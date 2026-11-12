@@ -32,6 +32,9 @@ type Input struct {
 	// Snapshots are Redis's view of the budgeted key, if the run took
 	// any.
 	Snapshots []Snapshot
+	// Logs are the services' logs by compose service name, if the run
+	// kept them.
+	Logs map[string][]LogLine
 }
 
 // Analyse computes the summary of a run under rule.
@@ -87,6 +90,7 @@ func Analyse(in Input, rule Rule) (*Summary, error) {
 			return nil, err
 		}
 	}
+	s.Store = storeLog(s, in.Logs, start, end)
 	return s, nil
 }
 

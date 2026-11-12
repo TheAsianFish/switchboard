@@ -98,6 +98,9 @@ func Load(dir string) (*Input, error) {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
+	if in.Logs, err = loadLogs(dir); err != nil {
+		return nil, err
+	}
 	return in, nil
 }
 
@@ -170,6 +173,30 @@ func Describe(s *Summary) string {
 			r = fmt.Sprintf("%.3f s", *e.RecoverySeconds)
 		}
 		fmt.Fprintf(&b, "%-24s at %6.2f s: %s, %d errors before\n", e.Name, e.AtSeconds, r, e.ErrorsBeforeRecovery)
+	}
+	if st := s.Store; st != nil {
+		for _, o := range st.Outages {
+			fmt.Fprintf(&b, "%s at %.1f s, store errors logged:", o.Event, o.AtSeconds)
+			for _, c := range o.Classes {
+				fmt.Fprintf(&b, " %s %d (%.1f-%.1f s)", c.Class, c.Lines, c.FirstSeconds, c.LastSeconds)
+			}
+			fmt.Fprintln(&b)
+		}
+		for _, r := range st.Restarts {
+			fmt.Fprintf(&b, "redis back at %.1f s:", r.AtSeconds)
+			if r.LoadedSeconds != nil {
+				fmt.Fprintf(&b, " AOF loaded in %.3f s,", *r.LoadedSeconds)
+			}
+			if r.ReadySeconds != nil {
+				fmt.Fprintf(&b, " ready after %.3f s,", *r.ReadySeconds)
+			}
+			fmt.Fprintf(&b, " %d LOADING errors,", r.LoadingErrors)
+			if r.DegradedSeconds != nil {
+				fmt.Fprintf(&b, " replicas degraded for %.3f s\n", *r.DegradedSeconds)
+			} else {
+				fmt.Fprintf(&b, " not every replica recovered\n")
+			}
+		}
 	}
 	if f := s.Flap; f != nil {
 		for _, o := range f.Outages {
