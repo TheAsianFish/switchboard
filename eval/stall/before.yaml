@@ -1,0 +1,21 @@
+# Gateway config for `make bench-stall` (M10), the "before" arm: today's
+# resilience defaults (two retries, a breaker that opens after five
+# failures in a row for 10 s, no hedging) and no first-token timeout. The
+# provider's whole-call timeout is left at its default (10 minutes): it has
+# to cover the longest legitimate reply, so it cannot be short. The fake
+# provider runs as its own process on 127.0.0.1:9101.
+listen: 127.0.0.1:8080
+admin_listen: 127.0.0.1:9190
+log:
+  format: json
+  level: warn
+providers:
+  - name: fake
+    type: openaicompat
+    base_url: http://127.0.0.1:9101/v1
+models:
+  - name: fake
+    provider: fake
+keys:
+  - name: bench
+    key: sk-bench

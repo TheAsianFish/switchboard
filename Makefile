@@ -4,7 +4,7 @@ BIN := $(CURDIR)/bin
 GOLANGCI := $(BIN)/golangci-lint
 export GOTOOLCHAIN ?= auto
 
-.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge chaos chaos-flap chaos-persist bench-persist eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results ui ui-check docker dist check-install clean
+.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge bench-stall chaos chaos-flap chaos-persist bench-persist eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results ui ui-check docker dist check-install clean
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -93,6 +93,9 @@ record-fixtures: ## re-capture provider fixtures from Ollama
 
 bench-hedge: ## Q4: hedging off and on through the fake provider's slow tail (about 3 minutes)
 	eval/hedge/run.sh
+
+bench-stall: ## M10: a stalled provider through one gateway, before and after the first-token timeout (about 6 minutes)
+	eval/stall/run.sh
 
 chaos: ## Q6: replica and Redis kills under load in a 3-replica compose fleet (about 3 minutes; REDIS_PERSIST=none|everysec|always for M9's arms)
 	chaos/run.sh

@@ -628,6 +628,57 @@ What the numbers and the code say:
   minutes): steady, stalled, recovered, through one gateway, before and
   after, per-phase latency, error kinds and breaker state from
   `/providers`.
+- *How each number is read and each hypothesis judged (fixed before the
+  full runs).* `make bench-stall` (`eval/stall/run.sh`) runs two arms
+  against a fresh fake provider (Q4's shape: 50 ms median first byte,
+  σ 0.3, 5% of requests 10× slower) and one fresh gateway each, streamed,
+  20 requests per second open-loop, 20 s steady, 60 s stalled, 40 s
+  recovered, client timeout 30 s, no warm-up. `before` is the gateway
+  built from the commit before this milestone (`ed0dedf`), so "today" is
+  today's code and not the new code with the setting off; `after` is this
+  tree with `first_token_timeout: 2s`. Both keep the defaults otherwise:
+  two retries, a breaker that opens after five failures in a row for a
+  10 s cooldown, no hedging, and the provider's whole-call timeout at its
+  10 minute default. The stall holds every request that arrives during it
+  until its caller gives up, even after the stall ends (a black-holed
+  upstream; a stall that answered its held requests on recovery would be
+  kinder to the breaker).
+  - *Phases* are assigned by each request's scheduled time against the
+    stall's on and off times as the fake provider recorded them.
+  - *Breaker state* is read every 50 ms from the admin listener's
+    `/providers` (both arms) and, where the gateway logs transitions
+    (`after`), from its warn lines. *Opens* counts transitions to open.
+    *Time to open* is from the stall's start to the first open; *time to
+    close* is from the stall's end to the first transition to closed
+    after it.
+  - *Refusals* are the 503 replies to requests scheduled in the stalled
+    phase while the breaker was open or half-open. Their latency is the
+    bench's (scheduled time to the error), reported at p50, p99 and max,
+    with the share that carries `Retry-After`. The few requests let
+    through as half-open probes wait out the timeout first; they are
+    counted beside the refusals and are under 1% of them, so they cannot
+    move the p99.
+  - *Before* holds if the breaker opens 0 times in the run and 0 requests
+    scheduled in the stalled phase complete.
+  - *After* holds part by part. Open: within 3.0 s of the stall's start,
+    and within 0.1 s of the fifth stalled upstream request's arrival
+    (fake provider's ledger) plus the 2 s timeout, which is what "plus its
+    five failures" predicts. Refusals: p99 under 5 ms and 100% with
+    `Retry-After`. Close: within 11 s (one cooldown plus 1 s) of the
+    stall's end. Written down before the run: with a black-holed stall the
+    worst case is longer, one cooldown plus the timeout plus one arrival
+    gap (about 12.05 s), when the stall ends just after a probe went out;
+    the run's alignment decides which case it measures, and the time from
+    the last probe to the stall's end is reported with it.
+  - *The sanity check* runs Q4's hedging-off arm again with the timeout
+    (`ARMS=off-ftt OUT=eval/results/m10-stall/q4-off-ftt
+    eval/hedge/run.sh`, `eval/hedge/off-ftt.yaml`): it holds if the
+    gateway's `switchboard_provider_first_token_timeouts_total` is 0,
+    reported with that arm's largest TTFT beside the 2 s timeout.
+  - *Error kinds* per phase are the bench's outcomes (`ok`, `http_503`,
+    `http_504`, client `timeout`, ...), with the gateway's first-token
+    timeouts and retries from its metrics and the upstream attempts from
+    the fake provider's ledger.
 
 ### Considered and not chosen
 
