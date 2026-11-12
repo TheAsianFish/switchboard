@@ -466,7 +466,7 @@ How the streaming path is tested:
 | Every limit and budget decision is one Lua script that reads Redis's clock | Atomic across replicas in one round trip; skewed replica clocks do not matter. | Read-modify-write from Go: races between replicas. Replica clocks: skew moves windows. |
 | Reserve the worst case, settle the real cost | Concurrent requests on any replica cannot together overspend; unsettled holds expire after a crash. | Charge after the reply: N replicas overspend by N requests' worth at the edge. |
 | Budget grace as a per-replica allowance that refills over `grace_refill` (1 h) | A flapping store's overshoot is bounded by replica processes × grace × (1 + T / refill), not by the number of outages; measured before and after in M8. | Fresh grace per outage (what shipped until M8): eight outages overshot a $0.20 budget by more than the budget itself. Grace shared in Redis: unreachable exactly when it is needed. |
-| Redis with an append-only file, fsynced every second (`deploy/compose.yaml`) | A restart replays budgets, counters and cache; picked by a rule fixed before M9's runs, from the overshoot and the p99 cost of each mode. | No persistence: a restart gives every spent key its budget again. `appendfsync always`: milliseconds at p99 per request on a container filesystem, for at most one second of writes. |
+| Redis with an append-only file, fsynced every second (`deploy/compose.yaml`) | A restart replays budgets, counters and cache; picked by a rule fixed before M9's runs, from the overshoot and the p99 cost of each mode. | No persistence: a restart gives every spent key its budget again. `appendfsync always`: milliseconds at p99 per request on a container filesystem, to save at most a second of writes, and only from a machine crash. |
 | Degrade to per-replica limits at rate ÷ replicas when Redis is down | The fleet stays near its limit during an outage instead of failing every request or admitting all of them. | Fail closed: a Redis blip becomes an outage. Fail open: unlimited spend. |
 | Exact key over the whole request, semantic match on the last user turn only within the same context hash | A cached reply can never cross a tenant, a system prompt, earlier turns or sampling parameters, and similarity is only asked of short texts, where embeddings work. | Embedding the whole conversation: multi-turn similarity is unreliable and a false hit serves another conversation's answer. |
 | Semantic threshold chosen by a rule fixed before the full run (Wilson upper bound of false hits ≤ 1% on every pair set) | A semantic cache with an unmeasured false-hit rate is a correctness bug; the rule makes the shipped number the eval's, and a test keeps them equal. | A vendor default (0.9–0.97) measured on someone else's traffic. |
@@ -526,11 +526,13 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   compose file now ships, a restarted Redis forgot no spend and the
   overshoot was the outage's grace alone, at a p99 cost the bench could
   not tell from zero; `always` costs milliseconds and buys at most a
-  second of writes. What is left: a crash mid-spend can still lose a
-  second of charges, and the replicas stay degraded for about two seconds
-  after Redis is back, since go-redis's dial backoff and the gateway's
-  probe wait one after the other. One retry timer instead of two would
-  halve that.
+  second of writes. What is left: a killed Redis process loses nothing
+  `everysec` acknowledged (the kernel holds the bytes), but a machine
+  crash mid-spend can still lose about a second of charges, a case the
+  container kill could not test; and the replicas stay degraded for
+  about two seconds after Redis is back, since go-redis's dial backoff
+  and the gateway's probe wait one after the other. One retry timer
+  instead of two would halve that.
 - Planned next (PLAN.md, evolution round 1): M10, a first-token timeout
   per attempt, so a provider that accepts connections and never answers
   opens the breaker.

@@ -285,11 +285,13 @@ observed.
   other, so a replica keeps using its local limits, grace and no cache for
   about two seconds after Redis is ready (M9, every mode). The cache is
   the visible cost: hits lost, not wrong answers.
-- **`everysec` can lose the last second of charges.** A Redis crash in
-  the middle of a key's spending forgets up to a second of its writes;
-  M9's crash came after the budget had run out, so it lost none. With no
-  append-only file (`REDIS_PERSIST=none`, Q6) a restart forgets every
-  budget.
+- **`everysec` can lose the last second of charges to a machine crash.**
+  A killed Redis process loses nothing it acknowledged (the kernel holds
+  the written bytes), which is the case M9's container kill tested; a
+  crash of the machine or kernel in the middle of a key's spending
+  forgets up to about a second of its writes, and no run here produces
+  one. With no append-only file (`REDIS_PERSIST=none`, Q6) a restart
+  forgets every budget.
 - **A `LOADING` Redis was not reached under load.** M9's append-only file
   loaded in tens of milliseconds and no replica called during it; the integration
   test shows a `LOADING` reply degrades like an unreachable store and

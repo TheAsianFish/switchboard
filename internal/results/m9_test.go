@@ -372,3 +372,26 @@ func TestLoadM9ModeMismatch(t *testing.T) {
 		t.Errorf("empty dir: %v, %v", m, err)
 	}
 }
+
+// Redis counts delayed fsyncs only under everysec; under always the
+// fsync is inline, so the row must not read as "0 delays".
+func TestM9DelayedFsyncOnlyUnderEverysec(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	root := filepath.Join(dir, M9Dir)
+	m9WriteBench(t, filepath.Join(root, M9BenchDir, "none"), "none", 1)
+	m9WriteBench(t, filepath.Join(root, M9BenchDir, "everysec"), "everysec", 1.05)
+	m9WriteBench(t, filepath.Join(root, M9BenchDir, "always"), "always", 3)
+	d, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"n/a / n/a", "3 / 3", "n/a / n/a"} {
+		if got := d.M9.Runs[i].Bench.DelayedFsync; got != want {
+			t.Errorf("%s delayed fsyncs = %q, want %q", d.M9.Runs[i].Mode, got, want)
+		}
+	}
+	if d.M9.DriftMax != "0.01" {
+		t.Errorf("largest drift = %q, want 0.01", d.M9.DriftMax)
+	}
+}

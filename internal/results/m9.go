@@ -87,8 +87,11 @@ type M9 struct {
 	// and Q1's committed drift beside it ("–" without Q1's breakdown).
 	BenchRate, BenchWindow, BenchDataFS                      string
 	DriftTotalP50, DriftTotalP99, DriftTTFTP50, DriftTTFTP99 string
-	Q1DriftP50, Q1DriftP99                                   string
-	Resamples                                                int
+	// DriftMax is the largest of the four drifts, "n/a" until both
+	// metrics have one.
+	DriftMax               string
+	Q1DriftP50, Q1DriftP99 string
+	Resamples              int
 	// ToMeasure lists the missing runs with their commands.
 	ToMeasure []string
 	// Reading is sentences built from the numbers above, no
@@ -478,7 +481,10 @@ func loadM9Bench(dir, mode string) (*M9Bench, error) {
 		}
 		d, s := "n/a", "n/a"
 		if info != nil {
-			if v, ok := info["aof_delayed_fsync"]; ok {
+			// Redis counts a delayed fsync only under everysec (a write
+			// held back while the background fsync is late); under always
+			// the fsync is inline and a slow disk shows as latency.
+			if v, ok := info["aof_delayed_fsync"]; ok && mode == "everysec" {
 				d = v
 			}
 			if v, err := strconv.ParseInt(info["aof_current_size"], 10, 64); err == nil {
@@ -613,6 +619,10 @@ func buildM9(m *M9) {
 	}
 	if driftOK[m9TTFT] {
 		m.DriftTTFTP50, m.DriftTTFTP99 = msf(drift[m9TTFT][0]), msf(drift[m9TTFT][1])
+	}
+	m.DriftMax = "n/a"
+	if driftOK[m9Total] && driftOK[m9TTFT] {
+		m.DriftMax = msf(max(drift[m9Total][0], drift[m9Total][1], drift[m9TTFT][0], drift[m9TTFT][1]))
 	}
 
 	m9Tables(m)
@@ -791,7 +801,7 @@ func m9Tables(m *M9) {
 			}),
 			brow("Gateway requests (non-streaming / streaming)", func(b *M9Bench) string { return b.Requests }),
 			brow("Gateway errors (non-streaming / streaming)", func(b *M9Bench) string { return b.Errors }),
-			brow("Redis delayed fsyncs after each run", func(b *M9Bench) string { return b.DelayedFsync }),
+			brow("Redis delayed fsyncs after each run (counted under `everysec` only)", func(b *M9Bench) string { return b.DelayedFsync }),
 			brow("Append-only file after each run", func(b *M9Bench) string { return b.AOFSize }),
 		}
 	}

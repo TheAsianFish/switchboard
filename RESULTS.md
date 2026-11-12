@@ -1091,7 +1091,7 @@ unresolved.
 | Spread between the direct runs, TTFT p50 / p99 (ms) | 0.05 / 0.01 | 0.03 / 0.01 | 0.02 / 0.00 |
 | Gateway requests (non-streaming / streaming) | 6000 / 6000 | 6000 / 6000 | 6000 / 6000 |
 | Gateway errors (non-streaming / streaming) | 0 / 0 | 0 / 0 | 0 / 0 |
-| Redis delayed fsyncs after each run | n/a / n/a | 0 / 0 | 0 / 0 |
+| Redis delayed fsyncs after each run (counted under `everysec` only) | n/a / n/a | 0 / 0 | n/a / n/a |
 | Append-only file after each run | no file / no file | 7.75 MB / 15.57 MB | 7.75 MB / 15.57 MB |
 
 **Q6's slow stretch after the Redis kill**, from the `none` arm's logs (the
@@ -1158,12 +1158,18 @@ The rule picks `everysec`: `everysec` is the first mode whose overshoot is withi
   $0.198040). With either fsync policy Redis forgot $0, and the
   overshoot at the end ($0.017620) is what the outage spent on grace
   ($0.018600, bound $0.020000): the restart added nothing.
-  `everysec` risks the writes of the last second before a crash; here the
-  budget had run out well before the kill, so that second held refusals
-  and no charge. A crash in the middle of a key's spending would lose up
-  to a second of its charges, which is the one-second term in the bound.
+  `everysec` hands each write to the kernel before Redis replies and
+  fsyncs once a second, so a killed Redis process, which is what this
+  schedule's SIGKILL is, loses nothing it acknowledged: the bytes are in
+  the kernel's page cache and the restarted Redis reads them back. What
+  `everysec` risks is a crash of the machine or its kernel, which can
+  lose the last second or so of writes, and writes Redis holds back while
+  an earlier fsync is late (its delayed-fsync count). A container kill
+  produces neither, so the one-second term in the bound was never
+  exercised: the hypothesis held without being tested at its edge.
 - How long the fleet stays degraded after a restart is set by two retry
-  timers, not by loading the file. Redis replayed its 17.37 MB file in
+  timers, not by loading the file. Redis replayed its append-only file
+  (which held 17.37 MB by the end of the run, less at the restart) in
   0.038 s, at the end of the 0.445 s from `docker start` to ready, and no
   replica's call landed in that window, so none read a `LOADING` reply
   (the integration test is what covers that path). Every mode, the one
@@ -1183,14 +1189,15 @@ The rule picks `everysec`: `everysec` is the first mode whose overshoot is withi
   non-streaming total: with `appendfsync always` Redis writes and fsyncs
   the file before it replies, and each request's limiter and budget calls
   wait for that, here on the container's overlay filesystem, far past the
-  0.2 ms hoped for at p99. Redis reported no delayed
-  fsyncs in any run, so the disk kept up; the cost is the wait itself.
-- `everysec` is judged "no" by the rule fixed before the run, on its
-  streaming TTFT costs (+0.12 ms at p50, +0.15 ms at p99), which exceed
-  0.1 ms by a few hundredths. The same run puts its non-streaming p50
-  cost at -0.14 ms, a saving `everysec` cannot cause and larger than
-  either excess. The direct runs, which the rule uses as the drift, moved
-  by no more than 0.05 ms; the gateway runs move between runs by more
+  0.2 ms hoped for at p99. Redis counts delayed fsyncs only under
+  `everysec`; under `always` a slow disk shows up only as this wait.
+- `everysec`'s latency hypothesis is judged "no" by the check fixed
+  before the run, on its streaming TTFT costs (+0.12 ms at p50, +0.15 ms
+  at p99), which exceed 0.1 ms by a few hundredths (the compose-default
+  rule, which allows 0.5 ms, passes it). The same run puts its
+  non-streaming p50 cost at -0.14 ms, a saving `everysec` cannot cause and
+  larger than either excess. The direct runs, which the check uses as the
+  drift, moved by no more than 0.05 ms; the gateway runs move between runs by more
   than that. So the honest reading is that `everysec`'s cost is not
   resolved from zero at the 0.1 to 0.15 ms level by one run per mode, not
   that it was measured above 0.1 ms. Either way it is far under the
@@ -1262,11 +1269,13 @@ observed.
   other, so a replica keeps using its local limits, grace and no cache for
   about two seconds after Redis is ready (M9, every mode). The cache is
   the visible cost: hits lost, not wrong answers.
-- **`everysec` can lose the last second of charges.** A Redis crash in
-  the middle of a key's spending forgets up to a second of its writes;
-  M9's crash came after the budget had run out, so it lost none. With no
-  append-only file (`REDIS_PERSIST=none`, Q6) a restart forgets every
-  budget.
+- **`everysec` can lose the last second of charges to a machine crash.**
+  A killed Redis process loses nothing it acknowledged (the kernel holds
+  the written bytes), which is the case M9's container kill tested; a
+  crash of the machine or kernel in the middle of a key's spending
+  forgets up to about a second of its writes, and no run here produces
+  one. With no append-only file (`REDIS_PERSIST=none`, Q6) a restart
+  forgets every budget.
 - **A `LOADING` Redis was not reached under load.** M9's append-only file
   loaded in tens of milliseconds and no replica called during it; the integration
   test shows a `LOADING` reply degrades like an unreachable store and
