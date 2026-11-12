@@ -361,6 +361,17 @@ func TestVerdicts(t *testing.T) {
 	}
 }
 
+func TestBeforeOpensNeedsAnObservedBreaker(t *testing.T) {
+	t.Parallel()
+	for _, polls := range []int{0, 1} {
+		a := &Arm{Name: "before", Breaker: Breaker{Source: "poll", Polls: polls}}
+		v := armVerdicts(a)[0]
+		if v.Check != CheckOpens || v.Held != (polls > 0) {
+			t.Errorf("%d polls: %+v", polls, v)
+		}
+	}
+}
+
 func TestJudge(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

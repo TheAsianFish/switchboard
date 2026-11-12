@@ -630,9 +630,14 @@ func armVerdicts(a *Arm) []Verdict {
 	b := a.Breaker
 	switch a.Name {
 	case "before":
+		// No polls and no log lines would read as 0 opens: the breaker was
+		// never observed, so there is nothing to judge.
+		var opens *float64
+		if b.Polls > 0 || b.Source == "log" {
+			opens = ptr(float64(b.Opens))
+		}
 		return []Verdict{
-			{Arm: a.Name, Check: CheckOpens, Hypothesis: "breaker opens in the run",
-				Measured: ptr(float64(b.Opens)), Op: OpEq, Bound: 0, Held: b.Opens == 0},
+			judge(a.Name, CheckOpens, "breaker opens in the run", opens, OpEq, 0, ""),
 			{Arm: a.Name, Check: CheckStalledOK, Hypothesis: "requests scheduled in the stall that complete",
 				Measured: ptr(float64(a.StalledOK)), Op: OpEq, Bound: 0, Held: a.StalledOK == 0},
 		}
