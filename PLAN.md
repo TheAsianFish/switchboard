@@ -1170,6 +1170,41 @@ Changes made while building:
     up to one more grace, because settling a hold admitted before it gives
     the over-estimate back; `budget/degrade.go` says so.
 
+- **M10.**
+  - "Cancelled by the first event" is read as the first token: the first
+    event after the stream's start, the moment the hedge layer already
+    times as TTFT. A provider that sends its start event and then nothing
+    is therefore caught too; what is not caught is a stall after the
+    first token.
+  - The setting applies to streamed attempts only. A non-streamed reply
+    arrives whole, so a timer on it would be a whole-reply timeout, and
+    a short one would fail every long answer; the provider's `timeout`
+    remains the only bound there, and the README says so.
+  - The timer runs on a context of its own under the attempt's, so a
+    hedge winning or the caller leaving still reads as a cancellation
+    (not counted by the breaker), and only the timer's own firing reads
+    as the provider's timeout. A token and the timer that cross are
+    settled by `Timer.Stop`: if the timer already fired, the attempt
+    failed.
+  - The fake provider's stall is a black hole: requests that arrive
+    during it are held until their caller gives up, even after the stall
+    ends. A stall that answered them on recovery would let an in-flight
+    half-open probe close the breaker at once, which is the kinder case.
+  - The `before` arm runs the gateway built from the commit before this
+    milestone, not the new code with the setting off, so "today" is
+    measured on today's code.
+  - Added after the main runs and before it ran: the main `after` run's
+    stall ended late in an open window, the kind alignment, so the close
+    bound was not tested at its edge. A third run, `make bench-stall`'s
+    `after` arm with `STALL=37` into `eval/results/m10-stall-aligned/`,
+    ends the stall 0.64 s after the third half-open probe went out
+    (probes 12.26, 24.34 and 36.36 s into the stall in the main run). That
+    probe is held and fails, so the prediction is a close about 11.4 s
+    after the stall's end (probe + 2 s timeout + 10 s cooldown + at most
+    one 50 ms arrival gap, minus the stall's end), over the 11 s bound.
+    It is reported beside the main run; the main run's verdict stands as
+    measured.
+
 - [x] M1: Scaffold, CI and the streaming spine — Go module with `golangci-lint`, `go vet`, `go test -race`, GitHub Actions (lint, test; `timeout-minutes` on every job), Dockerfile, Makefile, MIT licence; canonical types; OpenAI and Anthropic front ends for chat completions and messages (text content, usage, streaming SSE in both directions) backed by the Anthropic provider (`anthropic-sdk-go`), the OpenAI-compatible provider (Ollama) and the fake provider; API keys from `switchboard.yaml`; structured logging with request ids; `switchboard bench` and `switchboard fake-provider` with the first Q1 number in RESULTS.md. Done when an unmodified OpenAI SDK and an unmodified Anthropic SDK both stream a reply through the gateway from Ollama and (when a key exists) from Claude, recorded streams replay in tests, and `make check` is green in CI.
 - [x] M2: Shared limits, budgets and cost accounting — Redis client and compose with 3 replicas behind a load balancer; `ratelimit` interface with a fixed-window baseline and the GCRA Lua implementation slot (interface, oracle tests, property tests, miniredis concurrency tests); token-cost estimate and reconciliation; `budget` reserve/settle ledger; price table and usage normalisation for every provider; `/metrics` with Prometheus counters for requests, tokens and dollars per key and model; degrade policy when Redis is unreachable; `make test-limits` answering Q2 for the baseline. Done when three replicas enforce one key's limit and budget together, the over-admission test runs in the compose stack, and the per-key spend matches the fake provider's ledger to the cent.
 - [x] M3: Exact and semantic cache — canonical request hash cache; `embed` client for Ollama `/api/embed` with a fake; vector index interface with Redis HNSW/FLAT and in-memory FLAT implementations; cacheability rules (temperature, explicit header, context hash) and tenant namespacing; cached streams replayed in the client's wire format; `make eval-cache` with the PAWS-Wiki and GSM8K-perturbation pair sets, the threshold sweep and the FLAT vs HNSW latency check; RESULTS.md cache section answering Q3. Done when the cross-tenant and cross-context leak tests pass, the eval runs end to end on a laptop with Ollama, and the chosen threshold is the one the eval produced.
