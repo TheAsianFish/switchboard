@@ -42,6 +42,7 @@ make check
 | `make eval-router` | router frontier (Q5): 5-fold cross-validation from the committed recordings and embeddings, offline, $0; writes the shipped weights | local, manual workflow |
 | `make eval-router-label` | Q5 labels: every candidate answers the 600 questions through the gateway (local ladder on Ollama by default, about 3 h on a laptop CPU; `MODELS=claude-...` with a key); resumes | local |
 | `make eval-router-embed` / `make eval-router-data` | re-embed the eval prompts (Ollama with `nomic-embed-text`) / rebuild the eval set from GSM8K and MMLU | local |
+| `make bench-stall` | M10: a stalled provider through one gateway, before (gateway built from the pre-M10 commit) and after a 2 s first-token timeout (about 6 minutes) | local, manual workflow |
 | `make chaos` | the phased kill run (Q6) | local, manual workflow |
 | `make chaos-flap RUN=before\|after` | M8: Redis cut off and reconnected eight times with its state kept, a replica killed while degraded, budget reconciled against the provider's ledger (about 4 minutes) | local, manual workflow |
 | `make results` | re-render RESULTS.md and the README results table from `eval/results/` | after any of the above |
