@@ -595,7 +595,14 @@ What the numbers and the code say:
   `everysec`'s TTFT cost exceeded 0.1 ms by a few hundredths while its
   non-streaming p50 cost was negative by more, so the drift the rule
   used (the direct runs' spread) understates how much gateway runs move.
-  A second pass that measures that is under "To measure".
+  A second `bench-persist` pass, run afterwards and rendered beside the
+  first without changing the pre-stated verdicts, confirms it: there
+  `everysec`'s TTFT costs read +0.07 and +0.08 ms and `none`'s added
+  total p99 moved by 1.04 ms between passes, so `everysec` at 0.1 ms is
+  unresolved; `always` is over in both passes and the rule picks
+  `everysec` in both. Also, a container SIGKILL cannot lose what
+  `everysec` acknowledged (the bytes are in the page cache), so the
+  bound's one-second term was never exercised.
 
 **M10. Does a provider that stops answering ever open the breaker?**
 

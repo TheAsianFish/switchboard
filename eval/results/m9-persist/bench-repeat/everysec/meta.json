@@ -1,0 +1,32 @@
+{
+  "commit": "7a08ba4-dirty",
+  "date": "2026-11-12T03:27:25Z",
+  "fake_provider": {
+    "latency": "20ms",
+    "tokens": 30,
+    "token_interval": "5ms"
+  },
+  "command": "RATES='' DURATION=60s WARMUP=5s FEATURES='budget' BREAKDOWN_RATE=200 EMBED_RATE=5 BREAKDOWN_DURATION=30s BREAKDOWN_WARMUP=2s REDIS_PERSIST=everysec OUT=/tmp/m9rerun/bench/everysec eval/bench/q1.sh",
+  "breakdown": {
+    "rate": 200,
+    "embed_rate": 5,
+    "duration": "30s",
+    "warmup": "2s",
+    "cache_directive": "semantic",
+    "redis": "redis:8",
+    "redis_persist": "everysec",
+    "redis_args": "--save '' --appendonly yes --appendfsync everysec",
+    "redis_data_fs": "overlayfs",
+    "jaeger": "",
+    "ollama": null,
+    "configs": [
+      {"name": "none", "features": [], "rate": 200, "model": "fake", "status": "not selected", "reason": "not in FEATURES"},
+      {"name": "limits", "features": ["limits"], "rate": 200, "model": "fake", "status": "not selected", "reason": "not in FEATURES"},
+      {"name": "budget", "features": ["limits", "budget"], "rate": 200, "model": "fake", "status": "measured", "reason": ""},
+      {"name": "exact", "features": ["limits", "budget", "exact"], "rate": 200, "model": "fake", "status": "not selected", "reason": "not in FEATURES"},
+      {"name": "tracing", "features": ["limits", "budget", "exact", "tracing"], "rate": 200, "model": "fake", "status": "not selected", "reason": "not in FEATURES"},
+      {"name": "semantic", "features": ["limits", "budget", "exact", "tracing", "semantic"], "rate": 5, "model": "fake", "status": "not selected", "reason": "not in FEATURES"},
+      {"name": "router", "features": ["limits", "budget", "exact", "tracing", "semantic", "router"], "rate": 5, "model": "auto", "status": "not selected", "reason": "not in FEATURES"}
+    ]
+  }
+}

@@ -1045,7 +1045,45 @@ within the bound and whose larger p99 cost of the two metrics is under
 {{- end}}
 
 {{if .Decided}}The rule picks `{{.Default}}`: {{.DefaultReason}}.{{else}}The rule is {{.DefaultReason}}.{{end}}
-{{if .Reading}}
+{{$m9 := .}}{{with .Second}}
+**A second bench pass.** `make bench-persist` run again on the same
+machine into `eval/results/m9-persist/bench-repeat/`, so each mode's
+gateway run can be set against the same mode's gateway run in another
+pass, which the direct runs the checks above use as their drift cannot
+do. Each cell is pass 1 / pass 2 (point estimates; pass 1's intervals
+are in the table above).
+
+|  | `none` | `everysec` | `always` |
+|--|------:|------:|------:|
+{{- range .Rows}}
+| {{.Name}} |{{range .Values}} {{.}} |{{end}}
+{{- end}}
+
+How far a mode's added latency moved between the passes (the gateway
+drift), against the direct runs' largest spread within a pass
+({{$m9.DriftMax}} ms):
+
+| Metric | Gateway drift (ms) | Largest for | Per mode (ms) |
+|--------|-------------------:|-------------|---------------|
+{{- range .Moves}}
+| {{.Metric}} | {{.Largest}} | `{{.Mode}}` | {{.PerMode}} |
+{{- end}}
+
+The latency hypotheses read with both passes (a cost no larger than the
+gateway drift in either pass is unresolved, and so are two passes on
+either side of the threshold):
+
+| Cost | Pass 1 | Pass 2 | Gateway drift | Threshold | Reading |
+|------|-------:|-------:|--------------:|----------:|---------|
+{{- range .Checks}}
+| `{{.Mode}}` {{.Metric}} | {{.Pass1}} ms | {{.Pass2}} ms | {{.Drift}} ms | {{.Threshold}} ms | {{.Reading}} |
+{{- end}}
+
+The checks in the hypotheses table above are the pre-stated ones and
+stand as written; this pass was run after them and changes no verdict
+there. It does change what the `everysec` verdict means (see the reading
+below).
+{{end}}{{if .Reading}}
 **Reading the runs.**
 
 {{range .Reading}}- {{.}}
@@ -1098,8 +1136,14 @@ within the bound and whose larger p99 cost of the two metrics is under
   drift, moved by no more than {{.DriftMax}} ms; the gateway runs move between runs by more
   than that. So the honest reading is that `everysec`'s cost is not
   resolved from zero at the 0.1 to 0.15 ms level by one run per mode, not
-  that it was measured above 0.1 ms. Either way it is far under the
-  0.5 ms the rule allows.
+  that it was measured above 0.1 ms.{{with .Second}} The second pass bears
+  this out: there `everysec`'s TTFT costs read {{(index .Checks 2).Pass2}} and {{(index .Checks 3).Pass2}} ms, under
+  0.1 ms, and a mode's added total p99 moved by up to
+  {{(index .Moves 1).Largest}} ms between passes, so at 0.1 ms the
+  hypothesis is unresolved, not failed. `always`'s cost, milliseconds,
+  is far outside that movement in both passes.{{end}} Either way
+  `everysec` is far under the 0.5 ms the rule allows, and the rule picks
+  it in both passes.
 {{with .SlowClass "timeout"}}- Q6's slow stretch after the Redis kill, now read from the logs:
   calls on connections the replicas had open to Redis timed out
   ({{.Lines}} lines, from {{.First}} s to {{.Last}} s after the kill), each waiting out its
@@ -1111,7 +1155,8 @@ within the bound and whose larger p99 cost of the two metrics is under
 {{end}}{{end}}
 {{range .Runs}}{{$mode := .Mode}}{{with .Chaos}}- `{{$mode}}` chaos: commit `{{.Meta.Commit}}`, run {{.Meta.Date}}, `{{.Meta.Command}}`; {{.Hardware}}.
 {{end}}{{with .Bench}}- `{{$mode}}` bench: commit `{{.Meta.Commit}}`, run {{.Meta.Date}}, `{{.Meta.Command}}`{{if .RedisArgs}} (Redis `{{.RedisArgs}}`){{end}}; {{.Hardware}}.
-{{end}}{{end}}- Cost: $0 (fake provider; the budget's dollars are its made-up price).
+{{end}}{{end}}{{with .Second}}{{range .Runs}}{{$mode := .Mode}}{{with .Bench}}- `{{$mode}}` bench, second pass: commit `{{.Meta.Commit}}`, run {{.Meta.Date}}, `{{.Meta.Command}}`{{if .RedisArgs}} (Redis `{{.RedisArgs}}`){{end}}; {{.Hardware}}.
+{{end}}{{end}}{{end}}- Cost: $0 (fake provider; the budget's dollars are its made-up price).
 {{else}}
 Not measured yet. Run `make chaos-persist` and `make bench-persist`, then
 `make results`.
@@ -1236,12 +1281,18 @@ observed.
 {{- else}}{{range .M9.ToMeasure}}
 - {{.}}
 {{- end}}{{end}}
+{{- if not (and .M9 .M9.Second)}}
 - M9's `everysec` cost against the gateway's own run-to-run drift: a
-  second `bench-persist` pass into another directory
-  (`MODES='none everysec' OUT_ROOT=/tmp/m9-repeat make bench-persist`)
-  sets `none` against `none` and `everysec` against `everysec` across
-  passes, which the direct runs cannot (about 7 minutes, $0). The
-  renderer does not read it yet.
+  second `bench-persist` pass
+  (`OUT_ROOT=eval/results/m9-persist/bench-repeat make bench-persist`)
+  sets each mode against itself across passes, which the direct runs
+  cannot (about 11 minutes, $0).
+{{- else}}
+- M9's `everysec` cost resolved at 0.1 ms: two passes disagree and the
+  gateway's p99 moves by about a millisecond between passes, so it needs
+  several passes per mode, interleaved, and a test on their spread
+  rather than on one run's bootstrap interval.
+{{- end}}
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with
   `claude-haiku-5-5`).

@@ -373,6 +373,105 @@ func TestLoadM9ModeMismatch(t *testing.T) {
 	}
 }
 
+func TestM9SecondReading(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                  string
+		c1, c2, drift, thresh float64
+		want                  string
+	}{
+		{"both under, outside the drift", -0.14, -0.19, 0.03, 0.1, "under in both passes"},
+		{"one pass inside the drift", 0.07, -1.06, 1.04, 0.1, "unresolved: within the gateway drift"},
+		{"either side of the threshold", 0.12, 0.07, 0.03, 0.1, "unresolved: the passes disagree"},
+		{"both over", 6.18, 5.83, 1.04, 0.2, "over in both passes, by at least 5.63 ms"},
+		{"exactly the drift is inside it", 0.05, 0.05, 0.05, 0.1, "unresolved: within the gateway drift"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := m9SecondReading(tt.c1, tt.c2, tt.drift, tt.thresh); got != tt.want {
+				t.Errorf("m9SecondReading(%v, %v, %v, %v) = %q, want %q", tt.c1, tt.c2, tt.drift, tt.thresh, got, tt.want)
+			}
+		})
+	}
+}
+
+// A second bench pass is set against the first: the gateway drift is the
+// largest move of a mode's added latency between passes, and a cost inside
+// it is unresolved even when one pass alone looks resolved.
+func TestLoadM9Second(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	root := filepath.Join(dir, M9Dir)
+	m9WriteBench(t, filepath.Join(root, M9BenchDir, "none"), "none", 1)
+	m9WriteBench(t, filepath.Join(root, M9BenchDir, "everysec"), "everysec", 1.05)
+	m9WriteBench(t, filepath.Join(root, M9BenchDir, "always"), "always", 3)
+	// The second pass: none's gateway run 0.5 ms slower, everysec's the
+	// same, always's 0.1 ms faster.
+	m9WriteBench(t, filepath.Join(root, M9BenchRepeatDir, "none"), "none", 1.5)
+	m9WriteBench(t, filepath.Join(root, M9BenchRepeatDir, "everysec"), "everysec", 1.05)
+	m9WriteBench(t, filepath.Join(root, M9BenchRepeatDir, "always"), "always", 2.9)
+
+	d, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := d.M9
+	if m == nil || m.Second == nil {
+		t.Fatal("no second pass")
+	}
+	s := m.Second
+	if mv := s.Moves[0]; mv.Largest != "0.50" || mv.Mode != "none" || mv.PerMode != "`none` 0.50, `everysec` 0.00, `always` 0.10" {
+		t.Errorf("total p50 move %+v", mv)
+	}
+	if s.Runs[0].Bench.CostTotalP50.ok {
+		t.Error("none has a cost against itself")
+	}
+	if got := s.Runs[1].Bench.CostTotalP50.Point(); got != "-0.45" {
+		t.Errorf("second-pass everysec cost = %s, want -0.45 (against the second pass's none)", got)
+	}
+	want := map[string]string{
+		"everysec total p50": "unresolved: within the gateway drift",
+		"always total p99":   "over in both passes, by at least 1.20 ms",
+	}
+	for _, c := range s.Checks {
+		if w, ok := want[c.Mode+" "+c.Metric]; ok {
+			if c.Reading != w {
+				t.Errorf("%s %s: %q, want %q", c.Mode, c.Metric, c.Reading, w)
+			}
+			delete(want, c.Mode+" "+c.Metric)
+		}
+	}
+	if len(want) > 0 {
+		t.Errorf("checks missing %v in %+v", want, s.Checks)
+	}
+	if len(s.Checks) != 6 {
+		t.Errorf("%d checks, want 4 for everysec and 2 for always", len(s.Checks))
+	}
+	if !strings.Contains(m.Headline, "`everysec` adds +0.05 ms at p99 (non-streaming total, against none; -0.45 ms in a second pass)") {
+		t.Errorf("headline %q", m.Headline)
+	}
+
+	var out bytes.Buffer
+	if err := Render(dir, tmplPath, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"**A second bench pass.**",
+		"| Cost against `none`, p50 total (ms) | n/a / n/a | +0.05 / -0.45 | +2.00 / +1.40 |",
+		"| `everysec` total p50 | +0.05 ms | -0.45 ms | 0.50 ms | 0.10 ms | unresolved: within the gateway drift |",
+		"- `everysec` bench, second pass: commit `abc1234`",
+		"- M9's `everysec` cost resolved at 0.1 ms",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("render lacks %q", want)
+		}
+	}
+	if strings.Contains(out.String(), "OUT_ROOT=eval/results/m9-persist/bench-repeat make bench-persist") {
+		t.Error("render still lists the second pass under To measure")
+	}
+}
+
 // Redis counts delayed fsyncs only under everysec; under always the
 // fsync is inline, so the row must not read as "0 delays".
 func TestM9DelayedFsyncOnlyUnderEverysec(t *testing.T) {

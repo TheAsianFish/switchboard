@@ -92,6 +92,8 @@ type M9 struct {
 	DriftMax               string
 	Q1DriftP50, Q1DriftP99 string
 	Resamples              int
+	// Second is a second bench pass beside the first, nil without one.
+	Second *M9Second
 	// ToMeasure lists the missing runs with their commands.
 	ToMeasure []string
 	// Reading is sentences built from the numbers above, no
@@ -234,6 +236,12 @@ func loadM9(dir string, q1 *Q1) (*M9, error) {
 		m.Q1DriftP50, m.Q1DriftP99 = msf(q1.Breakdown.driftP50), msf(q1.Breakdown.driftP99)
 	}
 	buildM9(m)
+	second, err := loadM9Second(dir, m)
+	if err != nil {
+		return nil, err
+	}
+	m.Second = second
+	m.Headline = m9Headline(m)
 	return m, nil
 }
 
@@ -694,8 +702,16 @@ func m9Headline(m *M9) string {
 	s := "Budget across a Redis restart: overshoot " + strings.Join(over, ", ")
 	for _, r := range m.Runs {
 		if r.Mode != "none" && r.Bench != nil && r.Bench.CostTotalP99.ok {
-			s += fmt.Sprintf("; `%s` adds %s ms at p99 (non-streaming total, against none)",
-				r.Mode, r.Bench.CostTotalP99.Point())
+			again := ""
+			if m.Second != nil {
+				for _, r2 := range m.Second.Runs {
+					if r2.Mode == r.Mode && r2.Bench.CostTotalP99.ok {
+						again = fmt.Sprintf("; %s ms in a second pass", r2.Bench.CostTotalP99.Point())
+					}
+				}
+			}
+			s += fmt.Sprintf("; `%s` adds %s ms at p99 (non-streaming total, against none%s)",
+				r.Mode, r.Bench.CostTotalP99.Point(), again)
 		}
 	}
 	switch {

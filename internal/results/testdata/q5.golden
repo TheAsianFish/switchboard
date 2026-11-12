@@ -314,11 +314,10 @@ observed.
 - M9 budgets across a Redis restart per append-only mode: `make chaos-persist`
   and `make bench-persist`, then `make results`.
 - M9's `everysec` cost against the gateway's own run-to-run drift: a
-  second `bench-persist` pass into another directory
-  (`MODES='none everysec' OUT_ROOT=/tmp/m9-repeat make bench-persist`)
-  sets `none` against `none` and `everysec` against `everysec` across
-  passes, which the direct runs cannot (about 7 minutes, $0). The
-  renderer does not read it yet.
+  second `bench-persist` pass
+  (`OUT_ROOT=eval/results/m9-persist/bench-repeat make bench-persist`)
+  sets each mode against itself across passes, which the direct runs
+  cannot (about 11 minutes, $0).
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with
   `claude-haiku-5-5`).

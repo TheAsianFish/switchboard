@@ -1145,6 +1145,53 @@ within the bound and whose larger p99 cost of the two metrics is under
 
 The rule picks `everysec`: `everysec` is the first mode whose overshoot is within the bound and whose p99 cost passes; every mode before it failed at least one of the two.
 
+**A second bench pass.** `make bench-persist` run again on the same
+machine into `eval/results/m9-persist/bench-repeat/`, so each mode's
+gateway run can be set against the same mode's gateway run in another
+pass, which the direct runs the checks above use as their drift cannot
+do. Each cell is pass 1 / pass 2 (point estimates; pass 1's intervals
+are in the table above).
+
+|  | `none` | `everysec` | `always` |
+|--|------:|------:|------:|
+| Added p50, non-streaming total (ms) | +1.53 / +1.57 | +1.40 / +1.37 | +2.85 / +2.87 |
+| Added p99, non-streaming total (ms) | +1.62 / +2.66 | +1.70 / +1.60 | +7.81 / +8.49 |
+| Added p50, streaming TTFT (ms) | +1.12 / +1.14 | +1.24 / +1.22 | +2.24 / +2.21 |
+| Added p99, streaming TTFT (ms) | +1.23 / +1.28 | +1.38 / +1.36 | +6.73 / +7.25 |
+| Cost against `none`, p50 total (ms) | n/a / n/a | -0.14 / -0.19 | +1.31 / +1.31 |
+| Cost against `none`, p99 total (ms) | n/a / n/a | +0.07 / -1.06 | +6.18 / +5.83 |
+| Cost against `none`, p50 TTFT (ms) | n/a / n/a | +0.12 / +0.07 | +1.12 / +1.06 |
+| Cost against `none`, p99 TTFT (ms) | n/a / n/a | +0.15 / +0.08 | +5.50 / +5.98 |
+
+How far a mode's added latency moved between the passes (the gateway
+drift), against the direct runs' largest spread within a pass
+(0.05 ms):
+
+| Metric | Gateway drift (ms) | Largest for | Per mode (ms) |
+|--------|-------------------:|-------------|---------------|
+| total p50 | 0.03 | `none` | `none` 0.03, `everysec` 0.02, `always` 0.03 |
+| total p99 | 1.04 | `none` | `none` 1.04, `everysec` 0.10, `always` 0.68 |
+| TTFT p50 | 0.03 | `always` | `none` 0.02, `everysec` 0.02, `always` 0.03 |
+| TTFT p99 | 0.52 | `always` | `none` 0.04, `everysec` 0.03, `always` 0.52 |
+
+The latency hypotheses read with both passes (a cost no larger than the
+gateway drift in either pass is unresolved, and so are two passes on
+either side of the threshold):
+
+| Cost | Pass 1 | Pass 2 | Gateway drift | Threshold | Reading |
+|------|-------:|-------:|--------------:|----------:|---------|
+| `everysec` total p50 | -0.14 ms | -0.19 ms | 0.03 ms | 0.10 ms | under in both passes |
+| `everysec` total p99 | +0.07 ms | -1.06 ms | 1.04 ms | 0.10 ms | unresolved: within the gateway drift |
+| `everysec` TTFT p50 | +0.12 ms | +0.07 ms | 0.03 ms | 0.10 ms | unresolved: the passes disagree |
+| `everysec` TTFT p99 | +0.15 ms | +0.08 ms | 0.52 ms | 0.10 ms | unresolved: within the gateway drift |
+| `always` total p99 | +6.18 ms | +5.83 ms | 1.04 ms | 0.20 ms | over in both passes, by at least 5.63 ms |
+| `always` TTFT p99 | +5.50 ms | +5.98 ms | 0.52 ms | 0.20 ms | over in both passes, by at least 5.30 ms |
+
+The checks in the hypotheses table above are the pre-stated ones and
+stand as written; this pass was run after them and changes no verdict
+there. It does change what the `everysec` verdict means (see the reading
+below).
+
 **Reading the runs.**
 
 - `none`: overshoot $0.198040 at the end, $0.198555 of spend Redis did not hold at the snapshot ending `replica down, Redis back`; Redis ready 0.409 s after its start (append-only file: no file loaded), 0 replica lines with `LOADING`, degraded 2.154 s.
@@ -1200,8 +1247,14 @@ The rule picks `everysec`: `everysec` is the first mode whose overshoot is withi
   drift, moved by no more than 0.05 ms; the gateway runs move between runs by more
   than that. So the honest reading is that `everysec`'s cost is not
   resolved from zero at the 0.1 to 0.15 ms level by one run per mode, not
-  that it was measured above 0.1 ms. Either way it is far under the
-  0.5 ms the rule allows.
+  that it was measured above 0.1 ms. The second pass bears
+  this out: there `everysec`'s TTFT costs read +0.07 and +0.08 ms, under
+  0.1 ms, and a mode's added total p99 moved by up to
+  1.04 ms between passes, so at 0.1 ms the
+  hypothesis is unresolved, not failed. `always`'s cost, milliseconds,
+  is far outside that movement in both passes. Either way
+  `everysec` is far under the 0.5 ms the rule allows, and the rule picks
+  it in both passes.
 - Q6's slow stretch after the Redis kill, now read from the logs:
   calls on connections the replicas had open to Redis timed out
   (85 lines, from 0.233 s to 2.061 s after the kill), each waiting out its
@@ -1217,6 +1270,9 @@ The rule picks `everysec`: `everysec` is the first mode whose overshoot is withi
 - `everysec` bench: commit `7fc69bf`, run 2026-11-12T03:00:55Z, `RATES='' DURATION=60s WARMUP=5s FEATURES='budget' BREAKDOWN_RATE=200 EMBED_RATE=5 BREAKDOWN_DURATION=30s BREAKDOWN_WARMUP=2s REDIS_PERSIST=everysec OUT=eval/results/m9-persist/bench/everysec eval/bench/q1.sh` (Redis `--save '' --appendonly yes --appendfsync everysec`); AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
 - `always` chaos: commit `7fc69bf`, run 2026-11-12T02:55:33Z, `REDIS_PERSIST=always make chaos`; AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
 - `always` bench: commit `7fc69bf`, run 2026-11-12T03:04:10Z, `RATES='' DURATION=60s WARMUP=5s FEATURES='budget' BREAKDOWN_RATE=200 EMBED_RATE=5 BREAKDOWN_DURATION=30s BREAKDOWN_WARMUP=2s REDIS_PERSIST=always OUT=eval/results/m9-persist/bench/always eval/bench/q1.sh` (Redis `--save '' --appendonly yes --appendfsync always`); AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- `none` bench, second pass: commit `7a08ba4`, run 2026-11-12T03:24:09Z, `RATES='' DURATION=60s WARMUP=5s FEATURES='budget' BREAKDOWN_RATE=200 EMBED_RATE=5 BREAKDOWN_DURATION=30s BREAKDOWN_WARMUP=2s REDIS_PERSIST=none OUT=/tmp/m9rerun/bench/none eval/bench/q1.sh` (Redis `--save '' --appendonly no`); AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- `everysec` bench, second pass: commit `7a08ba4-dirty`, run 2026-11-12T03:27:25Z, `RATES='' DURATION=60s WARMUP=5s FEATURES='budget' BREAKDOWN_RATE=200 EMBED_RATE=5 BREAKDOWN_DURATION=30s BREAKDOWN_WARMUP=2s REDIS_PERSIST=everysec OUT=/tmp/m9rerun/bench/everysec eval/bench/q1.sh` (Redis `--save '' --appendonly yes --appendfsync everysec`); AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- `always` bench, second pass: commit `7a08ba4-dirty`, run 2026-11-12T03:30:45Z, `RATES='' DURATION=60s WARMUP=5s FEATURES='budget' BREAKDOWN_RATE=200 EMBED_RATE=5 BREAKDOWN_DURATION=30s BREAKDOWN_WARMUP=2s REDIS_PERSIST=always OUT=/tmp/m9rerun/bench/always eval/bench/q1.sh` (Redis `--save '' --appendonly yes --appendfsync always`); AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
 - Cost: $0 (fake provider; the budget's dollars are its made-up price).
 
 ## Unmodified SDKs through the gateway
@@ -1303,12 +1359,10 @@ observed.
 - Q6 with GCRA: set `ratelimit.algorithm: gcra` in `chaos/switchboard.yaml`
   and run `make chaos` once the GCRA limiter is implemented
   (`internal/ratelimit/gcra.go`).
-- M9's `everysec` cost against the gateway's own run-to-run drift: a
-  second `bench-persist` pass into another directory
-  (`MODES='none everysec' OUT_ROOT=/tmp/m9-repeat make bench-persist`)
-  sets `none` against `none` and `everysec` against `everysec` across
-  passes, which the direct runs cannot (about 7 minutes, $0). The
-  renderer does not read it yet.
+- M9's `everysec` cost resolved at 0.1 ms: two passes disagree and the
+  gateway's p99 moves by about a millisecond between passes, so it needs
+  several passes per mode, interleaved, and a test on their spread
+  rather than on one run's bootstrap interval.
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with
   `claude-haiku-5-5`).
