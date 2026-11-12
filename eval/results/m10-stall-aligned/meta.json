@@ -1,0 +1,22 @@
+{
+  "commit": "9efa1df",
+  "date": "2026-11-12T09:58:02Z",
+  "before_ref": "",
+  "fake_provider": {
+    "latency": "50ms",
+    "latency_sigma": 0.3,
+    "slow_fraction": 0.05,
+    "slow_factor": 10,
+    "tokens": 30,
+    "token_interval": "5ms",
+    "seed": 1
+  },
+  "rate": 20,
+  "steady_seconds": 20,
+  "stall_seconds": 37,
+  "recover_seconds": 40,
+  "client_timeout": "30s",
+  "poll_interval_seconds": 0.05,
+  "arms": "after",
+  "command": "ARMS='after' OUT=eval/results/m10-stall-aligned RATE=20 STEADY=20 STALL=37 RECOVER=40 TIMEOUT=30s SEED=1 eval/stall/run.sh"
+}

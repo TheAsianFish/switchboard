@@ -1,0 +1,3 @@
+switchboard_provider_breaker_state{provider="fake"} 0
+switchboard_provider_first_token_timeouts_total{provider="fake"} 51
+switchboard_provider_retries_total{kind="timeout",provider="fake"} 51
