@@ -211,8 +211,10 @@ func TestDegradingFallsBackAndRecovers(t *testing.T) {
 		t.Fatalf("transitions = %v, want [true false]", got)
 	}
 	logs := f.logs.String()
-	if strings.Count(logs, "level=WARN") != 1 || strings.Count(logs, "level=INFO") != 1 {
-		t.Fatalf("want one warning and one info line, got:\n%s", logs)
+	// Both ends of the outage at warn, so a fleet logging at warn records
+	// each transition.
+	if strings.Count(logs, "level=WARN") != 2 || !strings.Contains(logs, `level=WARN msg="rate limit store recovered, using shared limits"`) {
+		t.Fatalf("want a warning for the failure and one for the recovery, got:\n%s", logs)
 	}
 	if !strings.Contains(logs, "request_id=req_test") {
 		t.Fatalf("log lines lack the request id:\n%s", logs)
