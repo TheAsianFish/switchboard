@@ -67,8 +67,9 @@ type Server struct {
 }
 
 // Loading returns the server at LoadingURLEnv, held by this test until it
-// ends. It skips the test when the variable is unset or the server refuses
-// DEBUG. When the test ends the server is reloaded no more, its debug
+// ends. It skips the test when the variable is unset, and fails it when the
+// server refuses DEBUG: a server named for these tests that cannot run them
+// must not turn the job green with the LOADING path untested. When the test ends the server is reloaded no more, its debug
 // configuration is restored and the next test may have it.
 //
 // Tests that call it must not be parallel: a reload refuses every other
@@ -94,7 +95,7 @@ func Loading(t testing.TB) *Server {
 	defer cancel()
 	if err := s.admin.Do(ctx, "DEBUG", "SLEEP", "0").Err(); err != nil {
 		if strings.Contains(err.Error(), "DEBUG command not allowed") {
-			t.Skipf("Redis at %s refuses DEBUG; start it with --enable-debug-command yes: %v", LoadingURLEnv, err)
+			t.Fatalf("Redis at %s refuses DEBUG; start it with --enable-debug-command yes: %v", LoadingURLEnv, err)
 		}
 		t.Fatalf("Redis at %s: %v", LoadingURLEnv, err)
 	}

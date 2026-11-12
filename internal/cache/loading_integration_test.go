@@ -62,10 +62,13 @@ func TestIntegrationLoadingBypassesAndRecovers(t *testing.T) {
 	logs := &lockedBuffer{}
 	ctx := telemetry.WithRequest(context.Background(), slog.New(slog.NewTextHandler(logs, nil)), "req_test")
 	c := cache.New(cache.Options{
-		KV:            recordingKV{cache.NewRedisKV(rdb, testPrefix()), errs},
-		TTL:           time.Minute,
-		Timeout:       500 * time.Millisecond,
-		RetryInterval: 50 * time.Millisecond,
+		KV:      recordingKV{cache.NewRedisKV(rdb, testPrefix()), errs},
+		TTL:     time.Minute,
+		Timeout: 500 * time.Millisecond,
+		// Long enough that a scheduling pause under -race between the
+		// failed lookup and the next one cannot end the bypass, short
+		// enough to retry twice inside a reload of about a second.
+		RetryInterval: 250 * time.Millisecond,
 	})
 	up := cache.Upstream{Provider: "p", Model: "m"}
 	r := &core.Request{Model: "m", Messages: []core.Message{{Role: core.RoleUser, Text: "What is the capital of France?"}}}
@@ -90,7 +93,7 @@ func TestIntegrationLoadingBypassesAndRecovers(t *testing.T) {
 	}
 	// A lookup after the retry interval tries the store and meets LOADING
 	// again.
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	if l := lookup(); l.Status != cache.StatusError {
 		t.Fatalf("lookup after the interval during LOADING: %s (%s), want error", l.Status, l.Reason)
 	}
