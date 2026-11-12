@@ -57,6 +57,51 @@ type Provider struct {
 	last   *core.Request
 	ledger []Entry
 	rnd    *rand.Rand
+	// stalled is the stall switch; transitions records every flip.
+	stalled     bool
+	transitions []Transition
+	held        atomic.Int64
+}
+
+// Transition is one flip of the stall switch.
+type Transition struct {
+	Time    time.Time `json:"time"`
+	Stalled bool      `json:"stalled"`
+}
+
+// SetStalled turns the stall on or off. A request that arrives while the
+// provider is stalled is accepted and never answered: it is held until its
+// caller gives up, even if the stall ends first, as a black-holed upstream
+// holds the connections it accepted. Requests that arrive after the stall
+// ends are answered as usual. Turning the switch to the state it is
+// already in records nothing.
+func (p *Provider) SetStalled(on bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stalled == on {
+		return
+	}
+	p.stalled = on
+	p.transitions = append(p.transitions, Transition{Time: time.Now(), Stalled: on})
+}
+
+// Stalled reports whether the stall switch is on.
+func (p *Provider) Stalled() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stalled
+}
+
+// Held is the number of stalled requests whose callers have not yet given
+// up.
+func (p *Provider) Held() int64 { return p.held.Load() }
+
+// hold blocks a stalled request until its caller gives up.
+func (p *Provider) hold(ctx context.Context) error {
+	p.held.Add(1)
+	defer p.held.Add(-1)
+	<-ctx.Done()
+	return core.Wrap(core.KindTimeout, ctx.Err(), "request cancelled")
 }
 
 // Entry is one request in the provider's ledger: when it arrived and the
@@ -73,6 +118,9 @@ type Entry struct {
 	InputTokens  int  `json:"input_tokens"`
 	OutputTokens int  `json:"output_tokens"`
 	Completed    bool `json:"completed"`
+	// Stalled is true for a request that arrived while the stall switch
+	// was on and was never answered.
+	Stalled bool `json:"stalled,omitempty"`
 }
 
 // Ledger returns a copy of every request received since the last reset.
@@ -138,22 +186,27 @@ func (p *Provider) LastRequest() *core.Request {
 	return &c
 }
 
-// record notes a request and returns its reply id and ledger index.
-func (p *Provider) record(req *core.Request) (string, int) {
+// record notes a request and returns its reply id, its ledger index and
+// whether it arrived while the provider was stalled.
+func (p *Provider) record(req *core.Request) (string, int, bool) {
 	p.calls.Add(1)
 	c := *req
 	c.Messages = append([]core.Message(nil), req.Messages...)
 	p.mu.Lock()
 	p.last = &c
-	p.ledger = append(p.ledger, Entry{Time: time.Now(), Model: req.Model, Stream: req.Stream, InputTokens: InputTokens(req)})
+	stalled := p.stalled
+	p.ledger = append(p.ledger, Entry{Time: time.Now(), Model: req.Model, Stream: req.Stream, InputTokens: InputTokens(req), Stalled: stalled})
 	i := len(p.ledger) - 1
 	p.mu.Unlock()
-	return fmt.Sprintf("fake-%d", p.seq.Add(1)), i
+	return fmt.Sprintf("fake-%d", p.seq.Add(1)), i, stalled
 }
 
 // Complete implements core.Provider.
 func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Response, error) {
-	id, entry := p.record(req)
+	id, entry, stalled := p.record(req)
+	if stalled {
+		return nil, p.hold(ctx)
+	}
 	if err := sleep(ctx, p.latency()); err != nil {
 		return nil, err
 	}
@@ -180,16 +233,17 @@ func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Respo
 
 // Stream implements core.Provider.
 func (p *Provider) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
-	id, entry := p.record(req)
+	id, entry, stalled := p.record(req)
 	s := &stream{
-		p:     p,
-		entry: entry,
-		ctx:   ctx,
-		cfg:   p.cfg,
-		delay: p.latency(),
-		id:    id,
-		model: req.Model,
-		input: InputTokens(req),
+		p:       p,
+		stalled: stalled,
+		entry:   entry,
+		ctx:     ctx,
+		cfg:     p.cfg,
+		delay:   p.latency(),
+		id:      id,
+		model:   req.Model,
+		input:   InputTokens(req),
 	}
 	if s.call = toolCall(req); s.call != nil {
 		s.stop = core.StopToolUse
@@ -293,14 +347,17 @@ func InputTokens(req *core.Request) int {
 }
 
 type stream struct {
-	p     *Provider
-	entry int
-	ctx   context.Context
-	cfg   Config
-	delay time.Duration
-	id    string
-	model string
-	words []string
+	p *Provider
+	// stalled: the request arrived during a stall and the stream never
+	// sends anything.
+	stalled bool
+	entry   int
+	ctx     context.Context
+	cfg     Config
+	delay   time.Duration
+	id      string
+	model   string
+	words   []string
 	// call, when set, is the reply instead of words: a tool call start and
 	// one arguments delta.
 	call  *core.ToolCall
@@ -332,6 +389,8 @@ func (s *stream) Next() (core.Event, error) {
 		return core.Event{}, io.EOF
 	}
 	switch {
+	case s.state == 0 && s.stalled:
+		return core.Event{}, s.p.hold(s.ctx)
 	case s.state == 0:
 		if err := sleep(s.ctx, s.delay); err != nil {
 			return core.Event{}, err
@@ -395,6 +454,34 @@ func (p *Provider) LedgerHandler() http.Handler {
 	})
 	mux.HandleFunc("POST /ledger/reset", func(w http.ResponseWriter, _ *http.Request) {
 		p.ResetLedger()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	return mux
+}
+
+// StallHandler serves the stall switch: GET /stall returns the switch,
+// the number of requests held and every transition so far; POST
+// /stall/on and /stall/off flip it. `switchboard fake-provider` mounts it,
+// so a benchmark can stall and recover the provider while it runs.
+func (p *Provider) StallHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /stall", func(w http.ResponseWriter, _ *http.Request) {
+		p.mu.Lock()
+		body := struct {
+			Stalled     bool         `json:"stalled"`
+			Held        int64        `json:"held"`
+			Transitions []Transition `json:"transitions"`
+		}{Stalled: p.stalled, Held: p.held.Load(), Transitions: append([]Transition{}, p.transitions...)}
+		p.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(body)
+	})
+	mux.HandleFunc("POST /stall/on", func(w http.ResponseWriter, _ *http.Request) {
+		p.SetStalled(true)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /stall/off", func(w http.ResponseWriter, _ *http.Request) {
+		p.SetStalled(false)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	return mux

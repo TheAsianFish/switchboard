@@ -270,6 +270,7 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	slowFraction := fs.Float64("slow-fraction", 0, "share of requests whose first byte is -slow-factor times slower")
 	slowFactor := fs.Float64("slow-factor", 10, "how much slower a slow request is")
 	seed := fs.Uint64("seed", 1, "seed for the latency draws")
+	stalled := fs.Bool("stalled", false, "start stalled: accept requests and never answer them (POST /stall/off to recover, /stall/on to stall again)")
 	logLevel := fs.String("log-level", envOr("SWITCHBOARD_LOG_LEVEL", "warn"), "log level; warn by default so a benchmark measures serving, not logging")
 	logFormat := fs.String("log-format", envOr("SWITCHBOARD_LOG_FORMAT", "json"), "json or text")
 	if err := parse(fs, args); err != nil {
@@ -281,10 +282,13 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	fp := fake.New(fake.Config{Latency: *latency, Tokens: *tokens, TokenInterval: *interval,
 		LatencySigma: *sigma, SlowFraction: *slowFraction, SlowFactor: *slowFactor, Seed: *seed})
+	fp.SetStalled(*stalled)
 	gw := pipeline.Open{Provider: fp, Names: []string{"fake"}}
 	mux := http.NewServeMux()
 	mux.Handle("/ledger", fp.LedgerHandler())
 	mux.Handle("/ledger/", fp.LedgerHandler())
+	mux.Handle("/stall", fp.StallHandler())
+	mux.Handle("/stall/", fp.StallHandler())
 	mux.Handle("/", server.Handler(gw, log))
 	log.Warn("fake provider starting", slog.String("listen", *listen), slog.Duration("latency", *latency),
 		slog.Int("tokens", *tokens), slog.Duration("token_interval", *interval),
