@@ -189,8 +189,9 @@ means the first whole second after the event already met the rule.
   when its cache comes out of a one-second bypass wait it out, then the
   cache is bypassed again. That the slow stretch ends while Redis is still
   down suggests the calls then fail at once instead of timing out (Docker
-  removes the dead container's name and address); the replicas' logs are
-  not kept, so this is the likely cause rather than a measured one.
+  removes the dead container's name and address). The replicas' logs
+  were not kept in this run; M9 keeps them and confirms it: timeouts on
+  the connections open at the kill, then fast DNS failures.
 - A Redis restart is a reset. Redis has no persistence here (as in
   `deploy/compose.yaml`), so the cache, the limit counters and the budget
   ledger all come back empty: the hit rate climbs back as the pool prompts
@@ -214,6 +215,17 @@ files in `eval/results/m8-flap/before/` and `eval/results/m8-flap/after/`.
 Not measured yet. Run `make chaos-flap RUN=before` at the commit before
 the grace fix and `make chaos-flap RUN=after`, then `make results`.
 
+## M9: budgets across a Redis restart
+
+What does it cost to make a budget survive a Redis restart? Commands:
+`make chaos-persist` (`REDIS_PERSIST=none|everysec|always make chaos`) and
+`make bench-persist` (`eval/bench/persist.sh`), raw files in
+`eval/results/m9-persist/chaos-<mode>/` and
+`eval/results/m9-persist/bench/<mode>/`.
+
+Not measured yet. Run `make chaos-persist` and `make bench-persist`, then
+`make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -236,9 +248,20 @@ observed.
 
 - Budget reconciliation under a flapping store: not measured yet
   (`make chaos-flap`).
-- **Budgets reset on a Redis restart.** Redis runs without persistence,
-  so the ledger comes back empty (Q6's overshoot after the restart); M9
-  measures what an append-only file costs.
+- **About two seconds degraded after Redis comes back.** go-redis's
+  dial backoff and the gateway's one-second probe run one after the
+  other, so a replica keeps using its local limits, grace and no cache for
+  about two seconds after Redis is ready (M9, every mode). The cache is
+  the visible cost: hits lost, not wrong answers.
+- **`everysec` can lose the last second of charges.** A Redis crash in
+  the middle of a key's spending forgets up to a second of its writes;
+  M9's crash came after the budget had run out, so it lost none. With no
+  append-only file (`REDIS_PERSIST=none`, Q6) a restart forgets every
+  budget.
+- **A `LOADING` Redis was not reached under load.** M9's append-only file
+  loaded in tens of milliseconds and no replica called during it; the integration
+  test shows a `LOADING` reply degrades like an unreachable store and
+  recovers, but no chaos run has a Redis that loads for seconds.
 
 ## To measure
 
@@ -261,6 +284,14 @@ observed.
 - Q6 with GCRA: set `ratelimit.algorithm: gcra` in `chaos/switchboard.yaml`
   and run `make chaos` once the GCRA limiter is implemented
   (`internal/ratelimit/gcra.go`).
+- M9 budgets across a Redis restart per append-only mode: `make chaos-persist`
+  and `make bench-persist`, then `make results`.
+- M9's `everysec` cost against the gateway's own run-to-run drift: a
+  second `bench-persist` pass into another directory
+  (`MODES='none everysec' OUT_ROOT=/tmp/m9-repeat make bench-persist`)
+  sets `none` against `none` and `everysec` against `everysec` across
+  passes, which the direct runs cannot (about 7 minutes, $0). The
+  renderer does not read it yet.
 - Claude through the gateway with the unmodified SDKs:
   `ANTHROPIC_API_KEY=... make sdk-smoke` (under $0.01 with
   `claude-haiku-5-5`).
