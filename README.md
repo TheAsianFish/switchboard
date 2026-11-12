@@ -572,6 +572,11 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   after Redis applied it is charged twice, and a hold whose replica died
   while Redis was up expires without its cost reaching `spent`; neither
   showed up in M8's runs.
+- Next (PLAN.md, evolution round 2): a seeded fault-schedule search for
+  ways a budget loses spend that the list above does not name (M11);
+  an expired hold charged as spend without double-charging a late settle
+  (M12); and where an outage's slow requests come from, with the cache
+  probing the store one lookup at a time (M13).
 - Budgets across a Redis restart (M9): with the append-only file the
   compose file now ships, a restarted Redis forgot no spend and the
   overshoot was the outage's grace alone, at a p99 cost the bench could
