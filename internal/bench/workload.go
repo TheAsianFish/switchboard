@@ -68,6 +68,9 @@ type Record struct {
 	// Cache is the gateway's X-Switchboard-Cache-Status, absent when the
 	// response had none.
 	Cache string `json:"cache,omitempty"`
+	// RetryAfter is the response's Retry-After header, absent when it had
+	// none.
+	RetryAfter string `json:"retry_after,omitempty"`
 	// Pool is the pool prompt the request reused, absent for a unique
 	// prompt.
 	Pool *int `json:"pool,omitempty"`
@@ -82,6 +85,8 @@ func record(cfg *Config, i int, r scheduled, start time.Time) Record {
 		Outcome: r.outcome,
 		Status:  r.status,
 		Cache:   r.cache,
+
+		RetryAfter: r.retryAfter,
 	}
 	if !r.sent.IsZero() {
 		v := round6(r.sent.Sub(start).Seconds())

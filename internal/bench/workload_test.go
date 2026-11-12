@@ -311,3 +311,26 @@ func TestResultWithoutRepeatIsUnchanged(t *testing.T) {
 		}
 	}
 }
+
+func TestLogRecordsRetryAfter(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "7")
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	var log bytes.Buffer
+	if _, err := Run(context.Background(), Config{URL: srv.URL, Model: "m", Rate: 50, Warmup: time.Millisecond,
+		Duration: 100 * time.Millisecond, Log: &log}); err != nil {
+		t.Fatal(err)
+	}
+	recs := readRecords(t, &log)
+	if len(recs) == 0 {
+		t.Fatal("no log lines")
+	}
+	for _, r := range recs {
+		if r.Outcome != "http_503" || r.RetryAfter != "7" {
+			t.Fatalf("record %+v, want http_503 with Retry-After 7", r)
+		}
+	}
+}
