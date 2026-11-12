@@ -532,6 +532,57 @@ What the numbers and the code say:
   numbers, by a rule written here before the run: the cheapest mode whose
   overshoot is within the grace bound plus one second of spend and whose
   added p99 is under 0.5 ms.
+- *How each number is read and each hypothesis judged (fixed before the
+  full runs).* `make chaos-persist` runs Q6's schedule and streams once per
+  mode (`REDIS_PERSIST=none|everysec|always make chaos`), Redis in a fresh
+  container whose append-only file lives on the container's own
+  filesystem, since `redis:8` declares no volume (`stat -f` reports
+  overlayfs in the smoke run). Snapshots of the budgeted key are taken
+  before every docker action, as in M8.
+  - *Overshoot* is Q6's: the provider ledger's spend for the key from the
+    start to the end of the run, minus $0.20. `everysec` holds at
+    $0.02465 or less (two live replicas' grace at the kill, $0.0200, plus
+    one second of the stream's offered spend, 10 × $0.000465); `always`
+    holds at $0.0200 or less.
+  - *What the restart lost* is the reconciliation gap (ledger minus
+    Redis `spent`) at the snapshot 0.5 s before replica 2 starts, 14.5 s
+    after Redis did: by then pending grace charges have been flushed, so
+    a gap is spend Redis forgot.
+  - *Errors while Redis answers `LOADING`*: the main stream's error rate
+    and the other two streams' errors other than 429 and 402 in the phase
+    after the restart, beside the number of replica log lines that carry a
+    `LOADING` error. If no replica logged one, the run did not exercise the
+    `LOADING` path and that part of the hypothesis rests on the integration
+    test; it is reported as such, not as held.
+  - *Hit rate of repeats* in the phase after the restart; holds at 95% or
+    more.
+  - *Degraded seconds after the restart*: from the start of Redis until the
+    last live replica's budget, limiter and cache logged their recovery
+    (the replicas' logs at warn level, kept with the run). Reported, with
+    no threshold.
+  - *Latency* (`make bench-persist`): per mode, Q1's breakdown method for
+    the `budget` config (limits and budget on) at 200 requests per second,
+    30 s after 2 s warm-up, non-streaming total and streaming TTFT, each
+    against the pooled direct runs before and after it, with Q1's 1,000
+    resample bootstrap intervals. A mode's *cost* is its added latency
+    minus `none`'s at the same percentile, with an interval from
+    resampling all four sample sets. The *drift* is the largest spread
+    between the two direct runs of any mode at that percentile in the same
+    run (Q1's committed figure, 0.09 ms at p50 and 0.12 ms at p99, is
+    shown beside it). A cost no larger than the drift is *unresolved*;
+    otherwise it holds if it is under the threshold (0.1 ms at p50 and p99
+    for `everysec`, 0.2 ms at p99 for `always`) and fails by the excess if
+    not. Both metrics must hold for the hypothesis to hold.
+  - *The rule.* Modes in the order `none`, `everysec`, `always`; the
+    default is the first whose overshoot is at most $0.02465 and whose
+    larger p99 cost (of the two metrics) is under 0.5 ms; an unresolved
+    cost passes only if the drift itself is under 0.5 ms. `none` costs 0
+    by definition. If no mode passes, the default stays `none` and the
+    README says so.
+  - *Q6's slow stretch* is read from the `none` arm's logs (the Q6
+    configuration): the store errors each replica logged after the kill,
+    by class (timeout, DNS, refused, `LOADING`, closed) and by when they
+    started and stopped, including go-redis's own connection-pool lines.
 
 **M10. Does a provider that stops answering ever open the breaker?**
 
