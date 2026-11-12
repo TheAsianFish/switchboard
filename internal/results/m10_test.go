@@ -47,7 +47,7 @@ func m10Summary() *stalleval.Summary {
 	after.Metrics.FirstTokenTimeouts, after.Metrics.Retries = 51, map[string]int{"timeout": 51}
 	after.Ledger.Stalled = 51
 	s.Arms = []*stalleval.Arm{before, after}
-	s.Sanity = &stalleval.Sanity{Commit: "abc1234", Requests: 12000, TimeoutSeconds: 2,
+	s.Sanity = &stalleval.Sanity{Commit: "abc1234", Requests: 12000, Sent: 13000, Upstream: 13000, TimeoutSeconds: 2,
 		TTFT: bench.Stats{P99: 637.909, P999: 952.203, Max: 1455.891}, Held: true}
 	s.Verdicts = []stalleval.Verdict{
 		{Arm: "before", Check: stalleval.CheckOpens, Measured: f64(0), Op: stalleval.OpEq, Held: true},
@@ -71,6 +71,7 @@ func TestRenderM10(t *testing.T) {
 	aligned.Arms[0].Breaker.TimeToCloseSeconds = f64(11.43)
 	aligned.Arms[0].Breaker.PredictedCloseSeconds = f64(11.41)
 	m.Aligned = buildM10Aligned(m10Summary(), aligned)
+	addM10AlignedClose(m)
 	m.Trace = &M10Trace{Command: "scripts/trace-check.sh --local --stall", Config: "eval/trace/stall.yaml", TimeoutMS: "300", TTFT: "331.9",
 		Attempts: []M10Attempt{{N: "1", Outcome: "first_token_timeout", DurationMS: "300.9"}, {N: "2", Outcome: "won", DurationMS: "172.2"}}}
 	if m.Timeout != "2 s" || m.ClientTimeout != "30 s" || m.PollGap != "63" || m.WorstClose != "12.05" || m.HalfOpenAfterEnd != "0.407" {
@@ -91,8 +92,9 @@ func TestRenderM10(t *testing.T) {
 		"| First-token timeouts / timeout retries (gateway metrics) | – | 51 / 51 |",
 		"1,155, p50 0.96 ms, p99 1.57 ms, max 2,095.6 ms",
 		"4 of them (0.3%)",
-		"| After: closed after the provider answers again | ≤ 11 s (one cooldown + 1 s) | 12.100 s | no |",
-		"| 0 first-token timeouts on Q4's hedging-off arm | 0 | 0 (largest TTFT 1,455.9 ms against the 2 s timeout) | yes |",
+		"| After: closed after the provider answers again (main run) | ≤ 11 s (one cooldown + 1 s) | 12.100 s | no |",
+		"| After: closed after the provider answers again, stall ending just after a probe (aligned run) | ≤ 11 s (one cooldown + 1 s) | 11.430 s | no |",
+		"| 0 first-token timeouts on Q4's hedging-off arm | 0 | 0 (largest TTFT 1,455.9 ms against the 2 s timeout; 13,000 upstream requests for 13,000 sent) | yes |",
 		"| Stall end to closed (s) | 0.477 | 11.430 |",
 		"| Closed within 11 s | yes | no |",
 		"over the bound as predicted: yes",
@@ -108,6 +110,9 @@ func TestRenderM10(t *testing.T) {
 	}
 	if !strings.HasPrefix(m.Headline, "Provider stalled at 20 req/s: breaker opened 0 times in 60 s before; with a 2 s first-token timeout, open 2.249 s") {
 		t.Errorf("headline %q", m.Headline)
+	}
+	if !strings.HasSuffix(m.Headline, "(11.430 s when the stall ended just after a probe)") {
+		t.Errorf("headline %q leaves out the aligned run's close", m.Headline)
 	}
 }
 

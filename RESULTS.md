@@ -1345,8 +1345,9 @@ the maximum.
 | After: open at the fifth stalled upstream arrival plus the timeout | within 0.1 s | -0.03 ms | yes |
 | After: refusals in the stall are fast (p99) | < 5 ms | 1.57 ms | yes |
 | After: refusals carry `Retry-After` | 100% | 100.0% (1,155 of 1,155) | yes |
-| After: closed after the provider answers again | ≤ 11 s (one cooldown + 1 s) | 0.477 s | yes |
-| 0 first-token timeouts on Q4's hedging-off arm | 0 | 0 (largest TTFT 1,455.8 ms against the 2 s timeout) | yes |
+| After: closed after the provider answers again (main run) | ≤ 11 s (one cooldown + 1 s) | 0.477 s | yes |
+| After: closed after the provider answers again, stall ending just after a probe (aligned run) | ≤ 11 s (one cooldown + 1 s) | 11.476 s | no |
+| 0 first-token timeouts on Q4's hedging-off arm | 0 | 0 (largest TTFT 1,455.8 ms against the 2 s timeout; 13,000 upstream requests for 13,000 sent) | yes |
 
 **Reading the runs.**
 
@@ -1369,7 +1370,10 @@ the stall ends just after a probe went out, the probe is held and fails,
 and the close comes about one cooldown plus the timeout later, over the
 11 s bound. Measured: closed 11.476 s after the stall's end against
 11.437 s predicted from its last probe; over the bound as predicted: yes.
-The main run's verdict stands as measured.
+So the main run's close met the 11 s bound only because its stall ended late in an
+open window; PLAN.md withdraws "within a cooldown plus 1 s" as a guarantee.
+The bound is one cooldown plus the timeout plus one arrival gap and the
+probe's own reply.
 
 | | Main run (`after`) | Aligned run |
 |-|------:|------:|
@@ -1381,7 +1385,9 @@ The main run's verdict stands as measured.
 | Closed within 11 s | yes | no |
 
 **Sanity check.** Q4's hedging-off arm again (12,000 requests), with the
-2 s first-token timeout (`eval/hedge/off-ftt.yaml`): the timeout fired 0 times (the counter exported no series: it never fired).
+2 s first-token timeout (`eval/hedge/off-ftt.yaml`): the timeout fired 0 times (the counter exported no series: it never fired),
+and the fake provider's ledger received 13,000 requests for the 13,000 the bench sent
+(warm-up included), so no attempt was retried.
 The largest TTFT was 1,455.8 ms (p99.9 952.5 ms, p99 638.6 ms); Q4's committed
 hedging-off arm (`84a20db`) had 1,458.8 ms and 952.7 ms. The fake provider's tail is
 built to stay under the timeout, so this checks that the setting does not

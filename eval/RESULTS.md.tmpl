@@ -1242,7 +1242,10 @@ the stall ends just after a probe went out, the probe is held and fails,
 and the close comes about one cooldown plus the timeout later, over the
 {{.Bound}} s bound. Measured: closed {{.Close}} s after the stall's end against
 {{.Predicted}} s predicted from its last probe; over the bound as predicted: {{.OverAsPredicted}}.
-The main run's verdict stands as measured.
+So the main run's close met the 11 s bound only because its stall ended late in an
+open window; PLAN.md withdraws "within a cooldown plus 1 s" as a guarantee.
+The bound is one cooldown plus the timeout plus one arrival gap and the
+probe's own reply.
 
 | | Main run (`after`) | Aligned run |
 |-|------:|------:|
@@ -1251,7 +1254,9 @@ The main run's verdict stands as measured.
 {{- end}}
 {{end}}{{with .Sanity}}
 **Sanity check.** Q4's hedging-off arm again ({{.Requests}} requests), with the
-{{.Timeout}} first-token timeout (`eval/hedge/off-ftt.yaml`): the timeout fired {{.Fired}} times{{.FiredNote}}.
+{{.Timeout}} first-token timeout (`eval/hedge/off-ftt.yaml`): the timeout fired {{.Fired}} times{{.FiredNote}},
+and the fake provider's ledger received {{.Upstream}} requests for the {{.Sent}} the bench sent
+(warm-up included), so no attempt was retried.
 The largest TTFT was {{.TTFTMax}} ms (p99.9 {{.TTFTP999}} ms, p99 {{.TTFTP99}} ms); Q4's committed
 hedging-off arm (`{{.Q4Commit}}`) had {{.Q4TTFTMax}} ms and {{.Q4TTFTP999}} ms. The fake provider's tail is
 built to stay under the timeout, so this checks that the setting does not

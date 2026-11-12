@@ -138,6 +138,9 @@ type M10Sanity struct {
 	Q4Commit, Q4TTFTP999, Q4TTFTMax string
 	// FiredNote says when the counter exported no series.
 	FiredNote string
+	// Sent and Upstream are the requests sent and the provider's ledger
+	// count; equal when no timeout fired (a fired one is retried).
+	Sent, Upstream string
 }
 
 const dash = "–"
@@ -174,10 +177,41 @@ func loadM10(resultsDir string) (*M10, error) {
 	if m.Aligned, err = loadM10Aligned(filepath.Join(resultsDir, M10AlignedDir), s); err != nil {
 		return nil, err
 	}
+	addM10AlignedClose(m)
 	if m.Trace, err = loadM10Trace(filepath.Join(resultsDir, M10TraceDir)); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+// addM10AlignedClose puts the aligned run's close beside the main run's
+// in the hypotheses and the headline: the main run's stall ended late in
+// an open window, so its close alone reads as the bound holding when it
+// holds only for that alignment.
+func addM10AlignedClose(m *M10) {
+	al := m.Aligned
+	if al == nil || al.Close == dash {
+		return
+	}
+	held := "yes"
+	if al.OverAsPredicted == "yes" {
+		held = "no"
+	}
+	row := M10Check{
+		Hypothesis: "After: closed after the provider answers again, stall ending just after a probe (aligned run)",
+		Bound:      "≤ " + al.Bound + " s (one cooldown + 1 s)",
+		Measured:   al.Close + " s",
+		Held:       held,
+	}
+	// Beside the main run's close, or last without one.
+	at := len(m.Checks)
+	for i, c := range m.Checks {
+		if strings.HasPrefix(c.Hypothesis, "After: closed after the provider answers again") {
+			at = i + 1
+		}
+	}
+	m.Checks = append(m.Checks[:at], append([]M10Check{row}, m.Checks[at:]...)...)
+	m.Headline += fmt.Sprintf(" (%s s when the stall ended just after a probe)", al.Close)
 }
 
 func loadM10Aligned(dir string, main *stalleval.Summary) (*M10Aligned, error) {
@@ -377,6 +411,7 @@ func buildM10(s *stalleval.Summary) *M10 {
 		m.Sanity = &M10Sanity{Meta: san, Hardware: describeHardware(san.Hardware),
 			Requests: thousands(strconv.Itoa(san.Requests)), Fired: strconv.Itoa(san.FirstTokenTimeouts),
 			Timeout: num(san.TimeoutSeconds) + " s",
+			Sent:    thousands(strconv.Itoa(san.Sent)), Upstream: thousands(strconv.Itoa(san.Upstream)),
 			TTFTP99: thousands1(san.TTFT.P99), TTFTP999: thousands1(san.TTFT.P999), TTFTMax: thousands1(san.TTFT.Max),
 			Q4Commit: dash, Q4TTFTP999: dash, Q4TTFTMax: dash}
 		if !san.FirstTokenTimeoutsSeries {
@@ -511,7 +546,7 @@ func m10Check(s *stalleval.Summary, v stalleval.Verdict) M10Check {
 			return out
 		})
 	case stalleval.CheckCloseWithin:
-		c.Hypothesis = "After: closed after the provider answers again"
+		c.Hypothesis = "After: closed after the provider answers again (main run)"
 		c.Bound = "≤ " + num(v.Bound) + " s (one cooldown + 1 s)"
 		val(func(x float64) string { return strconv.FormatFloat(x, 'f', 3, 64) + " s" })
 	case stalleval.CheckNoTimeouts:
@@ -519,7 +554,8 @@ func m10Check(s *stalleval.Summary, v stalleval.Verdict) M10Check {
 		val(func(x float64) string {
 			out := num(x)
 			if san := s.Sanity; san != nil {
-				out += fmt.Sprintf(" (largest TTFT %s ms against the %s s timeout)", thousands1(san.TTFT.Max), num(san.TimeoutSeconds))
+				out += fmt.Sprintf(" (largest TTFT %s ms against the %s s timeout; %s upstream requests for %s sent)",
+					thousands1(san.TTFT.Max), num(san.TimeoutSeconds), thousands(strconv.Itoa(san.Upstream)), thousands(strconv.Itoa(san.Sent)))
 			}
 			return out
 		})
