@@ -32,6 +32,11 @@
 #                       (default 30s, 2s, or DURATION and WARMUP when set)
 #   OLLAMA_URL          a running Ollama to embed with; otherwise q1.sh starts
 #                       ollama/ollama in Docker (named volume switchboard-bench-ollama)
+#   REDIS_PERSIST       none, everysec or always (M9, eval/bench/persist.sh):
+#                       Redis without snapshots and with the append-only file
+#                       off, or on with that fsync policy. Unset: the image's
+#                       defaults, as in every Q1 run so far.
+#   OUT                 results directory (default eval/results/q1-overhead)
 #
 # Durations take a single unit: 500ms, 30s or 2m.
 #
@@ -93,9 +98,28 @@ ollama_volume=switchboard-bench-ollama
 probe_n=120
 probe_par=16
 
-out=eval/results/q1-overhead
+persist=${REDIS_PERSIST:-}
+redis_args=()
+redis_desc=""
+case $persist in
+"") ;;
+none)
+	redis_args=(--save "" --appendonly no)
+	redis_desc="--save '' --appendonly no"
+	;;
+everysec | always)
+	redis_args=(--save "" --appendonly yes --appendfsync "$persist")
+	redis_desc="--save '' --appendonly yes --appendfsync $persist"
+	;;
+*)
+	echo "q1: REDIS_PERSIST must be none, everysec or always, got $persist" >&2
+	exit 2
+	;;
+esac
+
+out=${OUT:-eval/results/q1-overhead}
 bdir=$out/breakdown
-command="RATES='$rates' DURATION=$duration WARMUP=$warmup FEATURES='$features' BREAKDOWN_RATE=$breakdown_rate EMBED_RATE=$embed_rate BREAKDOWN_DURATION=$breakdown_duration BREAKDOWN_WARMUP=$breakdown_warmup eval/bench/q1.sh"
+command="RATES='$rates' DURATION=$duration WARMUP=$warmup FEATURES='$features' BREAKDOWN_RATE=$breakdown_rate EMBED_RATE=$embed_rate BREAKDOWN_DURATION=$breakdown_duration BREAKDOWN_WARMUP=$breakdown_warmup${persist:+ REDIS_PERSIST=$persist}${OUT:+ OUT=$OUT} eval/bench/q1.sh"
 
 for f in $features; do
 	if [[ " ${all_configs[*]} " != *" $f "* ]]; then
@@ -246,7 +270,7 @@ host_port() { docker port "$1" "$2/tcp" | head -n1 | sed 's/.*://'; }
 redis_name="" redis_url=""
 if $need_redis; then
 	redis_name=switchboard-q1-redis-$$
-	start_container "$redis_name" -p 127.0.0.1::6379 "$redis_image"
+	start_container "$redis_name" -p 127.0.0.1::6379 "$redis_image" ${redis_args[@]+"${redis_args[@]}"}
 	redis_url=redis://127.0.0.1:$(host_port "$redis_name" 6379)/0
 	for _ in $(seq 1 50); do
 		docker exec "$redis_name" redis-cli ping >/dev/null 2>&1 && break
@@ -482,6 +506,11 @@ $breakdown_selected && mkdir -p "$bdir"
 		echo "    \"warmup\": \"$breakdown_warmup\","
 		echo "    \"cache_directive\": \"${bench_cache[1]:-}\","
 		echo "    \"redis\": \"$($need_redis && echo "$redis_image")\","
+		if [[ -n $persist ]] && $need_redis; then
+			echo "    \"redis_persist\": \"$persist\","
+			echo "    \"redis_args\": $(json_str "$redis_desc"),"
+			echo "    \"redis_data_fs\": \"$(docker exec "$redis_name" stat -f -c %T /data 2>/dev/null || echo unknown)\","
+		fi
 		echo "    \"jaeger\": \"$($need_jaeger && echo "$jaeger_image")\","
 		if [[ -n $ollama_url ]]; then
 			echo "    \"ollama\": {"
@@ -586,6 +615,10 @@ gateway_run() {
 	local rss
 	rss=$(peak_rss_kb "$gw")
 	curl -fsS "http://$admin_addr/metrics" | grep '^switchboard_' | grep -v '_bucket{' >"$base.metrics.txt" || true
+	if [[ -n $persist && -n $redis_name ]]; then
+		# What Redis did with its append-only file during the run.
+		docker exec "$redis_name" redis-cli INFO persistence | tr -d '\r' >"$base.redis-persistence.txt" || true
+	fi
 	kill "$gw"
 	wait "$gw" 2>/dev/null || true
 	local trace_found=null

@@ -4,7 +4,7 @@ BIN := $(CURDIR)/bin
 GOLANGCI := $(BIN)/golangci-lint
 export GOTOOLCHAIN ?= auto
 
-.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge chaos chaos-flap chaos-persist eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results ui ui-check docker dist check-install clean
+.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge chaos chaos-flap chaos-persist bench-persist eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results ui ui-check docker dist check-install clean
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -99,6 +99,9 @@ chaos: ## Q6: replica and Redis kills under load in a 3-replica compose fleet (a
 
 chaos-persist: ## M9: the Q6 schedule once per Redis append-only mode, none, everysec and always (about 10 minutes; MODES= to pick)
 	for m in $(or $(MODES),none everysec always); do REDIS_PERSIST=$$m chaos/run.sh || exit 1; done
+
+bench-persist: ## M9: Q1's limits-and-budget config at 200 req/s against Redis with each append-only mode (about 11 minutes)
+	eval/bench/persist.sh
 
 chaos-flap: ## M8: Redis cut off and reconnected eight times, a replica killed while degraded (about 4 minutes; RUN=before|after)
 	@test -n "$(RUN)" || { echo "set RUN, e.g. make chaos-flap RUN=after"; exit 1; }
