@@ -523,6 +523,64 @@ func TestStoreRecoveryLogged(t *testing.T) {
 	}
 }
 
+// slowKV holds the first Get until released, so a call can be in flight
+// while another one fails.
+type slowKV struct {
+	*failingKV
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *slowKV) Get(ctx context.Context, k string) ([]byte, bool, error) {
+	first := false
+	s.once.Do(func() { first = true })
+	if first {
+		close(s.entered)
+		<-s.release
+		return s.KV.Get(ctx, k)
+	}
+	return s.failingKV.Get(ctx, k)
+}
+
+// A call that was in flight when the store failed, and succeeds afterwards,
+// says nothing about the store now: it must not log a recovery in the middle
+// of the outage. The first call that starts after the failure and succeeds
+// does.
+func TestStoreRecoveryIgnoresCallsFromBeforeTheFailure(t *testing.T) {
+	t.Parallel()
+	const recovered = `level=WARN msg="cache store reachable again"`
+	logs := &logBuffer{}
+	ctx := telemetry.WithRequest(context.Background(), slog.New(slog.NewTextHandler(logs, nil)), "req_test")
+	clk := &clock{t: time.Unix(1_700_000_000, 0)}
+	kv := &slowKV{failingKV: &failingKV{KV: cache.NewMemoryKV(10, clk.now)}, entered: make(chan struct{}), release: make(chan struct{})}
+	c := cache.New(cache.Options{KV: kv, TTL: time.Hour, Timeout: time.Minute, RetryInterval: time.Second, Now: clk.now})
+
+	done := make(chan *cache.Lookup)
+	go func() { done <- c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", "in flight")) }()
+	<-kv.entered
+	kv.set(true)
+	if l := c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", "fails")); l.Status != cache.StatusError {
+		t.Fatalf("lookup in the outage: %+v", l)
+	}
+	close(kv.release)
+	if l := <-done; l.Status != cache.StatusMiss {
+		t.Fatalf("lookup in flight: %+v", l)
+	}
+	if n := strings.Count(logs.String(), recovered); n != 0 {
+		t.Fatalf("%d recovery lines from a call that started before the failure, want 0; logs:\n%s", n, logs.String())
+	}
+
+	kv.set(false)
+	clk.add(time.Second)
+	if l := c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", "after")); l.Status != cache.StatusMiss {
+		t.Fatalf("lookup after the outage: %+v", l)
+	}
+	if n := strings.Count(logs.String(), recovered); n != 1 {
+		t.Fatalf("%d recovery lines after the outage, want 1; logs:\n%s", n, logs.String())
+	}
+}
+
 // Without the embedder the exact layer keeps working.
 func TestEmbedderDown(t *testing.T) {
 	t.Parallel()
