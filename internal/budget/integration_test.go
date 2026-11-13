@@ -87,13 +87,30 @@ func TestIntegrationConcurrentReplicas(t *testing.T) {
 	concurrentProperty(t, replicas, "key")
 }
 
+// TestIntegrationExpiry checks the expiry charge and the late settle on a
+// real Redis, whose scripts run on its own clock: the hold is charged at
+// its held amount once it lapses, frees nothing, and the late settle
+// corrects the charge to the real cost, once.
 func TestIntegrationExpiry(t *testing.T) {
 	rdb := realRedis(t)
-	l := NewRedis(rdb, testPrefix(t, rdb), time.Second, nil)
+	prefix := testPrefix(t, rdb)
+	l := NewRedis(rdb, prefix, time.Second, nil)
+	ctx := context.Background()
 	b := Budget{Limit: 100, Period: PeriodMonthly}
-	mustReserve(t, l, "k", b, "a", 100)
-	wantPosition(t, mustBalance(t, l, "k", b), 0, 100)
+	r := mustReserve(t, l, "k", b, "a", 70)
+	wantPosition(t, mustBalance(t, l, "k", b), 0, 70)
 	time.Sleep(1200 * time.Millisecond)
-	wantPosition(t, mustBalance(t, l, "k", b), 0, 0)
-	mustReserve(t, l, "k", b, "b", 100)
+	wantPosition(t, mustBalance(t, l, "k", b), 70, 0)
+	if _, err := l.Reserve(ctx, "k", b, "b", 31); !errors.Is(err, ErrExhausted) {
+		t.Fatalf("Reserve past the expired hold's charge: err = %v", err)
+	}
+	tomb := l.keys("k", r.Window)[3]
+	if ttl, err := rdb.TTL(ctx, tomb).Result(); err != nil || ttl < 69*24*time.Hour {
+		t.Fatalf("tombstone TTL = %v, %v; want the monthly window's 70 days", ttl, err)
+	}
+	mustSettle(t, l, "k", b, r, 25)
+	wantPosition(t, mustBalance(t, l, "k", b), 25, 0)
+	mustSettle(t, l, "k", b, r, 5)
+	wantPosition(t, mustBalance(t, l, "k", b), 30, 0)
+	mustReserve(t, l, "k", b, "b", 70)
 }

@@ -282,6 +282,34 @@ seed that lost spend or broke an invariant, per arm).
 
 Not measured yet. Run `make sim-budget SEEDS=100000`, then `make results`.
 
+## M12: an unsettled hold becomes spend, without charging anything twice
+
+What does a replica killed with requests in flight cost the ledger while
+Redis is up, and does charging an expired hold close it without
+double-charging the holds the degraded path already leaves to expire?
+Commands: `make chaos-orphan RUN=before|after`, the flap schedule re-run
+(`SCHEDULE=flap OUT=eval/results/m12-orphan/flap-rerun chaos/run.sh`),
+and `make sim-budget SEEDS=100000`; raw files in
+`eval/results/m12-orphan/` and `eval/results/m12-budget-sim/`.
+
+**The fix.** An expired hold is charged as `spent` at its held amount
+(the input estimate plus `max_tokens`, the request's worst case) by the
+next script that touches the key, and its id is kept with the amount in
+a tombstone hash that lives as long as the window's keys. A settle that
+finds the tombstone corrects `spent` by actual − held instead of adding
+the cost again. A replica that settles a Redis hold while Redis is
+unreachable keeps that cost in pending under the hold's id, so the flush
+after the outage settles the hold (or corrects its tombstone) instead of
+charging beside it. `memory.go` does the same under the ledger contract
+tests; `TestIntegrationExpiry` runs expiry and a late settle on a real
+Redis, and `TestDegradingParkedSettleOutlivesTwoHoldTTLs` flushes a
+grace-time settle after an outage of two and a half hold TTLs and
+charges it once (with the ledger fix alone and no id in pending, that
+test charges 80 + 30 for a request that cost 30).
+
+Not measured yet. Run `make chaos-orphan RUN=before`, `make chaos-orphan
+RUN=after` and `make sim-budget SEEDS=100000`, then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire

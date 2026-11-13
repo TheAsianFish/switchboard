@@ -1,0 +1,72 @@
+# Gateway config for M12's orphan run (`make chaos-orphan`, PLAN.md M12):
+# chaos/switchboard.yaml with three changes. Unsettled holds lapse after
+# 30 s (budget.reservation_ttl), so a hold left by a killed replica
+# expires inside the run; the provider timeout drops to 20 s because
+# config requires a hold to outlive it; and the budgeted key gets $5, so it
+# is admitting for the whole run instead of running out at about 43 s.
+# chaos/orphan.compose.yaml mounts this file in place of the Q6 one.
+listen: 0.0.0.0:8080
+log:
+  format: json
+  level: warn
+providers:
+  - name: fake
+    type: openaicompat
+    base_url: http://fake-provider:9101/v1
+    timeout: 20s
+models:
+  - name: fake-chaos
+    provider: fake
+  - name: fake-limited
+    provider: fake
+  - name: fake-budget
+    provider: fake
+    # A made-up price so spend is not zero: $3 in, $15 out per MTok, as in
+    # Q2. A fake reply (5 tokens in, 30 out) costs $0.000465. The fake
+    # provider streams this model's replies at 68 ms a token, about 2 s.
+    price: {input: 3, output: 15}
+redis:
+  url: redis://redis:6379/0
+  timeout: 100ms
+ratelimit:
+  # GCRA is not implemented yet (Q2); the fixed window is what ships.
+  algorithm: fixed_window
+  # While Redis is down each replica enforces a third of every limit.
+  replicas: 3
+budget:
+  # An unsettled hold lapses 30 s after it was taken (the default is 15
+  # minutes): long enough for any request here, short enough that the
+  # holds of the requests a killed replica had in flight lapse in the run.
+  reservation_ttl: 30s
+  # Per replica and key while Redis is down: about 20 fake replies.
+  grace_usd: 0.01
+  # The allowance refills over an hour and is not reset when Redis comes
+  # back, so a flapping store cannot hand out grace again and again (M8).
+  grace_refill: 1h
+cache:
+  # Exact only: the semantic layer ships off (RESULTS.md, Q3), so the run
+  # needs no embedding model. The main key's requests send
+  # X-Switchboard-Cache: exact, which makes them cacheable.
+  mode: off
+keys:
+  # The main workload: about 200 requests per second, 30% of them repeats,
+  # no limit and no budget, so its errors and latency are the fleet's.
+  - name: main
+    key: sk-chaos-main
+    models: [fake-chaos]
+    cache: exact
+  # Offered three times its limit, so the ledger shows whether the
+  # replicas hold one limit together through each fault.
+  - name: limited
+    key: sk-chaos-limited
+    models: [fake-limited]
+    cache: "off"
+    limits:
+      requests: {rate: 10, per: 1s, burst: 10}
+  # Never runs out: the run is about what a killed replica's holds do to
+  # spent, not about refusals. 600 requests of at most $0.001005 held each.
+  - name: budget
+    key: sk-chaos-budget
+    models: [fake-budget]
+    cache: "off"
+    budget: {usd: "5", period: total}

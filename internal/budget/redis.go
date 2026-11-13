@@ -22,7 +22,9 @@ const MaxExact cost.Nanos = 1 << 53
 
 // windowTTL is how long a window's keys live after their last write: long
 // enough to read yesterday's or last month's spend, short enough that old
-// windows do not pile up. Total budgets never expire.
+// windows do not pile up. Total budgets never expire, and neither do their
+// tombstones: one hash field per hold that expired unsettled, which a
+// healthy fleet makes only when a replica dies with requests in flight.
 func windowTTL(p Period) time.Duration {
 	switch p {
 	case PeriodDaily:
@@ -36,8 +38,18 @@ func windowTTL(p Period) time.Duration {
 
 // luaPrelude is shared by every script. KEYS[1] is the balance hash
 // (fields spent and reserved), KEYS[2] a ZSET of reservation id to expiry
-// in milliseconds, KEYS[3] a hash of reservation id to amount. Expiry uses
-// the Redis server's clock, so every replica agrees on when a hold lapses.
+// in milliseconds, KEYS[3] a hash of reservation id to amount and KEYS[4]
+// a hash of tombstones: the id and held amount of every hold that expired
+// unsettled. Expiry uses the Redis server's clock, so every replica agrees
+// on when a hold lapses.
+//
+// A hold that expires is charged as spent at its held amount: the request
+// it covered may have been billed by the provider and its replica may be
+// gone, and the hold is the most the request could cost. Its tombstone
+// lives as long as the window's keys, so a settle that arrives after the
+// expiry (a slow request, or one whose settle waited in a replica's
+// pending charges through an outage) corrects spent by actual − held
+// instead of charging the cost a second time.
 //
 // Amounts travel as strings and are written with HINCRBY so that sums are
 // exact integers; Lua numbers (doubles) are used only for comparisons.
@@ -45,7 +57,7 @@ const luaPrelude = `
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 
-local function release(id)
+local function unhold(id)
   local a = redis.call('HGET', KEYS[3], id)
   redis.call('ZREM', KEYS[2], id)
   if a then
@@ -55,14 +67,21 @@ local function release(id)
       if r < 0 then redis.call('HSET', KEYS[1], 'reserved', '0') end
     end
   end
+  return a
 end
 
 local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', now)
-for _, id in ipairs(expired) do release(id) end
+for _, id in ipairs(expired) do
+  local a = unhold(id)
+  if a and a ~= '0' then
+    redis.call('HINCRBY', KEYS[1], 'spent', a)
+    redis.call('HINCRBY', KEYS[4], id, a)
+  end
+end
 
 local function touch(ttl)
   if ttl ~= '0' then
-    for i = 1, 3 do redis.call('EXPIRE', KEYS[i], ttl) end
+    for i = 1, 4 do redis.call('EXPIRE', KEYS[i], ttl) end
   end
 end
 
@@ -75,7 +94,7 @@ end
 // {admitted, spent, reserved} with the position before the hold.
 var reserveScript = redis.NewScript(luaPrelude + `
 local limit, amount, id = tonumber(ARGV[1]), tonumber(ARGV[2]), ARGV[3]
-release(id)
+unhold(id)
 local pos = position()
 local rem = limit - tonumber(pos[1]) - tonumber(pos[2])
 if amount > rem or (amount == 0 and rem <= 0) then
@@ -89,10 +108,21 @@ touch(ARGV[5])
 return {'1', pos[1], pos[2]}
 `)
 
-// settleScript: ARGV id (may be empty), actual, key TTL s.
+// settleScript: ARGV id (may be empty), actual, key TTL s. A live hold is
+// released and actual charged; a tombstone (the hold expired and was
+// charged at its held amount) is removed and spent corrected by
+// actual − held; an unknown or empty id is a plain charge.
 var settleScript = redis.NewScript(luaPrelude + `
-if ARGV[1] ~= '' then release(ARGV[1]) end
+local id = ARGV[1]
+local held = false
+if id ~= '' then
+  if not unhold(id) then
+    held = redis.call('HGET', KEYS[4], id)
+    if held then redis.call('HDEL', KEYS[4], id) end
+  end
+end
 redis.call('HINCRBY', KEYS[1], 'spent', ARGV[2])
+if held then redis.call('HINCRBY', KEYS[1], 'spent', '-' .. held) end
 touch(ARGV[3])
 return position()
 `)
@@ -104,7 +134,7 @@ touch(ARGV[1])
 return position()
 `)
 
-// Redis is the shared Ledger. Each key and window has three Redis keys
+// Redis is the shared Ledger. Each key and window has four Redis keys
 // under one hash tag, so a cluster keeps them on one slot and a script can
 // touch all of them atomically.
 //
@@ -121,7 +151,7 @@ type Redis struct {
 	// check on itself (sim.go): a settle whose reservation id it reports
 	// releases the hold and records nothing as spent. Nothing outside the
 	// simulator sets it.
-	dropSettle func(id string) bool
+	dropSettle func(id string, actual cost.Nanos) bool
 }
 
 var _ Ledger = (*Redis)(nil)
@@ -141,7 +171,7 @@ func NewRedis(rdb redis.Scripter, prefix string, ttl time.Duration, now func() t
 
 func (l *Redis) keys(key, window string) []string {
 	base := l.prefix + "bud:{" + key + ":" + window + "}"
-	return []string{base + ":bal", base + ":exp", base + ":amt"}
+	return []string{base + ":bal", base + ":exp", base + ":amt", base + ":tomb"}
 }
 
 func ttlArg(p Period) string {
@@ -151,7 +181,9 @@ func ttlArg(p Period) string {
 // Reserve implements Ledger. A zero amount is admitted while anything
 // remains and refused once the budget is fully used, so a request whose
 // estimate is free still stops at an exhausted budget. Reserving again
-// with an id that is already held replaces the earlier hold.
+// with an id that is already held replaces the earlier hold; an id that
+// expired keeps its charge and its tombstone, and if the new hold expires
+// too, the tombstone holds both amounts, so one late settle corrects both.
 func (l *Redis) Reserve(ctx context.Context, key string, b Budget, id string, amount cost.Nanos) (Reservation, error) {
 	if err := checkReserve(b, id, amount); err != nil {
 		return Reservation{}, err
@@ -173,7 +205,8 @@ func (l *Redis) Reserve(ctx context.Context, key string, b Budget, id string, am
 }
 
 // Settle implements Ledger. The money lands in r.Window, or in the current
-// window if r has none; an empty r.ID is a plain charge.
+// window if r has none; an empty r.ID is a plain charge, and an r.ID whose
+// hold expired corrects the charge made at expiry.
 func (l *Redis) Settle(ctx context.Context, key string, b Budget, r Reservation, actual cost.Nanos) error {
 	if err := checkSettle(b, actual); err != nil {
 		return err
@@ -182,7 +215,7 @@ func (l *Redis) Settle(ctx context.Context, key string, b Budget, r Reservation,
 	if window == "" {
 		window = b.Window(l.now())
 	}
-	if r.ID != "" && l.dropSettle != nil && l.dropSettle(r.ID) {
+	if r.ID != "" && l.dropSettle != nil && l.dropSettle(r.ID, actual) {
 		actual = 0
 	}
 	err := settleScript.Run(ctx, l.rdb, l.keys(key, window), r.ID, int64(actual), ttlArg(b.Period)).Err()

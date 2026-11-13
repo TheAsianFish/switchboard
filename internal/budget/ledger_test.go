@@ -185,18 +185,73 @@ func TestContract(t *testing.T) {
 			mustReserve(t, l, "k", daily, "a", 60)
 			wantPosition(t, mustBalance(t, l, "k", daily), 0, 60)
 		}},
-		{"expired holds are released by the next call", func(t *testing.T, h harness) {
+		{"an expired hold is charged at its held amount by the next call", func(t *testing.T, h harness) {
 			l := h.ledger
-			r := mustReserve(t, l, "k", daily, "a", 100)
+			mustReserve(t, l, "k", daily, "a", 70)
 			h.set(t0.Add(59 * time.Second))
-			wantPosition(t, mustBalance(t, l, "k", daily), 0, 100)
+			wantPosition(t, mustBalance(t, l, "k", daily), 0, 70)
 			h.set(t0.Add(61 * time.Second))
-			wantPosition(t, mustBalance(t, l, "k", daily), 0, 0)
-			mustReserve(t, l, "k", daily, "b", 100)
-			// The late settle of the expired hold still records its cost
-			// and leaves the live hold alone.
-			mustSettle(t, l, "k", daily, r, 40)
-			wantPosition(t, mustBalance(t, l, "k", daily), 40, 100)
+			// The hold moves from reserved to spent: expiry frees nothing.
+			wantPosition(t, mustBalance(t, l, "k", daily), 70, 0)
+			if _, err := l.Reserve(context.Background(), "k", daily, "b", 31); !errors.Is(err, ErrExhausted) {
+				t.Fatalf("Reserve past what the expired hold left: err = %v", err)
+			}
+		}},
+		{"a late settle corrects the expiry charge by actual minus held", func(t *testing.T, h harness) {
+			l := h.ledger
+			below := mustReserve(t, l, "k", daily, "below", 40)
+			above := mustReserve(t, l, "k", daily, "above", 20)
+			zero := mustReserve(t, l, "k", daily, "zero", 0)
+			h.set(t0.Add(61 * time.Second))
+			live := mustReserve(t, l, "k", daily, "live", 30)
+			wantPosition(t, mustBalance(t, l, "k", daily), 60, 30)
+			mustSettle(t, l, "k", daily, below, 15)
+			wantPosition(t, mustBalance(t, l, "k", daily), 35, 30)
+			mustSettle(t, l, "k", daily, above, 25)
+			wantPosition(t, mustBalance(t, l, "k", daily), 40, 30)
+			// A zero hold charges nothing when it expires, so its late
+			// settle is a plain charge.
+			mustSettle(t, l, "k", daily, zero, 5)
+			wantPosition(t, mustBalance(t, l, "k", daily), 45, 30)
+			// The tombstone is used once: settling again is a plain
+			// charge, like settling a live hold twice.
+			mustSettle(t, l, "k", daily, below, 1)
+			wantPosition(t, mustBalance(t, l, "k", daily), 46, 30)
+			// The live hold is untouched by any of it.
+			mustSettle(t, l, "k", daily, live, 10)
+			wantPosition(t, mustBalance(t, l, "k", daily), 56, 0)
+		}},
+		{"a tombstone outlives many hold TTLs", func(t *testing.T, h harness) {
+			// A settle can wait in a replica's pending charges through an
+			// outage far longer than the hold TTL; it must still find the
+			// tombstone and not charge the cost a second time.
+			l := h.ledger
+			r := mustReserve(t, l, "k", daily, "a", 50)
+			h.set(t0.Add(10 * time.Hour))
+			wantPosition(t, mustBalance(t, l, "k", daily), 50, 0)
+			mustSettle(t, l, "k", daily, r, 30)
+			wantPosition(t, mustBalance(t, l, "k", daily), 30, 0)
+		}},
+		{"an id re-reserved and expired twice is corrected once for both", func(t *testing.T, h harness) {
+			l := h.ledger
+			mustReserve(t, l, "k", daily, "a", 40)
+			h.set(t0.Add(61 * time.Second))
+			wantPosition(t, mustBalance(t, l, "k", daily), 40, 0)
+			r := mustReserve(t, l, "k", daily, "a", 20)
+			h.set(t0.Add(122 * time.Second))
+			wantPosition(t, mustBalance(t, l, "k", daily), 60, 0)
+			mustSettle(t, l, "k", daily, r, 15)
+			wantPosition(t, mustBalance(t, l, "k", daily), 15, 0)
+		}},
+		{"a hold that expires in a window's last second is corrected there", func(t *testing.T, h harness) {
+			l := h.ledger
+			late := time.Date(2026, 10, 27, 23, 59, 30, 0, time.UTC)
+			h.set(late)
+			r := mustReserve(t, l, "k", daily, "a", 50)
+			h.set(late.Add(2 * time.Minute))
+			mustSettle(t, l, "k", daily, r, 20)
+			h.set(late)
+			wantPosition(t, mustBalance(t, l, "k", daily), 20, 0)
 		}},
 		{"daily rollover starts a fresh balance, settles land in their window", func(t *testing.T, h harness) {
 			l := h.ledger
@@ -321,6 +376,51 @@ func TestRedisKeyLayout(t *testing.T) {
 	}
 	if n, err := rdb.DBSize(ctx).Result(); err != nil || n != 9 {
 		t.Errorf("DBSize = %d, %v; want 9", n, err)
+	}
+}
+
+// TestRedisTombstoneLivesWithTheWindow checks the tombstone hash takes the
+// window's TTL, not the hold's: a settle parked through an outage longer
+// than two hold TTLs must still find it.
+func TestRedisTombstoneLivesWithTheWindow(t *testing.T) {
+	t.Parallel()
+	m := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: m.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	c := &clock{t: t0}
+	m.SetTime(t0)
+	l := NewRedis(rdb, "sb:", time.Minute, c.Now)
+	daily := Budget{Limit: 100, Period: PeriodDaily}
+	total := Budget{Limit: 100, Period: PeriodTotal}
+	rd := mustReserve(t, l, "team", daily, "a", 10)
+	rt := mustReserve(t, l, "team", total, "a", 10)
+	c.Set(t0.Add(3 * time.Minute))
+	m.SetTime(t0.Add(3 * time.Minute))
+	// The other keys' TTLs count down only as the server's clock moves;
+	// FastForward moves it by two hold TTLs and more.
+	m.FastForward(3 * time.Minute)
+	wantPosition(t, mustBalance(t, l, "team", daily), 10, 0)
+	wantPosition(t, mustBalance(t, l, "team", total), 10, 0)
+	for _, tc := range []struct {
+		key string
+		ttl time.Duration
+	}{
+		{"sb:bud:{team:2026-10-27}:tomb", 72 * time.Hour},
+		{"sb:bud:{team:total}:tomb", 0},
+	} {
+		if !m.Exists(tc.key) {
+			t.Fatalf("tombstone %s missing; have %v", tc.key, m.Keys())
+		}
+		if got := m.TTL(tc.key); got != tc.ttl {
+			t.Errorf("TTL(%s) = %v, want %v", tc.key, got, tc.ttl)
+		}
+	}
+	mustSettle(t, l, "team", daily, rd, 4)
+	mustSettle(t, l, "team", total, rt, 4)
+	wantPosition(t, mustBalance(t, l, "team", daily), 4, 0)
+	wantPosition(t, mustBalance(t, l, "team", total), 4, 0)
+	if v := m.HGet("sb:bud:{team:2026-10-27}:tomb", "a"); v != "" {
+		t.Errorf("tombstone still there after its settle: %q", v)
 	}
 }
 

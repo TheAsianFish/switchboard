@@ -1,0 +1,18 @@
+{
+  "commit": "dd7b49a",
+  "gateway_commit": "dd7b49a",
+  "fake_provider_commit": "dd7b49a",
+  "run": "after",
+  "date": "2026-11-13T14:18:30Z",
+  "command": "make chaos-orphan RUN=after",
+  "schedule": "orphan",
+  "replicas": 3,
+  "replica_ips": {"switchboard-1": "172.18.0.4", "switchboard-2": "172.18.0.5", "switchboard-3": "172.18.0.6"},
+  "start_unix": 1794579510.645365856,
+  "load_seconds": 60,
+  "observe_seconds": 100,
+  "kill": {"target": "switchboard-2", "planned_seconds": 40, "restarted": false},
+  "balance_read": "GET /api/overview on switchboard-1: Ledger.Balance, the balance script",
+  "budget": {"model": "fake-budget", "usd": "5", "input_price": "3", "output_price": "15", "rate": 10, "stream": true, "max_tokens": 64, "reservation_ttl": "30s", "provider_timeout": "20s"},
+  "fake_provider": {"latency": "20ms", "tokens": 30, "token_interval": "5ms", "budget_token_interval": "68ms"}
+}

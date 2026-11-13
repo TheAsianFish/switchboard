@@ -1,9 +1,10 @@
 // Package budgetsim runs the budget ledger's fault-schedule simulator
 // (budget.Simulator) over a range of seeds, once as the code is and once
 // with the planted bug, and writes what it found under
-// eval/results/m11-budget-sim/: summary.json, which `make results`
+// eval/results/m12-budget-sim/: summary.json, which `make results`
 // renders, and one gzipped JSON line per seed that lost spend or broke
-// an invariant.
+// an invariant. M11's run, from the ledger before expired holds were
+// charged, stays in eval/results/m11-budget-sim/.
 package budgetsim
 
 import (
@@ -28,8 +29,8 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/budget"
 )
 
-// Dir is the results subdirectory.
-const Dir = "m11-budget-sim"
+// Dir is the results subdirectory the current code's run is written to.
+const Dir = "m12-budget-sim"
 
 // The two arms.
 const (
@@ -113,6 +114,13 @@ type Arm struct {
 	// OverCountedLost those of them with a lost reply (I3 says all).
 	OverCounted     int `json:"over_counted"`
 	OverCountedLost int `json:"over_counted_lost_reply"`
+	// ExpiredCharged counts seeds where the store charged at least one
+	// expired hold. I4Closest is the seed without a lost reply whose
+	// over-count (spent − billed) came nearest I4's bound, the held −
+	// cost of its expired holds (largest over-count / bound). Absent in
+	// M11's run, which had no I4.
+	ExpiredCharged int        `json:"expired_charged,omitempty"`
+	I4Closest      *Overshoot `json:"i4_closest,omitempty"`
 }
 
 // Overshoot is one seed's billed spend over the limit against its bound.
@@ -162,6 +170,11 @@ type Example struct {
 	RedisHold int64    `json:"lost_redis_hold"`
 	GraceHold int64    `json:"lost_grace_hold"`
 	Planted   int      `json:"planted"`
+	// Over-counts (M12): a dead request's expired hold above its cost,
+	// an orphaned hold's charge, and a lost reply's second charge.
+	OverExpired int64 `json:"over_expired,omitempty"`
+	Orphaned    int64 `json:"orphaned,omitempty"`
+	Doubled     int64 `json:"doubled,omitempty"`
 }
 
 // Record is one line of seeds-<arm>.jsonl.gz: a seed that lost spend or
@@ -345,7 +358,12 @@ func Summarise(name string, cfg budget.SimConfig, first uint64, results []budget
 			arm.OverCounted++
 			if o.LostReply {
 				arm.OverCountedLost++
+			} else {
+				arm.I4Closest = closer(arm.I4Closest, r.Seed, int64(o.Spent-o.Billed), int64(o.ExpiredBound))
 			}
+		}
+		if o.ExpiredBound > 0 || o.OverExpired > 0 || o.Orphaned > 0 || len(o.Expired) > 0 {
+			arm.ExpiredCharged++
 		}
 		for _, v := range r.Violations {
 			invSeeds[v.Invariant]++
@@ -383,6 +401,15 @@ func Summarise(name string, cfg budget.SimConfig, first uint64, results []budget
 	return arm
 }
 
+// closer returns whichever of c and the seed's over/bound is larger, by
+// cross-multiplication; the lower seed on a tie.
+func closer(c *Overshoot, seed uint64, over, bound int64) *Overshoot {
+	if c == nil || over*c.Bound > c.Overshoot*bound || (over*c.Bound == c.Overshoot*bound && seed < c.Seed) {
+		return &Overshoot{Seed: seed, Overshoot: over, Bound: bound}
+	}
+	return c
+}
+
 func addLen(l []LenCount, steps int) []LenCount {
 	i, found := slices.BinarySearchFunc(l, steps, func(e LenCount, s int) int { return cmp.Compare(e.Steps, s) })
 	if found {
@@ -397,7 +424,8 @@ func example(seed uint64, minimal []budget.SimStep, o budget.SimOutcome) *Exampl
 		Seed: seed, Trace: o.Trace,
 		Billed: int64(o.Billed), Spent: int64(o.Spent), Bound: int64(o.Bound),
 		Pending: int64(o.LostPending), RedisHold: int64(o.LostRedisHold), GraceHold: int64(o.LostGraceHold),
-		Planted: o.Planted,
+		Planted:     o.Planted,
+		OverExpired: int64(o.OverExpired), Orphaned: int64(o.Orphaned), Doubled: int64(o.Doubled),
 	}
 	for _, s := range minimal {
 		e.Steps = append(e.Steps, s.String())

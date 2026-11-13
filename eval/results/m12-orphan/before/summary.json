@@ -1,0 +1,352 @@
+{
+  "meta": {
+    "commit": "dd7b49a",
+    "gateway_commit": "c22dd75",
+    "fake_provider_commit": "dd7b49a",
+    "run": "before",
+    "date": "2026-11-13T14:16:38Z",
+    "command": "make chaos-orphan RUN=before",
+    "schedule": "orphan",
+    "replicas": 3,
+    "replica_ips": {
+      "switchboard-1": "172.18.0.4",
+      "switchboard-2": "172.18.0.6",
+      "switchboard-3": "172.18.0.5"
+    },
+    "start_unix": 1794579398.5671892,
+    "load_seconds": 60,
+    "observe_seconds": 100,
+    "kill": {
+      "target": "switchboard-2",
+      "planned_seconds": 40,
+      "restarted": false
+    },
+    "balance_read": "GET /api/overview on switchboard-1: Ledger.Balance, the balance script",
+    "budget": {
+      "model": "fake-budget",
+      "usd": "5",
+      "input_price": "3",
+      "output_price": "15",
+      "rate": 10,
+      "stream": true,
+      "max_tokens": 64,
+      "reservation_ttl": "30s",
+      "provider_timeout": "20s"
+    },
+    "fake_provider": {
+      "latency": "20ms",
+      "tokens": 30,
+      "token_interval": "5ms",
+      "budget_token_interval": "68ms"
+    }
+  },
+  "kill_seconds": 40.019,
+  "died_seconds": 40.208,
+  "expired_by_seconds": 70.208,
+  "requests": 600,
+  "by_replica": {
+    "switchboard-1": 223,
+    "switchboard-2": 138,
+    "switchboard-3": 239
+  },
+  "unattributed": 0,
+  "one_request_nanodollars": 465000,
+  "client_outcomes": {
+    "malformed_stream": 5,
+    "ok": 595
+  },
+  "in_flight": {
+    "replica": "switchboard-2",
+    "ip": "172.18.0.6",
+    "count": 5,
+    "completed": 0,
+    "output_tokens": 68,
+    "billed_nanodollars": 1095000,
+    "held_nanodollars": 5025000,
+    "held_minus_billed_nanodollars": 3930000,
+    "held_over_billed": 4.589,
+    "first_seconds": 38.52,
+    "last_seconds": 40.122
+  },
+  "held_check": {
+    "label": "t=65",
+    "at_seconds": 65.02,
+    "reserved_nanodollars": 5025000,
+    "held_nanodollars": 5025000,
+    "equal": true
+  },
+  "timeline": [
+    {
+      "label": "t=5",
+      "at_seconds": 5.018,
+      "billed_nanodollars": 23250000,
+      "raw_spent_nanodollars": 14880000,
+      "raw_reserved_nanodollars": 20100000,
+      "spent_nanodollars": 15345000,
+      "reserved_nanodollars": 20100000,
+      "gap_nanodollars": 7905000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=10",
+      "at_seconds": 10.018,
+      "billed_nanodollars": 46500000,
+      "raw_spent_nanodollars": 38130000,
+      "raw_reserved_nanodollars": 20100000,
+      "spent_nanodollars": 38595000,
+      "reserved_nanodollars": 20100000,
+      "gap_nanodollars": 7905000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=15",
+      "at_seconds": 15.024,
+      "billed_nanodollars": 70215000,
+      "raw_spent_nanodollars": 61380000,
+      "raw_reserved_nanodollars": 20100000,
+      "spent_nanodollars": 61845000,
+      "reserved_nanodollars": 20100000,
+      "gap_nanodollars": 8370000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=20",
+      "at_seconds": 20.028,
+      "billed_nanodollars": 93465000,
+      "raw_spent_nanodollars": 84630000,
+      "raw_reserved_nanodollars": 20100000,
+      "spent_nanodollars": 85095000,
+      "reserved_nanodollars": 20100000,
+      "gap_nanodollars": 8370000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=25",
+      "at_seconds": 25.024,
+      "billed_nanodollars": 116715000,
+      "raw_spent_nanodollars": 107880000,
+      "raw_reserved_nanodollars": 21105000,
+      "spent_nanodollars": 108345000,
+      "reserved_nanodollars": 20100000,
+      "gap_nanodollars": 8370000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=30",
+      "at_seconds": 30.019,
+      "billed_nanodollars": 139500000,
+      "raw_spent_nanodollars": 131595000,
+      "raw_reserved_nanodollars": 20100000,
+      "spent_nanodollars": 132060000,
+      "reserved_nanodollars": 20100000,
+      "gap_nanodollars": 7440000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=35",
+      "at_seconds": 35.025,
+      "billed_nanodollars": 163215000,
+      "raw_spent_nanodollars": 154380000,
+      "raw_reserved_nanodollars": 21105000,
+      "spent_nanodollars": 154845000,
+      "reserved_nanodollars": 20100000,
+      "gap_nanodollars": 8370000,
+      "past_ttl": false
+    },
+    {
+      "label": "kill switchboard-2",
+      "at_seconds": 39.524,
+      "billed_nanodollars": 183690000,
+      "raw_spent_nanodollars": 175305000,
+      "raw_reserved_nanodollars": 21105000,
+      "spent_nanodollars": 175770000,
+      "reserved_nanodollars": 20100000,
+      "gap_nanodollars": 7920000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=41",
+      "at_seconds": 41.023,
+      "billed_nanodollars": 189420000,
+      "raw_spent_nanodollars": 181350000,
+      "raw_reserved_nanodollars": 23115000,
+      "spent_nanodollars": 181350000,
+      "reserved_nanodollars": 23115000,
+      "gap_nanodollars": 8070000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=45",
+      "at_seconds": 45.026,
+      "billed_nanodollars": 208485000,
+      "raw_spent_nanodollars": 198555000,
+      "raw_reserved_nanodollars": 25125000,
+      "spent_nanodollars": 199020000,
+      "reserved_nanodollars": 25125000,
+      "gap_nanodollars": 9465000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=50",
+      "at_seconds": 50.021,
+      "billed_nanodollars": 231270000,
+      "raw_spent_nanodollars": 221805000,
+      "raw_reserved_nanodollars": 25125000,
+      "spent_nanodollars": 222270000,
+      "reserved_nanodollars": 25125000,
+      "gap_nanodollars": 9000000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=55",
+      "at_seconds": 55.021,
+      "billed_nanodollars": 254985000,
+      "raw_spent_nanodollars": 245055000,
+      "raw_reserved_nanodollars": 26130000,
+      "spent_nanodollars": 245520000,
+      "reserved_nanodollars": 25125000,
+      "gap_nanodollars": 9465000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=60",
+      "at_seconds": 60.026,
+      "billed_nanodollars": 277305000,
+      "raw_spent_nanodollars": 268305000,
+      "raw_reserved_nanodollars": 23115000,
+      "spent_nanodollars": 268770000,
+      "reserved_nanodollars": 22110000,
+      "gap_nanodollars": 8535000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=65",
+      "at_seconds": 65.02,
+      "billed_nanodollars": 277770000,
+      "raw_spent_nanodollars": 276675000,
+      "raw_reserved_nanodollars": 5025000,
+      "spent_nanodollars": 276675000,
+      "reserved_nanodollars": 5025000,
+      "gap_nanodollars": 1095000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=70",
+      "at_seconds": 70.016,
+      "billed_nanodollars": 277770000,
+      "raw_spent_nanodollars": 276675000,
+      "raw_reserved_nanodollars": 5025000,
+      "spent_nanodollars": 276675000,
+      "reserved_nanodollars": 0,
+      "gap_nanodollars": 1095000,
+      "past_ttl": false
+    },
+    {
+      "label": "t=75",
+      "at_seconds": 75.019,
+      "billed_nanodollars": 277770000,
+      "raw_spent_nanodollars": 276675000,
+      "raw_reserved_nanodollars": 0,
+      "spent_nanodollars": 276675000,
+      "reserved_nanodollars": 0,
+      "gap_nanodollars": 1095000,
+      "past_ttl": true
+    },
+    {
+      "label": "t=80",
+      "at_seconds": 80.028,
+      "billed_nanodollars": 277770000,
+      "raw_spent_nanodollars": 276675000,
+      "raw_reserved_nanodollars": 0,
+      "spent_nanodollars": 276675000,
+      "reserved_nanodollars": 0,
+      "gap_nanodollars": 1095000,
+      "past_ttl": true
+    },
+    {
+      "label": "t=85",
+      "at_seconds": 85.017,
+      "billed_nanodollars": 277770000,
+      "raw_spent_nanodollars": 276675000,
+      "raw_reserved_nanodollars": 0,
+      "spent_nanodollars": 276675000,
+      "reserved_nanodollars": 0,
+      "gap_nanodollars": 1095000,
+      "past_ttl": true
+    },
+    {
+      "label": "t=90",
+      "at_seconds": 90.019,
+      "billed_nanodollars": 277770000,
+      "raw_spent_nanodollars": 276675000,
+      "raw_reserved_nanodollars": 0,
+      "spent_nanodollars": 276675000,
+      "reserved_nanodollars": 0,
+      "gap_nanodollars": 1095000,
+      "past_ttl": true
+    },
+    {
+      "label": "t=95",
+      "at_seconds": 95.017,
+      "billed_nanodollars": 277770000,
+      "raw_spent_nanodollars": 276675000,
+      "raw_reserved_nanodollars": 0,
+      "spent_nanodollars": 276675000,
+      "reserved_nanodollars": 0,
+      "gap_nanodollars": 1095000,
+      "past_ttl": true
+    },
+    {
+      "label": "t=100",
+      "at_seconds": 100.016,
+      "billed_nanodollars": 277770000,
+      "raw_spent_nanodollars": 276675000,
+      "raw_reserved_nanodollars": 0,
+      "spent_nanodollars": 276675000,
+      "reserved_nanodollars": 0,
+      "gap_nanodollars": 1095000,
+      "past_ttl": true
+    },
+    {
+      "label": "end",
+      "at_seconds": 100.341,
+      "billed_nanodollars": 277770000,
+      "raw_spent_nanodollars": 276675000,
+      "raw_reserved_nanodollars": 0,
+      "spent_nanodollars": 276675000,
+      "reserved_nanodollars": 0,
+      "gap_nanodollars": 1095000,
+      "past_ttl": true
+    }
+  ],
+  "after_ttl": {
+    "label": "end",
+    "at_seconds": 100.341,
+    "billed_nanodollars": 277770000,
+    "raw_spent_nanodollars": 276675000,
+    "raw_reserved_nanodollars": 0,
+    "spent_nanodollars": 276675000,
+    "reserved_nanodollars": 0,
+    "gap_nanodollars": 1095000,
+    "past_ttl": true
+  },
+  "before_hypothesis": {
+    "expected": true,
+    "holds": true,
+    "gap_nanodollars": 1095000,
+    "in_flight_billed_nanodollars": 1095000,
+    "gap_minus_billed_nanodollars": 0,
+    "tolerance_nanodollars": 465000,
+    "note": "at 100.3 s the gap (provider's bill minus spent) was $0.001095000; the 5 requests in flight on switchboard-2 were billed $0.001095000"
+  },
+  "after_hypothesis": {
+    "expected": false,
+    "holds": false,
+    "gap_nanodollars": 1095000,
+    "over_count_nanodollars": 0,
+    "bound_nanodollars": 3930000,
+    "over_count_over_billed": 0,
+    "bound_over_billed": 3.589,
+    "note": "at 100.3 s spent was $0.000000000 above the provider's bill, 0.00× what the 5 requests in flight on switchboard-2 were billed ($0.001095000); bound $0.003930000 held minus billed"
+  }
+}

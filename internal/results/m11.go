@@ -12,8 +12,12 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/budgetsim"
 )
 
-// M11Dir holds `make sim-budget`'s summary and per-seed records.
-const M11Dir = budgetsim.Dir
+// M11Dir holds M11's `make sim-budget` summary and per-seed records, run
+// on the ledger before expired holds were charged (M12 writes its own).
+const M11Dir = "m11-budget-sim"
+
+// m11Invariants are the invariants M11's run checked; M12 added I4.
+var m11Invariants = []string{"I1", "I2", "I3"}
 
 // M11 is the fault-schedule simulator section.
 type M11 struct {
@@ -167,12 +171,12 @@ func buildM11(s budgetsim.Summary) (*M11, error) {
 	}
 	m.Holds = strings.Join(h, ", ")
 	for i := range s.Arms {
-		if len(s.Arms[i].Violations) != len(budget.Invariants) || len(s.Arms[i].Exercised) == 0 {
-			return nil, fmt.Errorf("results: m11: arm %q needs %d invariants and its faults", s.Arms[i].Name, len(budget.Invariants))
+		if len(s.Arms[i].Violations) != len(m11Invariants) || len(s.Arms[i].Exercised) == 0 {
+			return nil, fmt.Errorf("results: m11: arm %q needs %d invariants and its faults", s.Arms[i].Name, len(m11Invariants))
 		}
 		for j, v := range s.Arms[i].Violations {
-			if v.Invariant != budget.Invariants[j] {
-				return nil, fmt.Errorf("results: m11: arm %q: invariant %d is %q, want %q", s.Arms[i].Name, j, v.Invariant, budget.Invariants[j])
+			if v.Invariant != m11Invariants[j] {
+				return nil, fmt.Errorf("results: m11: arm %q: invariant %d is %q, want %q", s.Arms[i].Name, j, v.Invariant, m11Invariants[j])
 			}
 		}
 		a := buildM11Arm(s.Arms[i])

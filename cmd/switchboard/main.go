@@ -14,6 +14,7 @@
 //	switchboard eval stall        M10: summarise a `make bench-stall` run
 //	switchboard eval budget-sim   M11: seeded fault schedules against the budget ledger
 //	switchboard chaos report      Q6: per-phase report of a chaos run
+//	switchboard chaos orphan      M12: a killed replica's holds against the provider's ledger
 //	switchboard version           print the build version
 package main
 
@@ -24,10 +25,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -68,6 +71,7 @@ commands:
   eval stall        M10: summarise a make bench-stall run as JSON
   eval budget-sim   M11: seeded fault schedules against the budget ledger
   chaos report      Q6: per-phase report of a chaos run (chaos/run.sh)
+  chaos orphan      M12: a killed replica's holds against the provider's ledger
   version           print the build version
 `
 
@@ -283,6 +287,19 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	slowFraction := fs.Float64("slow-fraction", 0, "share of requests whose first byte is -slow-factor times slower")
 	slowFactor := fs.Float64("slow-factor", 10, "how much slower a slow request is")
 	seed := fs.Uint64("seed", 1, "seed for the latency draws")
+	perModel := map[string]time.Duration{}
+	fs.Func("model-token-interval", "model=duration: a delay between streamed tokens for one model instead of -token-interval (repeatable)", func(v string) error {
+		name, d, ok := strings.Cut(v, "=")
+		if !ok || name == "" {
+			return fmt.Errorf("want model=duration, got %q", v)
+		}
+		dur, err := time.ParseDuration(d)
+		if err != nil || dur < 0 {
+			return fmt.Errorf("want model=duration, got %q", v)
+		}
+		perModel[name] = dur
+		return nil
+	})
 	stalled := fs.Bool("stalled", false, "start stalled: accept requests and never answer them (POST /stall/off to recover, /stall/on to stall again)")
 	logLevel := fs.String("log-level", envOr("SWITCHBOARD_LOG_LEVEL", "warn"), "log level; warn by default so a benchmark measures serving, not logging")
 	logFormat := fs.String("log-format", envOr("SWITCHBOARD_LOG_FORMAT", "json"), "json or text")
@@ -294,7 +311,7 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 		return err
 	}
 	fp := fake.New(fake.Config{Latency: *latency, Tokens: *tokens, TokenInterval: *interval,
-		LatencySigma: *sigma, SlowFraction: *slowFraction, SlowFactor: *slowFactor, Seed: *seed})
+		LatencySigma: *sigma, SlowFraction: *slowFraction, SlowFactor: *slowFactor, Seed: *seed, ModelTokenInterval: perModel})
 	fp.SetStalled(*stalled)
 	gw := pipeline.Open{Provider: fp, Names: []string{"fake"}}
 	mux := http.NewServeMux()
@@ -302,11 +319,23 @@ func fakeProvider(ctx context.Context, args []string, stderr io.Writer) error {
 	mux.Handle("/ledger/", fp.LedgerHandler())
 	mux.Handle("/stall", fp.StallHandler())
 	mux.Handle("/stall/", fp.StallHandler())
-	mux.Handle("/", server.Handler(gw, log))
+	mux.Handle("/", withCaller(server.Handler(gw, log)))
 	log.Warn("fake provider starting", slog.String("listen", *listen), slog.Duration("latency", *latency),
 		slog.Int("tokens", *tokens), slog.Duration("token_interval", *interval),
 		slog.Float64("latency_sigma", *sigma), slog.Float64("slow_fraction", *slowFraction), slog.Float64("slow_factor", *slowFactor))
 	return server.Run(ctx, *listen, mux, log, nil)
+}
+
+// withCaller tags each request's context with the IP it came from, which
+// the fake's ledger records: in the chaos fleet that names the replica.
+func withCaller(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		h.ServeHTTP(w, r.WithContext(fake.WithCaller(r.Context(), host)))
+	})
 }
 
 func envOr(name, def string) string {

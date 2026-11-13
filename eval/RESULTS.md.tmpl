@@ -1450,10 +1450,11 @@ schedule:
   schedules produced, not that it is tight. Nor that it always holds:
   holds that expire under requests still in flight on a live process
   free budget with no outage, and four rounds of reserves 15 minutes
-  apart bill 400 against a bound of 262
-  (`TestSimBoundNeedsHoldsToOutliveNoRequest`). The gateway's config
-  rules that state out (`reservation_ttl` must be longer than every
-  provider's timeout), the generator does not, and no seed reached it.
+  apart bill 400 against a bound of 262 on the ledger this run measured.
+  The gateway's config rules that state out (`reservation_ttl` must be
+  longer than every provider's timeout), the generator does not, and no
+  seed reached it. Since M12 an expired hold is charged and frees
+  nothing, and the same schedule bills 100 (`TestSimExpiryFreesNoBudget`).
 - I1 is a net check: a double charge can pay for a loss elsewhere and
   leave `spent` ≥ billed. The balance check is what rules out an
   unrecorded loss hidden that way.
@@ -1463,6 +1464,168 @@ schedule:
   milliseconds).
 {{else}}
 Not measured yet. Run `make sim-budget SEEDS=100000`, then `make results`.
+{{end}}
+## M12: an unsettled hold becomes spend, without charging anything twice
+
+What does a replica killed with requests in flight cost the ledger while
+Redis is up, and does charging an expired hold close it without
+double-charging the holds the degraded path already leaves to expire?
+Commands: `make chaos-orphan RUN=before|after`, the flap schedule re-run
+(`SCHEDULE=flap OUT=eval/results/m12-orphan/flap-rerun chaos/run.sh`),
+and `make sim-budget SEEDS=100000`; raw files in
+`eval/results/m12-orphan/` and `eval/results/m12-budget-sim/`.
+
+**The fix.** An expired hold is charged as `spent` at its held amount
+(the input estimate plus `max_tokens`, the request's worst case) by the
+next script that touches the key, and its id is kept with the amount in
+a tombstone hash that lives as long as the window's keys. A settle that
+finds the tombstone corrects `spent` by actual − held instead of adding
+the cost again. A replica that settles a Redis hold while Redis is
+unreachable keeps that cost in pending under the hold's id, so the flush
+after the outage settles the hold (or corrects its tombstone) instead of
+charging beside it. `memory.go` does the same under the ledger contract
+tests; `TestIntegrationExpiry` runs expiry and a late settle on a real
+Redis, and `TestDegradingParkedSettleOutlivesTwoHoldTTLs` flushes a
+grace-time settle after an outage of two and a half hold TTLs and
+charges it once (with the ledger fix alone and no id in pending, that
+test charges 80 + 30 for a request that cost 30).
+{{with .M12}}{{with .Before}}
+**Method.** The Q6 fleet (three replicas behind nginx, Redis 8, the fake
+provider) with `chaos/orphan.yaml`: `reservation_ttl` 30 s, provider
+timeout 20 s, a $5 budget so the key admits for the whole run. Only the
+budgeted key sends: streamed requests at 10 per second with the chaos
+key's existing `max_tokens` 64, which the fake provider answers at 68 ms
+a token (30 tokens, about 2 s), so about 20 are open at once. Replica 2
+is killed (SIGKILL) at 40 s with Redis up and not restarted; load stops
+at 60 s; snapshots run every 5 s until 100 s. Each snapshot reads the
+key's balance twice: a raw `HMGET`, and through the ledger (replica 1's
+admin API, which runs the balance script, and every script first deals
+with expired holds; nothing else touches the key after 60 s, so a raw
+read never sees an expiry). The fake provider records each request's
+caller address, so the requests in flight on the killed replica are
+counted from its ledger: those from replica 2's address that reached the
+provider before replica 2's connections closed and had not ended. An
+aborted stream is billed for the tokens generated before the connection
+closed. Each request's hold is recomputed from the ledger (the gateway's
+input estimate of the request the provider received, plus `max_tokens`,
+at $3 in and $15 out per MTok). As a check on that recomputation, Redis's
+`reserved` is read once the live replicas have settled and before any
+orphaned hold lapses: before, {{.HeldCheck}}{{end}}{{with .After}}; after,
+{{.HeldCheck}}{{end}}.
+{{if and .Before .After}}
+| | Before (`{{.Before.GatewayCommit}}`) | After (`{{.After.GatewayCommit}}`) |
+|---|---:|---:|
+| Requests at the provider | {{.Before.Requests}} | {{.After.Requests}} |
+| By replica | {{.Before.ByReplica}} | {{.After.ByReplica}} |
+| Client outcomes | {{.Before.Client}} | {{.After.Client}} |
+| Kill issued / replica's connections closed (s) | {{.Before.Kill}} / {{.Before.Died}} | {{.After.Kill}} / {{.After.Died}} |
+| Requests in flight on the killed replica (from the ledger) | {{.Before.InFlight}} | {{.After.InFlight}} |
+| Their output tokens | {{.Before.OutputTokens}} | {{.After.OutputTokens}} |
+| Billed for them | {{.Before.Billed}} | {{.After.Billed}} |
+| Held for them | {{.Before.Held}} ({{.Before.HeldOverBilled}}×) | {{.After.Held}} ({{.After.HeldOverBilled}}×) |
+| Gap after every hold lapsed (billed − `spent`) | {{.Before.Gap}} | {{.After.Gap}} |
+{{end}}
+**Hypotheses (PLAN.md, M12) against the runs.**
+
+| Hypothesis or check | Measured | Held |
+|---------------------|----------|------|
+{{- range .Checks}}
+| {{.Hypothesis}} | {{.Measured}} | {{.Held}} |
+{{- end}}
+
+The before gap is arithmetic: requests in flight times what each was
+billed. The result is the after column and the two checks. The
+over-count is the hold's margin over the actual cost: here the requests
+had streamed only part of their reply when the replica died, so what the
+provider billed is small next to `max_tokens`, and the over-count is
+several times the bill. It errs on refusing (the key's remaining budget
+is short by that margin), never on spending past the limit.
+{{range .Arms}}
+*{{.Name}} arm, snapshots* (the ledger read follows the raw read):
+
+| Snapshot | t (s) | Billed | Raw `spent` | Raw `reserved` | `spent` | `reserved` | Gap |
+|---|---:|---:|---:|---:|---:|---:|---:|
+{{- range .Timeline}}
+| {{.Label}} | {{.At}} | {{.Billed}} | {{.RawSpent}} | {{.RawReserved}} | {{.Spent}} | {{.Reserved}} | {{.Gap}} |
+{{- end}}
+{{end}}
+During the load the gap is positive in both arms because a request is
+billed at its final usage from the moment it reaches the provider, while
+`spent` catches up when it settles about 2 s later.
+{{with .Flap}}
+**The flap schedule on the fixed ledger.** M8's schedule (Redis cut off
+and reconnected eight times, replica 2 killed in the fifth outage), re-run
+at `{{.Commit}}` ({{.Date}}): the most negative reconciliation gap after the
+first outage was {{.MinGap}} against M8's committed {{.M8Gap}}, and the
+overshoot {{.Overshoot}} against M8's {{.M8Ov}}. The flap run uses the
+default 15-minute hold TTL, so no hold expires in it; what it exercises
+is the flush of pending spend under hold ids after each outage.
+{{end}}{{with .Sim}}
+**The simulator on the fixed ledger.** M11's simulator, same seeds and
+configuration, with its fault log extended for the new charges: a dead
+request's hold is charged at its held amount, so the fault log records
+what it cost above its hold as lost and the hold's margin over its cost
+as over-counted; a lost reply on a reserve leaves an orphaned hold that
+expires and is charged beside the grace request (an over-count); and a
+settle that waited in pending under a hold's id and whose reply was lost
+is charged again when flushed. I3 now allows `spent` above billed by the
+double charges, the orphaned holds and the expired holds' margins, and a
+new invariant I4 checks the expired holds' part on its own: on every
+schedule without a lost reply, `spent` − billed ≤ Σ(held − cost) over the
+holds that expired, counting only holds above their cost.
+
+**Violations under PLAN.md's rule** ({{.Main.Seeds}} seeds, {{.Main.Steps}} steps,
+{{.Main.Runs}} schedules run with shrinking, {{.Main.Wall}} for this arm on
+{{.Summary.Meta.Workers}} workers):
+
+| Invariant | Seeds | Killed pending | Expired hold | Other | Longest minimal |
+|-----------|------:|------:|------:|------:|------:|
+{{- range .Main.Rule}}
+| {{.Invariant}} | {{.Seeds}} | {{.KilledPending}} | {{.ExpiredHold}} | {{.Other}} | {{.Long}} |
+{{- end}}
+
+**Lost spend by the fault log**, against M11's run:
+
+| Class | Seeds | Share of seeds that lost spend | Minimal lengths (steps: seeds) | M11 seeds |
+|-------|------:|------:|-------|------:|
+{{- range .Classes}}
+| {{.Class}} | {{.Seeds}} | {{.ShareOfI1}} | {{.Lengths}} | {{.M11Seeds}} |
+{{- end}}
+
+{{.Main.I1}} of {{.Main.Seeds}} seeds lost spend ({{with .M11Main}}{{.I1}} in M11{{end}}). All three
+classes shrank, not only the one the fix aims at. "Killed pending" is now
+grace spend only: a Redis hold's cost parked during an outage keeps its
+id, and if its process dies the hold expires and is charged. "Other" loses
+its lost-reply path: the orphaned hold a lost reserve reply leaves on
+Redis is now charged at the request's estimate, which covers the grace
+request unless it cost more than that; the outage path, where no hold
+exists, stays. I4's bound is reached exactly on its closest seed
+({{.I4Closest}}): a single killed request whose hold is charged in full,
+so the bound is tight.
+"Expired hold" is now only a dead request's cost above its hold: the
+generator draws a cost of one and a half times the hold one time in ten,
+an admitted under-estimate, and no charge the store can make knows
+the real cost of a request whose replica died.{{with .Main.Example "expired hold"}}
+Its shortest schedule (seed {{.Seed}}; {{.Sums}}):
+
+```
+{{range .Trace}}{{.}}
+{{end}}```{{end}}
+{{with .Main.Example "killed pending"}}
+*killed pending* (seed {{.Seed}}; {{.Sums}}):
+
+```
+{{range .Trace}}{{.}}
+{{end}}```
+{{end}}
+- Run: commit `{{.Summary.Meta.Commit}}`, {{.Summary.Meta.Date}}, `{{.Summary.Meta.Command}}`; {{.Hardware}}.
+{{end}}
+{{with .Before}}- Before arm: harness at `{{.Commit}}`, replicas built from `{{.GatewayCommit}}`, {{.Date}}.
+{{end}}{{with .After}}- After arm: `{{.Commit}}`, {{.Date}}.
+{{end}}- Cost: $0 (fake provider, no model).
+{{else}}
+Not measured yet. Run `make chaos-orphan RUN=before`, `make chaos-orphan
+RUN=after` and `make sim-budget SEEDS=100000`, then `make results`.
 {{end}}
 ## Unmodified SDKs through the gateway
 
@@ -1494,27 +1657,41 @@ Measured weaknesses and cases the runs could not reach, each with what was
 observed.
 {{with .M11}}{{with .Main}}
 - **Pending budget spend dies with its replica.** Costs a replica settles
-  on grace are kept in its memory until Redis answers again, and a
-  process killed before then takes them with it.{{with .Example "killed pending"}} M11's shortest schedule
-  (seed {{.Seed}}): {{.Line}}.{{end}}{{with $.M8}} In M8 the replica killed during an
+  for requests it admitted on grace are kept in its memory until Redis
+  answers again, and a process killed before then takes them with it.
+  Since M12 this is only grace spend: the cost of a request held on Redis
+  and settled during the outage keeps its hold's id, and if the process
+  dies the hold expires and is charged.{{with .Example "killed pending"}} M11's shortest schedule
+  (seed {{.Seed}}): {{.Line}}.{{end}}{{with $.M12}}{{with .Sim}} In M12's re-run the class is still found
+  on {{(index .Classes 0).Seeds}} seeds.{{end}}{{end}}{{with $.M8}} In M8 the replica killed during an
   outage took {{.LostBefore}} with it before the grace fix and {{.LostAfter}} after it (its
   allowance was already spent).{{end}}
 - **A request admitted on grace and in flight when its process dies is
   lost.** Found by M11. The cost is neither pending spend nor a hold on
   Redis that belongs to it: only the dead process's grace allowance knew
-  it.{{with .Example "other"}} Shortest schedule (seed {{.Seed}}): {{.Line}}.{{end}} A lost reply on
-  a reserve gets there without an outage: the store holds the request, the
-  replica sees a failure and admits it on grace, and the orphaned hold
-  expires separately. `degrade.go`'s loss bound (what the allowance
-  admitted) covers the amount; this list did not name it. Charging an
-  expired hold at its held amount (M12) would cover the lost-reply path
-  up to the request's estimate, since the orphaned hold is that
-  estimate, but not the outage path (store unreachable, reserve, kill:
-  `TestSimSchedules`), where no hold exists.
-- **A hold whose replica died while Redis was up expires without its
-  cost reaching `spent`.** The request was sent upstream; nobody settles
-  it, and after the reservation TTL the hold is released.{{with .Example "expired hold"}} M11's shortest
-  schedule (seed {{.Seed}}): {{.Line}}.{{end}}
+  it.{{with .Example "other"}} M11's shortest schedule (seed {{.Seed}}): {{.Line}}.{{end}}{{with $.M12}}{{with .Sim}}{{with .Main.Example "other"}}
+  M12's (seed {{.Seed}}): {{.Line}}; the orphaned hold is charged, and the
+  loss is what the request cost above it.{{end}}{{end}}{{end}}
+  `degrade.go`'s loss bound (what the allowance admitted) covers the
+  amount. A lost reply on a reserve reaches the same state without an
+  outage; since M12 the orphaned hold that reply left on Redis expires and
+  is charged at the request's estimate, so on that path the store
+  over-counts instead (the estimate and the grace request's cost are both
+  charged), and the outage path (store unreachable, reserve, kill:
+  `TestSimSchedules`) still loses the request.
+- **An expired hold is charged at its worst case.** Since M12 a hold
+  whose replica died while Redis was up is charged as spent at its held
+  amount (input estimate plus `max_tokens`) when it expires, and a late
+  settle corrects it. Nothing is lost, but the key is over-counted by
+  the hold's margin over what the provider billed{{with $.M12}}{{with .After}}: {{.OverCountOverBilled}}× the bill
+  for the {{.InFlight}} streams cut off in M12's run{{end}}{{end}}, which errs on refusing.
+  The tombstones of a total budget never expire (one hash field per hold
+  that lapsed unsettled). A request that costs more than its hold (a low
+  input estimate) still loses the difference when its replica dies{{with $.M12}}{{with .Sim}}: the
+  "expired hold" class of M12's simulator re-run, {{(index .Classes 1).Seeds}} seeds{{end}}{{end}}.
+  An expiry is charged by the next script that touches the key and
+  window, so a window nobody reads again shows its last expired holds
+  only when it is next read.
 - **A settle that timed out after Redis applied it is charged twice.**
   The replica cannot tell it from one that never arrived, so it keeps the
   cost as pending and charges it again: an over-count, never a miss. In
