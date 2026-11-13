@@ -10,6 +10,7 @@
 | [M8: budget grace under a flapping store](RESULTS.md#m8-budget-grace-under-a-flapping-store) | Not measured yet | `make chaos-flap` |
 | [M9: budgets across a Redis restart](RESULTS.md#m9-budgets-across-a-redis-restart) | Not measured yet | `make chaos-persist`, `make bench-persist` |
 | [M10: a stalled provider and the first-token timeout](RESULTS.md#m10-a-stalled-provider-and-the-first-token-timeout) | Not measured yet | `make bench-stall` |
+| [M11: is the list of ways a budget loses spend complete?](RESULTS.md#m11-is-the-list-of-ways-a-budget-loses-spend-complete) | Not measured yet | `make sim-budget` |
 
 Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2

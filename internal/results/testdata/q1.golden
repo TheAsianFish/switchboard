@@ -150,6 +150,17 @@ Not measured yet. Run `make bench-stall` and
 `ARMS=off-ftt OUT=eval/results/m10-stall/q4-off-ftt eval/hedge/run.sh`,
 then `make results`.
 
+## M11: is the list of ways a budget loses spend complete?
+
+Over seeded fault schedules on three replicas' ledgers sharing one store,
+can Redis's `spent` end below what the provider billed in a way this
+file's known problems do not list? Command: `make sim-budget SEEDS=100000`
+(`switchboard eval budget-sim`); raw files in
+`eval/results/m11-budget-sim/` (`summary.json`, and one gzipped line per
+seed that lost spend or broke an invariant, per arm).
+
+Not measured yet. Run `make sim-budget SEEDS=100000`, then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -206,6 +217,7 @@ observed.
 - Q3 semantic cache threshold sweep: `make eval-cache` (needs Ollama).
 - Q4 hedging on the synthetic tail: `make bench-hedge`.
 - M10 stalled provider: `make bench-stall`, then `make results`.
+- M11 budget fault schedules: `make sim-budget SEEDS=100000`, then `make results`.
 - Q4 against Claude:
   `ANTHROPIC_API_KEY=... eval/hedge/claude.sh`, then `make results` (no
   cost estimate yet: it is computed from the local run,

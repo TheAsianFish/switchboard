@@ -10,6 +10,7 @@
 | [M8: budget grace under a flapping store](RESULTS.md#m8-budget-grace-under-a-flapping-store) | {{with .M8}}Eight Redis outages on a spent budget: overshoot {{.OvershootBefore}} when grace reset every outage, {{.OvershootAfter}} with a refilled allowance (bound {{.RefillBound}}); a replica killed while degraded lost {{.LostBefore}} before, {{.LostAfter}} after{{else}}Not measured yet{{end}} | `make chaos-flap` |
 | [M9: budgets across a Redis restart](RESULTS.md#m9-budgets-across-a-redis-restart) | {{with .M9}}{{.Headline}}{{else}}Not measured yet{{end}} | `make chaos-persist`, `make bench-persist` |
 | [M10: a stalled provider and the first-token timeout](RESULTS.md#m10-a-stalled-provider-and-the-first-token-timeout) | {{with .M10}}{{.Headline}}{{else}}Not measured yet{{end}} | `make bench-stall` |
+| [M11: is the list of ways a budget loses spend complete?](RESULTS.md#m11-is-the-list-of-ways-a-budget-loses-spend-complete) | {{with .M11}}{{.Headline}}{{else}}Not measured yet{{end}} | `make sim-budget` |
 
 Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2

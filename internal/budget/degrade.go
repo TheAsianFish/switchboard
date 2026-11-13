@@ -71,7 +71,12 @@ type DegradeOptions struct {
 // call after recovery. Pending charges live only in this process's memory:
 // a replica killed while degraded takes its unreported spend with it,
 // which is at most what its allowance admitted plus the cost of primary
-// holds it settled during the outage.
+// holds it settled during the outage. That includes requests admitted on
+// grace and still in flight when the process dies: their cost was never
+// pending and never held on the primary, so only this process knew it.
+// A lost reply on a reserve gets there without an outage, since the
+// failed call sends the request to grace while the primary keeps an
+// orphaned hold that expires on its own.
 //
 // A reservation held on the primary and settled while degraded cannot be
 // released there; its cost goes to pending and the hold expires by TTL, so

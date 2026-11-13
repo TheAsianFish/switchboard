@@ -73,6 +73,8 @@ type Data struct {
 	// M10 is the stalled provider, before and after the first-token
 	// timeout.
 	M10 *M10
+	// M11 is the budget ledger's fault-schedule simulator.
+	M11 *M11
 	SDK *SDK
 }
 
@@ -190,6 +192,10 @@ func Load(resultsDir string) (Data, error) {
 	if err != nil {
 		return Data{}, err
 	}
+	m11, err := loadM11(filepath.Join(resultsDir, M11Dir))
+	if err != nil {
+		return Data{}, err
+	}
 	if q4 != nil {
 		for _, live := range []*Q4Live{q4o, q4c} {
 			if live != nil {
@@ -197,7 +203,7 @@ func Load(resultsDir string) (Data, error) {
 			}
 		}
 	}
-	return Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q4Claude: q4c, Q4ClaudeEstimate: q4cEst, Q5: q5, Q6: q6, M8: m8, M9: m9, M10: m10, SDK: sdk}, nil
+	return Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q4Claude: q4c, Q4ClaudeEstimate: q4cEst, Q5: q5, Q6: q6, M8: m8, M9: m9, M10: m10, M11: m11, SDK: sdk}, nil
 }
 
 // Execute runs the template at templatePath on d.
