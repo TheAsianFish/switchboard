@@ -30,6 +30,9 @@ type M12Sim struct {
 	// I4Closest describes the seed whose over-count came nearest I4's
 	// bound.
 	I4Closest string
+	// ExpiredOnly counts the main arm's seeds whose only loss is a dead
+	// request's cost above its expired hold.
+	ExpiredOnly int
 	// Checks are PLAN.md's M12 checks on the simulator.
 	Checks []M11Check
 	// Classes are the main arm's fault-log classes beside M11's seeds.
@@ -80,6 +83,9 @@ func loadM12Sim(dir string, m11 *M11) (*M12Sim, error) {
 				if len(r.Classes) == 0 {
 					unclassified++
 				}
+				if a.Name == budgetsim.ArmMain && len(r.Classes) == 1 && r.Classes[0].Class == budget.ClassExpiredHold {
+					m.ExpiredOnly++
+				}
 			}
 		}
 		if a.Violations[0].Seeds != lost {
@@ -123,8 +129,8 @@ func m12SimChecks(m *M12Sim) []M11Check {
 	}
 	var c []M11Check
 	c = append(c, M11Check{
-		"The \"expired hold\" class is gone: no dead request's cost is lost beyond what it cost above its hold",
-		fmt.Sprintf("%s seeds lose spend to an expired hold, all of it cost above the hold (%s)", seedCount(eh.Seeds), before),
+		"The \"expired hold\" class is gone",
+		fmt.Sprintf("%s seeds still lose spend to an expired hold (%s); that part of each loss is what a dead request cost above its hold, and %s of those seeds lose nothing else", seedCount(eh.Seeds), before, seedCount(m.ExpiredOnly)),
 		yesNo(eh.Seeds == 0),
 	})
 	c = append(c, M11Check{
@@ -235,7 +241,7 @@ func loadM12(resultsDir string, m11 *M11) (*M12, error) {
 		if m.Sim.M11Main != nil {
 			was = seedCount(m.Sim.M11Main.class(budget.ClassExpiredHold).Seeds)
 		}
-		m.Headline = fmt.Sprintf("Streams cut off by a replica kill with Redis up: before the fix, %s of them left %s out of spent after the hold TTL (their bill: %s); after it, %s of them left spent %s above the bill, their holds' margin (%s× what they were billed). Simulator re-run: seeds losing spend to an expired hold %s → %s, each only what a request cost above its hold; %s",
+		m.Headline = fmt.Sprintf("Streams cut off by a replica kill with Redis up: before the fix, %s of them left %s out of spent after the hold TTL (their bill: %s); after it, %s of them left spent %s above the bill, their holds' margin (%s× what they were billed). Simulator re-run: seeds losing spend to an expired hold %s → %s, the remaining loss what a dead request cost above its hold; %s",
 			m.Before.InFlight, m.Before.Gap, m.Before.Billed, m.After.InFlight, neg(m.After.S.AfterTTL), m.After.OverCountOverBilled, was, seedCount(eh), m12SimVerdict(m.Sim))
 	}
 	return m, nil

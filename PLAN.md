@@ -1530,9 +1530,9 @@ Changes made while building:
     over-count equalled held minus billed exactly, 4.29× the bill), the
     flap re-run matched M8 ($0 most negative gap, $0.0362 overshoot), I2
     to I4 held on every seed and every seed balanced. "Expired hold" did
-    not vanish: 2,065 seeds keep a loss, each only what a request cost
-    above its hold (the generator's under-estimates), which no charge at
-    expiry can know. "Killed pending" (5,984) and "other" (11,411) also
+    not vanish: 2,065 seeds keep a loss, whose expired-hold part is what
+    a request cost above its hold (the generator's under-estimates),
+    which no charge at expiry can know. "Killed pending" (5,984) and "other" (11,411) also
     shrank, since parked Redis-hold spend and orphaned holds are now
     charged.
 

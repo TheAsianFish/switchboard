@@ -1697,7 +1697,7 @@ $0.006030 at 65.0 s against $0.006030 recomputed (equal).
 | Before: after the TTL the gap is positive and equals what the provider billed for the requests in flight on the killed replica, within one request | gap $0.001095; 5 requests in flight billed $0.001095; difference $0.000000, tolerance $0.000465 | yes |
 | After: the gap after the TTL is at most 0, and the over-count at most held − billed over the requests in flight on the killed replica | gap −$0.004890; over-count $0.004890 against held − billed $0.004890 (6 requests); over-count 4.29× what they were billed, the bound 4.29× | yes |
 | The flap schedule re-run shows no reconciliation gap more negative than M8's committed one | most negative gap after the first outage $0 against M8's $0; overshoot $0.0362 against M8's $0.0362 | yes |
-| The "expired hold" class is gone: no dead request's cost is lost beyond what it cost above its hold | 2,065 seeds lose spend to an expired hold, all of it cost above the hold (M11: 20,581) | no |
+| The "expired hold" class is gone | 2,065 seeds still lose spend to an expired hold (M11: 20,581); that part of each loss is what a dead request cost above its hold, and 893 of those seeds lose nothing else | no |
 | "Killed pending" is still found | 5,984 seeds | yes |
 | I4 holds on every seed: without a lost reply, spent − billed ≤ Σ(held − cost) over expired holds | 0 violations; 73,084 seeds charged an expired hold; closest: 10 over billed against a bound of 10 (seed 4) | yes |
 | I2 and I3 still hold on every seed | I2: 0 violations, 32,788 seeds over the limit, closest 174 over the limit against a bound of 250 (seed 8487); I3: 0 violations | yes |
