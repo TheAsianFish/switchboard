@@ -117,6 +117,11 @@ type Redis struct {
 	prefix string
 	ttl    time.Duration
 	now    func() time.Time
+	// dropSettle is a planted bug for the fault-schedule simulator's
+	// check on itself (sim.go): a settle whose reservation id it reports
+	// releases the hold and records nothing as spent. Nothing outside the
+	// simulator sets it.
+	dropSettle func(id string) bool
 }
 
 var _ Ledger = (*Redis)(nil)
@@ -176,6 +181,9 @@ func (l *Redis) Settle(ctx context.Context, key string, b Budget, r Reservation,
 	window := r.Window
 	if window == "" {
 		window = b.Window(l.now())
+	}
+	if r.ID != "" && l.dropSettle != nil && l.dropSettle(r.ID) {
+		actual = 0
 	}
 	err := settleScript.Run(ctx, l.rdb, l.keys(key, window), r.ID, int64(actual), ttlArg(b.Period)).Err()
 	if err != nil {
