@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/TheAsianFish/switchboard/internal/core"
+	"github.com/TheAsianFish/switchboard/internal/cost"
 )
 
 // Config sets the shape of every reply.
@@ -42,6 +43,32 @@ type Config struct {
 	// Seed seeds the latency draws; runs with the same seed and the same
 	// arrival order draw the same delays.
 	Seed uint64
+	// ModelTokenInterval overrides TokenInterval for the models it names,
+	// so one model's streams can run slower than the rest (M12's budget
+	// model takes about 2 s per reply while the others keep their pace).
+	ModelTokenInterval map[string]time.Duration
+}
+
+// tokenInterval is the delay between streamed deltas for model.
+func (c Config) tokenInterval(model string) time.Duration {
+	if d, ok := c.ModelTokenInterval[model]; ok {
+		return d
+	}
+	return c.TokenInterval
+}
+
+type callerKey struct{}
+
+// WithCaller returns ctx carrying the name of whoever sent the request
+// (`switchboard fake-provider` sets the remote IP), which the ledger
+// records so a run with several gateways can tell their requests apart.
+func WithCaller(ctx context.Context, caller string) context.Context {
+	return context.WithValue(ctx, callerKey{}, caller)
+}
+
+func callerOf(ctx context.Context) string {
+	s, _ := ctx.Value(callerKey{}).(string)
+	return s
 }
 
 // DefaultConfig is the shape PLAN.md's Q1 method uses.
@@ -56,7 +83,10 @@ type Provider struct {
 	mu     sync.Mutex
 	last   *core.Request
 	ledger []Entry
-	rnd    *rand.Rand
+	// gen counts ledger resets, so a request that outlives a reset does
+	// not mark an entry of the new ledger as ended.
+	gen int64
+	rnd *rand.Rand
 	// stalled is the stall switch; transitions records every flip.
 	stalled     bool
 	transitions []Transition
@@ -118,6 +148,17 @@ type Entry struct {
 	InputTokens  int  `json:"input_tokens"`
 	OutputTokens int  `json:"output_tokens"`
 	Completed    bool `json:"completed"`
+	// Ended is when the request was done with: the reply finished, or
+	// the stream was closed, complete or not.
+	Ended time.Time `json:"ended,omitzero"`
+	// Caller is who sent the request (see WithCaller), empty if unknown.
+	Caller string `json:"caller,omitempty"`
+	// MaxTokens is the request's output limit, 0 if it set none.
+	MaxTokens int `json:"max_tokens,omitempty"`
+	// EstimatedInputTokens is the gateway's input estimate for the
+	// request as received (cost.EstimateInputTokens): with MaxTokens, what
+	// a gateway that forwarded it unchanged reserved against a budget.
+	EstimatedInputTokens int `json:"estimated_input_tokens,omitempty"`
 	// Stalled is true for a request that arrived while the stall switch
 	// was on and was never answered.
 	Stalled bool `json:"stalled,omitempty"`
@@ -134,6 +175,7 @@ func (p *Provider) Ledger() []Entry {
 func (p *Provider) ResetLedger() {
 	p.mu.Lock()
 	p.ledger = nil
+	p.gen++
 	p.mu.Unlock()
 }
 
@@ -141,6 +183,16 @@ func (p *Provider) settle(i int, output int, completed bool) {
 	p.mu.Lock()
 	p.ledger[i].OutputTokens = output
 	p.ledger[i].Completed = completed
+	p.mu.Unlock()
+}
+
+// end records when request i was done with, once; a reset since it was
+// recorded leaves nothing to mark.
+func (p *Provider) end(i int, gen int64) {
+	p.mu.Lock()
+	if gen == p.gen && i < len(p.ledger) && p.ledger[i].Ended.IsZero() {
+		p.ledger[i].Ended = time.Now()
+	}
 	p.mu.Unlock()
 }
 
@@ -186,24 +238,27 @@ func (p *Provider) LastRequest() *core.Request {
 	return &c
 }
 
-// record notes a request and returns its reply id, its ledger index and
-// whether it arrived while the provider was stalled.
-func (p *Provider) record(req *core.Request) (string, int, bool) {
+// record notes a request and returns its reply id, its ledger index, the
+// ledger's generation and whether it arrived while the provider was
+// stalled.
+func (p *Provider) record(ctx context.Context, req *core.Request) (string, int, int64, bool) {
 	p.calls.Add(1)
 	c := *req
 	c.Messages = append([]core.Message(nil), req.Messages...)
 	p.mu.Lock()
 	p.last = &c
 	stalled := p.stalled
-	p.ledger = append(p.ledger, Entry{Time: time.Now(), Model: req.Model, Stream: req.Stream, InputTokens: InputTokens(req), Stalled: stalled})
-	i := len(p.ledger) - 1
+	p.ledger = append(p.ledger, Entry{Time: time.Now(), Model: req.Model, Stream: req.Stream, InputTokens: InputTokens(req), Stalled: stalled,
+		Caller: callerOf(ctx), MaxTokens: req.MaxTokens, EstimatedInputTokens: cost.EstimateInputTokens(req)})
+	i, gen := len(p.ledger)-1, p.gen
 	p.mu.Unlock()
-	return fmt.Sprintf("fake-%d", p.seq.Add(1)), i, stalled
+	return fmt.Sprintf("fake-%d", p.seq.Add(1)), i, gen, stalled
 }
 
 // Complete implements core.Provider.
 func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Response, error) {
-	id, entry, stalled := p.record(req)
+	id, entry, gen, stalled := p.record(ctx, req)
+	defer p.end(entry, gen)
 	if stalled {
 		return nil, p.hold(ctx)
 	}
@@ -233,8 +288,9 @@ func (p *Provider) Complete(ctx context.Context, req *core.Request) (*core.Respo
 
 // Stream implements core.Provider.
 func (p *Provider) Stream(ctx context.Context, req *core.Request) (core.Stream, error) {
-	id, entry, stalled := p.record(req)
+	id, entry, gen, stalled := p.record(ctx, req)
 	s := &stream{
+		gen:     gen,
 		p:       p,
 		stalled: stalled,
 		entry:   entry,
@@ -352,6 +408,7 @@ type stream struct {
 	// sends anything.
 	stalled bool
 	entry   int
+	gen     int64
 	ctx     context.Context
 	cfg     Config
 	delay   time.Duration
@@ -399,7 +456,7 @@ func (s *stream) Next() (core.Event, error) {
 		return core.Event{Kind: core.EventStart, ID: s.id, Model: s.model, Usage: core.Usage{InputTokens: s.input}}, nil
 	case s.state <= s.body():
 		if s.state > 1 {
-			if err := sleep(s.ctx, s.cfg.TokenInterval); err != nil {
+			if err := sleep(s.ctx, s.cfg.tokenInterval(s.model)); err != nil {
 				return core.Event{}, err
 			}
 		}
@@ -424,6 +481,9 @@ func (s *stream) Next() (core.Event, error) {
 }
 
 func (s *stream) Close() error {
+	if !s.closed {
+		s.p.end(s.entry, s.gen)
+	}
 	s.closed = true
 	return nil
 }

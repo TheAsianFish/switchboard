@@ -14,10 +14,10 @@ func TestLedger(t *testing.T) {
 	t.Parallel()
 	p := New(Config{Tokens: 5})
 	ctx := context.Background()
-	if _, err := p.Complete(ctx, request("one two three", 0)); err != nil {
+	if _, err := p.Complete(WithCaller(ctx, "10.0.0.2"), request("one two three", 0)); err != nil {
 		t.Fatal(err)
 	}
-	full, err := p.Stream(ctx, request("four five", 0))
+	full, err := p.Stream(ctx, request("four five", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,9 +38,11 @@ func TestLedger(t *testing.T) {
 
 	got := p.Ledger()
 	want := []Entry{
-		{Model: "fake", InputTokens: 3, OutputTokens: 5, Completed: true},
-		{Model: "fake", InputTokens: 2, OutputTokens: 5, Completed: true},
-		{Model: "fake", InputTokens: 1, OutputTokens: 2},
+		// The estimate is the gateway's: 4 per message plus a token per
+		// three characters, rounded up.
+		{Model: "fake", InputTokens: 3, OutputTokens: 5, Completed: true, Caller: "10.0.0.2", EstimatedInputTokens: 9},
+		{Model: "fake", InputTokens: 2, OutputTokens: 5, Completed: true, MaxTokens: 64, EstimatedInputTokens: 7},
+		{Model: "fake", InputTokens: 1, OutputTokens: 2, EstimatedInputTokens: 5},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("ledger has %d entries, want %d", len(got), len(want))
@@ -50,7 +52,10 @@ func TestLedger(t *testing.T) {
 		if g.Time.IsZero() {
 			t.Errorf("entry %d has no time", i)
 		}
-		g.Time, g.Stream = want[i].Time, false
+		if g.Ended.Before(g.Time) {
+			t.Errorf("entry %d ended %v, before it arrived at %v", i, g.Ended, g.Time)
+		}
+		g.Time, g.Ended, g.Stream = want[i].Time, want[i].Ended, false
 		if g != want[i] {
 			t.Errorf("entry %d = %+v, want %+v", i, g, want[i])
 		}
@@ -75,5 +80,30 @@ func TestLedger(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent || len(p.Ledger()) != 0 {
 		t.Errorf("reset: status %d, %d entries left", resp.StatusCode, len(p.Ledger()))
+	}
+}
+
+// A request still open when the ledger is reset does not mark the new
+// ledger's entry with the same index as ended.
+func TestEndAfterReset(t *testing.T) {
+	t.Parallel()
+	p := New(Config{Tokens: 2})
+	ctx := context.Background()
+	old, err := p.Stream(ctx, request("one", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.ResetLedger()
+	open, err := p.Stream(ctx, request("two", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = old.Close()
+	if e := p.Ledger()[0]; !e.Ended.IsZero() {
+		t.Errorf("open request marked ended at %v by one from before the reset", e.Ended)
+	}
+	_ = open.Close()
+	if e := p.Ledger()[0]; e.Ended.IsZero() {
+		t.Error("closed request not marked ended")
 	}
 }

@@ -36,3 +36,21 @@ func TestLatencyDistribution(t *testing.T) {
 		t.Errorf("fixed latency drew %v", d)
 	}
 }
+
+func TestModelTokenInterval(t *testing.T) {
+	t.Parallel()
+	c := Config{TokenInterval: 5 * time.Millisecond, ModelTokenInterval: map[string]time.Duration{"slow": 70 * time.Millisecond}}
+	tests := []struct {
+		model string
+		want  time.Duration
+	}{
+		{"slow", 70 * time.Millisecond},
+		{"fast", 5 * time.Millisecond},
+		{"", 5 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		if got := c.tokenInterval(tt.model); got != tt.want {
+			t.Errorf("tokenInterval(%q) = %v, want %v", tt.model, got, tt.want)
+		}
+	}
+}

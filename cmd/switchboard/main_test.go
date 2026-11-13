@@ -24,6 +24,7 @@ func TestRunUsage(t *testing.T) {
 		{"serve with a stray argument", []string{"serve", "extra"}, 2, "", "unexpected arguments"},
 		{"serve with a missing config", []string{"serve", "--config", "/nonexistent/switchboard.yaml"}, 1, "", "read config"},
 		{"fake-provider with a bad flag", []string{"fake-provider", "--latency", "soon"}, 2, "", "invalid value"},
+		{"fake-provider with a bad model interval", []string{"fake-provider", "--model-token-interval", "fake-budget"}, 2, "", "want model=duration"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
