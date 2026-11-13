@@ -62,6 +62,7 @@ the method, the intervals, the hardware and the cost of every row.
 | [M9: budgets across a Redis restart](RESULTS.md#m9-budgets-across-a-redis-restart) | Budget across a Redis restart: overshoot $0.198040 with no append-only file, $0.017620 with `everysec`, $0.017620 with `always`; `everysec` adds +0.07 ms at p99 (non-streaming total, against none; -1.06 ms in a second pass); `always` adds +6.18 ms at p99 (non-streaming total, against none; +5.83 ms in a second pass); compose default by the pre-stated rule: `everysec` | `make chaos-persist`, `make bench-persist` |
 | [M10: a stalled provider and the first-token timeout](RESULTS.md#m10-a-stalled-provider-and-the-first-token-timeout) | Provider stalled at 20 req/s: breaker opened 0 times in 60 s before; with a 2 s first-token timeout, open 2.249 s into the stall, refusals p99 1.57 ms, closed 0.477 s after it ended (11.476 s when the stall ended just after a probe) | `make bench-stall` |
 | [M11: is the list of ways a budget loses spend complete?](RESULTS.md#m11-is-the-list-of-ways-a-budget-loses-spend-complete) | 100,000 seeded fault schedules on three replicas: 35,019 lost spend; by the fault log, 18,793 needed a third way (a request admitted on grace and in flight when its process died), shortest 2 steps; I2 and I3 held on every seed; a planted bug was found in 1,814 of the 2,087 seeds it hit | `make sim-budget` |
+| [M12: an unsettled hold becomes spend, without charging anything twice](RESULTS.md#m12-an-unsettled-hold-becomes-spend-without-charging-anything-twice) | Streams cut off by a replica kill with Redis up: before the fix, 5 of them left $0.001095 out of spent after the hold TTL (their bill: $0.001095); after it, 6 of them left spent $0.004890 above the bill, their holds' margin (4.29× what they were billed). Simulator re-run: seeds losing spend to an expired hold 20,581 → 2,065, each only what a request cost above its hold; I4 and the exact balance held on every seed | `make chaos-orphan`, `make sim-budget` |
 
 Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2
@@ -355,8 +356,11 @@ request reserves its worst-case cost (estimated input plus `max_tokens`;
 a request without one is sent upstream with the model's
 `max_output_tokens`, so the worst case is a real cap) before it is sent and
 settles the provider's real usage afterwards. That way
-three replicas spending at once cannot together pass the budget, and a
-reservation held by a replica that dies expires instead of leaking. The
+three replicas spending at once cannot together pass the budget. A
+reservation held by a replica that dies expires and is charged at its
+held amount, since the provider may have billed the request, and a settle
+that arrives after the expiry corrects the charge to the real cost by way
+of a tombstone kept as long as the budget window. The
 token limit is charged on the same estimate and corrected afterwards. When
 Redis is unreachable, each replica falls back to a local limiter at a third
 of the limit, a small grace allowance of budget, and a pending list of spend
@@ -390,6 +394,21 @@ instead (where each killed process's money sat, balanced exactly against
 `spent` so a lost reply's second charge cannot hide a loss) and shrinking
 per class found a way the list did not name: a request admitted on grace and still
 in flight when its replica dies (RESULTS.md, M11).
+
+Charging an expired hold (M12) looks like five lines of Lua, and done
+that way it double-charges. The degraded path already leaves holds to
+expire on purpose: a request held on Redis and settled during an outage
+has its cost parked in the replica's memory, and the flush after the
+outage charges it plainly beside the hold. So three things change
+together. The expiry charges the held amount and leaves a tombstone that
+lives as long as the window's keys (one hold TTL is not enough: a settle
+parked through a long outage would miss it); a settle that finds a
+tombstone corrects `spent` by actual minus held; and parked spend keeps
+its hold's id, so the flush settles that hold. A replica killed with
+streams in flight, which used to leave Redis short by exactly what the
+provider billed for them, now leaves it over by the holds' margin, and
+the simulator's re-run checks a new invariant that bounds that over-count
+on every seed (RESULTS.md, M12).
 
 Q2 measures it in compose: three replicas behind nginx, one key at three
 times its limit, and the fake provider's ledger as the ground truth of what
@@ -533,7 +552,7 @@ How the streaming path is tested:
 | Keys looked up by SHA-256 digest | A deployed config can hold digests, not keys, and lookups for both take the same path. | Plain-text compare: secrets in the file. |
 | The fake provider is a real server | `bench` and, later, the chaos run measure across processes, the way production runs. | An in-process mock: hides the network hop the overhead number is about. |
 | Every limit and budget decision is one Lua script that reads Redis's clock | Atomic across replicas in one round trip; skewed replica clocks do not matter. | Read-modify-write from Go: races between replicas. Replica clocks: skew moves windows. |
-| Reserve the worst case, settle the real cost | Concurrent requests on any replica cannot together overspend; unsettled holds expire after a crash. | Charge after the reply: N replicas overspend by N requests' worth at the edge. |
+| Reserve the worst case, settle the real cost | Concurrent requests on any replica cannot together overspend; a crashed replica's holds expire and are charged at their worst case, corrected if a settle arrives late. | Charge after the reply: N replicas overspend by N requests' worth at the edge. |
 | Budget grace as a per-replica allowance that refills over `grace_refill` (1 h) | A flapping store's overshoot is bounded by replica processes × grace × (1 + T / refill), not by the number of outages; measured before and after in M8. | Fresh grace per outage (what shipped until M8): eight outages overshot a $0.20 budget by more than the budget itself. Grace shared in Redis: unreachable exactly when it is needed. |
 | Search the budget's failure cases with a seeded simulator, checked against two sums and classified from a fault log (M11) | Invariants over what the provider billed and what Redis spent cannot share a bug with the ledger; the fault log records where each killed process's money sat, so a shrunk schedule's class does not depend on which steps the shrinker happened to keep. | A second reference ledger: it encodes the same assumptions as the code it checks. Classifying by the shrunk schedule's shape (PLAN.md's first rule): shrinking slips, and every kill collapsed to "reserve, kill". |
 | Redis with an append-only file, fsynced every second (`deploy/compose.yaml`) | A restart replays budgets, counters and cache; picked by a rule fixed before M9's runs, from the overshoot and the p99 cost of each mode. | No persistence: a restart gives every spent key its budget again. `appendfsync always`: milliseconds at p99 per request on a container filesystem, to save at most a second of writes, and only from a machine crash. |
@@ -585,20 +604,20 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   tests and Lua slot are in; the implementation is not).
 - A reranking stage for semantic hits: Q3 shows embeddings alone cannot
   keep false hits under 1% at a useful hit rate on adversarial pairs.
-- Budget spend lost to a killed replica, searched (M11): over seeded
-  fault schedules a killed process loses money in three ways, not the two
-  this list used to name. They are spend it settled during an outage and
-  had not yet charged, a Redis hold that expires unsettled, and a request
-  admitted on grace and still in flight, which holds nothing on Redis at
-  all. Each shrinks to a few steps; RESULTS.md M11 prints them. A settle
-  charged twice after a lost reply over-counts and never loses money. No
-  schedule invented spend without a lost reply, and none passed the
-  documented overshoot bound.
-- Next (PLAN.md, evolution round 2): an expired hold charged as spend
-  without double-charging a late settle (M12), which leaves the
-  grace-in-flight case to its allowance bound; and where an outage's
-  slow requests come from, with the cache probing the store one lookup
-  at a time (M13).
+- Budget spend lost to a killed replica, searched (M11) and closed where
+  the store can close it (M12). M11's simulator found three ways a killed
+  process loses money: spend it settled during an outage and had not yet
+  charged, a Redis hold that expires unsettled, and a request admitted on
+  grace and still in flight. M12 charges an expired hold at its held
+  amount, keeps a tombstone so a late settle corrects the charge instead of
+  adding to it, and keeps a parked settle's hold id so the flush after an
+  outage settles that hold. A replica killed with streams in flight now
+  leaves Redis over-counting by the holds' margin instead of short by the
+  bill (RESULTS.md M12). What is left is grace spend (pending or in
+  flight), which only the dead process knew, and a request that cost more
+  than its hold.
+- Next (PLAN.md, evolution round 2): where an outage's slow requests come
+  from, with the cache probing the store one lookup at a time (M13).
 - Budgets across a Redis restart (M9): with the append-only file the
   compose file now ships, a restarted Redis forgot no spend and the
   overshoot was the outage's grace alone, at a p99 cost the bench could

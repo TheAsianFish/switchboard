@@ -75,6 +75,9 @@ type Data struct {
 	M10 *M10
 	// M11 is the budget ledger's fault-schedule simulator.
 	M11 *M11
+	// M12 is expired holds charged: the orphan run, the flap re-run and
+	// the simulator on the fixed ledger.
+	M12 *M12
 	SDK *SDK
 }
 
@@ -196,6 +199,10 @@ func Load(resultsDir string) (Data, error) {
 	if err != nil {
 		return Data{}, err
 	}
+	m12, err := loadM12(resultsDir, m11)
+	if err != nil {
+		return Data{}, err
+	}
 	if q4 != nil {
 		for _, live := range []*Q4Live{q4o, q4c} {
 			if live != nil {
@@ -203,7 +210,7 @@ func Load(resultsDir string) (Data, error) {
 			}
 		}
 	}
-	return Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q4Claude: q4c, Q4ClaudeEstimate: q4cEst, Q5: q5, Q6: q6, M8: m8, M9: m9, M10: m10, M11: m11, SDK: sdk}, nil
+	return Data{Q1: q1, Q2: q2, Q3: q3, Q4: q4, Q4Ollama: q4o, Q4Claude: q4c, Q4ClaudeEstimate: q4cEst, Q5: q5, Q6: q6, M8: m8, M9: m9, M10: m10, M11: m11, M12: m12, SDK: sdk}, nil
 }
 
 // Execute runs the template at templatePath on d.
