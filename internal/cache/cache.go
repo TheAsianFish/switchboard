@@ -59,8 +59,9 @@ type Options struct {
 	// Timeout bounds each store and embedding call. Zero means 250 ms.
 	Timeout time.Duration
 	// RetryInterval is how long the cache stays bypassed after a store
-	// error, so an unreachable Redis costs one timeout per interval and
-	// not one per request; the semantic layer alone is bypassed as long
+	// error; after it one lookup probes the store while the rest still
+	// bypass, so an unreachable Redis costs one timeout per interval and
+	// not one per request. The semantic layer alone is bypassed as long
 	// after an embedder or vector index error. Zero means one second.
 	RetryInterval time.Duration
 	// Metrics records lookups and fills; nil records nothing.
@@ -76,9 +77,10 @@ type Cache struct {
 	index   Index
 	dims    int
 
-	// downUntil is the unix-nano time until which the store is bypassed,
-	// embedDownUntil and indexDownUntil the same for the embedder and the
-	// vector index, whose failures bypass the semantic layer only.
+	// downUntil is the unix-nano time until which the store is bypassed
+	// while it is down, and then the time of the next probe (mayCall);
+	// embedDownUntil and indexDownUntil bypass the embedder and the vector
+	// index, whose failures bypass the semantic layer only.
 	downUntil      atomic.Int64
 	embedDownUntil atomic.Int64
 	indexDownUntil atomic.Int64
@@ -174,7 +176,7 @@ func (c *Cache) Lookup(ctx context.Context, tenant string, up Upstream, mode Mod
 	if !ok {
 		return Skip("last turn is not the user's")
 	}
-	if c.bypassed(&c.downUntil) {
+	if !c.mayCall() {
 		return c.record(&Lookup{Status: StatusSkip, Reason: "store unavailable"})
 	}
 	tools := req.HasToolContent()
@@ -392,6 +394,29 @@ func (c *Cache) record(l *Lookup) *Lookup {
 
 func (c *Cache) bypassed(until *atomic.Int64) bool {
 	return c.opts.Now().UnixNano() < until.Load()
+}
+
+// mayCall reports whether a lookup may call the store. While the store is
+// down only one lookup per RetryInterval does: the first to find the
+// interval over moves it a further interval on and is the probe, and the
+// rest go on bypassing the cache until the probe has answered, as the
+// limiter and the budget let one call through. Without the gate every
+// lookup that arrives between the interval's end and the probe's failure
+// calls the store too, and each waits out the store's timeout (M13).
+func (c *Cache) mayCall() bool {
+	if !c.storeDown.Load() {
+		return true
+	}
+	now := c.opts.Now()
+	for {
+		until := c.downUntil.Load()
+		if now.UnixNano() < until {
+			return false
+		}
+		if c.downUntil.CompareAndSwap(until, now.Add(c.opts.RetryInterval).UnixNano()) {
+			return true
+		}
+	}
 }
 
 // storeFailed bypasses the cache for RetryInterval. A cache that waits out

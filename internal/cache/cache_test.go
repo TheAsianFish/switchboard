@@ -985,3 +985,118 @@ func TestSlowStoreCallsLogged(t *testing.T) {
 		}
 	}
 }
+
+// probeKV fails while down; with hold set, the next Get signals entered
+// and waits for release, so a probe can be held in flight while other
+// lookups arrive (and any of them that calls the store is counted and
+// answered at once).
+type probeKV struct {
+	cache.KV
+	mu      sync.Mutex
+	down    bool
+	hold    bool
+	gets    int
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (p *probeKV) Get(ctx context.Context, k string) ([]byte, bool, error) {
+	p.mu.Lock()
+	p.gets++
+	down, hold := p.down, p.hold
+	p.hold = false
+	p.mu.Unlock()
+	if hold {
+		p.entered <- struct{}{}
+		<-p.release
+	}
+	if down {
+		return nil, false, errors.New("dial tcp: i/o timeout")
+	}
+	return p.KV.Get(ctx, k)
+}
+
+func (p *probeKV) state(down, hold bool) { p.mu.Lock(); p.down, p.hold = down, hold; p.mu.Unlock() }
+func (p *probeKV) count() int            { p.mu.Lock(); defer p.mu.Unlock(); return p.gets }
+
+// While the store is down, one lookup per retry interval probes it: with
+// the probe still in flight, every other lookup bypasses the cache without
+// calling the store, and keeps bypassing after the probe fails until a
+// further interval has passed. The first probe that succeeds turns the
+// cache back on for everyone.
+func TestOneLookupProbesAnUnreachableStore(t *testing.T) {
+	t.Parallel()
+	const others = 50
+	for _, probeUp := range []bool{false, true} {
+		t.Run(fmt.Sprintf("probe finds the store up=%v", probeUp), func(t *testing.T) {
+			t.Parallel()
+			clk := &clock{t: time.Unix(1_700_000_000, 0)}
+			kv := &probeKV{KV: cache.NewMemoryKV(100, clk.now), down: true, entered: make(chan struct{}), release: make(chan struct{})}
+			c := cache.New(cache.Options{KV: kv, TTL: time.Hour, RetryInterval: time.Second, Now: clk.now})
+			ctx := context.Background()
+			lookup := func(i int) *cache.Lookup {
+				return c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", fmt.Sprintf("p%d", i)))
+			}
+			if l := lookup(-1); l.Status != cache.StatusError {
+				t.Fatalf("first lookup: %+v", l)
+			}
+			// Inside the interval nothing reaches the store.
+			clk.add(999 * time.Millisecond)
+			if l := lookup(-2); l.Status != cache.StatusSkip || kv.count() != 1 {
+				t.Fatalf("lookup inside the interval: %+v, %d gets", l, kv.count())
+			}
+			// The interval is over: hold the probe in flight.
+			clk.add(time.Millisecond)
+			kv.state(!probeUp, true)
+			probe := make(chan *cache.Lookup)
+			go func() { probe <- lookup(0) }()
+			<-kv.entered
+			var wg sync.WaitGroup
+			skipped := make(chan bool, others)
+			for i := range others {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					skipped <- lookup(i+1).Status == cache.StatusSkip
+				}()
+			}
+			wg.Wait()
+			close(skipped)
+			for s := range skipped {
+				if !s {
+					t.Fatal("a lookup reached the store while the probe was in flight")
+				}
+			}
+			if n := kv.count(); n != 2 {
+				t.Fatalf("%d gets with the probe in flight, want 2 (the first failure and the probe)", n)
+			}
+			close(kv.release)
+			l := <-probe
+			if !probeUp {
+				if l.Status != cache.StatusError {
+					t.Fatalf("failed probe: %+v", l)
+				}
+				// The failure restarts the interval: still one probe per
+				// interval, however many lookups arrive.
+				for i := range others {
+					if l := lookup(100 + i); l.Status != cache.StatusSkip {
+						t.Fatalf("lookup after a failed probe: %+v", l)
+					}
+				}
+				clk.add(time.Second)
+				kv.state(false, false)
+			} else if l.Status != cache.StatusMiss {
+				t.Fatalf("successful probe: %+v", l)
+			}
+			before := kv.count()
+			for i := range 5 {
+				if l := lookup(200 + i); l.Status != cache.StatusMiss {
+					t.Fatalf("lookup %d after recovery: %+v", i, l)
+				}
+			}
+			if n := kv.count() - before; n != 5 {
+				t.Fatalf("%d of 5 lookups reached the store after recovery", n)
+			}
+		})
+	}
+}
