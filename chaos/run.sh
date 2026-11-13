@@ -66,6 +66,19 @@
 # when each replica's limiter, budget and cache gave up on Redis and when
 # they found it again, and with what error.
 #
+# RETRY_INTERVAL=1s|250ms (any Go duration) is M13's switch (PLAN.md
+# M13): every replica's ratelimit.retry_interval, which also sets how often
+# the budget and the cache probe an unreachable Redis. With it, a q6 run's
+# results go to eval/results/m13-outage/retry-<interval>/ unless OUT is
+# set (`make chaos-retry` runs each arm three times into run-1..3).
+#
+# REPLICA_REF=<commit> builds the three replicas' image from that commit
+# in a git worktree (tagged switchboard:replica-<commit>) and runs them
+# through chaos/replica.compose.yaml; the fake provider and the load
+# generator stay the working tree's. `make chaos-probe RUN=before` uses it
+# for M13's before arm. CHAOS_COMMAND, if set, is the command recorded in
+# meta.json.
+#
 #   chaos/run.sh                                  # the full run (make chaos, about 3 minutes)
 #   REDIS_PERSIST=everysec chaos/run.sh           # M9's everysec arm
 #   SCALE=0.25 OUT=/tmp/q6 chaos/run.sh           # a 30 s smoke: schedule and duration × 0.25
@@ -108,6 +121,19 @@ everysec | always) appendonly=yes fsync=$persist ;;
 	;;
 esac
 export REDIS_APPENDONLY=$appendonly REDIS_APPENDFSYNC=$fsync
+retry=${RETRY_INTERVAL:-}
+if [[ -n $retry ]]; then
+	if [[ $sched == orphan ]] || ! [[ $retry =~ ^[0-9]+(\.[0-9]+)?(ms|s)$ ]]; then
+		echo "q6: RETRY_INTERVAL must be a duration such as 1s or 250ms, and not with SCHEDULE=orphan; got '$retry'" >&2
+		exit 2
+	fi
+fi
+export RETRY_INTERVAL=$retry
+replica_ref=${REPLICA_REF:-}
+if [[ -n $replica_ref && $sched == orphan ]]; then
+	echo "q6: SCHEDULE=orphan takes BEFORE_REF, not REPLICA_REF" >&2
+	exit 2
+fi
 main_rate=${MAIN_RATE:-200}
 limited_rate=${LIMITED_RATE:-30}
 budget_rate=${BUDGET_RATE:-10}
@@ -116,6 +142,13 @@ command="make chaos"
 if [[ -n $persist ]]; then
 	default_out=eval/results/m9-persist/chaos-$persist
 	command="REDIS_PERSIST=$persist make chaos"
+fi
+if [[ -n $retry ]]; then
+	default_out=eval/results/m13-outage/retry-$retry
+	command="RETRY_INTERVAL=$retry $command"
+	if [[ -n $persist ]]; then
+		command="RETRY_INTERVAL=$retry REDIS_PERSIST=$persist make chaos"
+	fi
 fi
 out=${OUT:-$default_out}
 if [[ $sched == flap ]]; then
@@ -130,6 +163,9 @@ if [[ $sched == orphan ]]; then
 fi
 if [[ $sched != orphan && -n ${SCALE:-}${MAIN_RATE:-}${LIMITED_RATE:-}${BUDGET_RATE:-} ]]; then
 	command="SCHEDULE=$sched SCALE=$scale MAIN_RATE=$main_rate LIMITED_RATE=$limited_rate BUDGET_RATE=$budget_rate${persist:+ REDIS_PERSIST=$persist} chaos/run.sh"
+fi
+if [[ -n ${CHAOS_COMMAND:-} ]]; then
+	command=$CHAOS_COMMAND
 fi
 scaled() { awk -v s="$scale" -v v="$1" 'BEGIN { printf "%.3f", s * v }'; }
 if [[ $sched == flap ]]; then
@@ -148,6 +184,8 @@ project=switchboard-chaos
 compose=(docker compose -f chaos/compose.yaml -p "$project")
 if [[ $sched == orphan ]]; then
 	compose=(docker compose -f chaos/compose.yaml -f chaos/orphan.compose.yaml -p "$project")
+elif [[ -n $replica_ref ]]; then
+	compose=(docker compose -f chaos/compose.yaml -f chaos/replica.compose.yaml -p "$project")
 fi
 lb=http://127.0.0.1:28080
 fake=http://127.0.0.1:29101
@@ -388,9 +426,21 @@ if [[ $sched == orphan ]]; then
 		worktree=
 		ORPHAN_REPLICA_IMAGE=switchboard:m12-before
 	fi
+elif [[ -n $replica_ref ]]; then
+	# The fake provider from the working tree (switchboard:dev); the
+	# replicas from REPLICA_REF.
+	"${compose[@]}" build fake-provider >/dev/null
+	gateway_commit=$(git rev-parse --short "$replica_ref")
+	worktree=$tmp/replica-src
+	git worktree add --detach "$worktree" "$replica_ref" >/dev/null 2>&1
+	docker build -q -t "switchboard:replica-$gateway_commit" "$worktree" >/dev/null
+	git worktree remove --force "$worktree"
+	worktree=
+	export REPLICA_IMAGE=switchboard:replica-$gateway_commit
 else
 	"${compose[@]}" build switchboard-1 >/dev/null
 fi
+gateway_commit=${gateway_commit:-$commit}
 # A fresh anonymous /data volume for Redis, so an append-only file from an
 # earlier run is never replayed into this one.
 "${compose[@]}" up -d --force-recreate --renew-anon-volumes >/dev/null 2>&1
@@ -470,9 +520,11 @@ aof_bytes=$("${compose[@]}" exec -T redis sh -c 'du -sb /data/appendonlydir 2>/d
 cat >"$tmp/meta.json" <<JSON
 {
   "commit": "$commit",
+  "gateway_commit": "$gateway_commit",
   "date": "$(date -u -d "@${t0%.*}" +%Y-%m-%dT%H:%M:%SZ)",
   "command": "$command",
   "replicas": 3,
+  "retry_interval": "${retry:-1s}",
   "duration_seconds": $duration,
   "time_scale": $scale,
   "schedule": "$sched",

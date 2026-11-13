@@ -1,0 +1,16 @@
+# M13's before arm (`make chaos-probe RUN=before`, PLAN.md M13), layered
+# on chaos/compose.yaml by chaos/run.sh when REPLICA_REF is set: the three
+# replicas run the image in REPLICA_IMAGE, built by the script from that
+# commit, and are never built here. The fake provider and the load
+# generator stay the working tree's.
+# Written out per service: a `!reset` behind a YAML alias is lost.
+services:
+  switchboard-1:
+    image: ${REPLICA_IMAGE:-switchboard:dev}
+    build: !reset null
+  switchboard-2:
+    image: ${REPLICA_IMAGE:-switchboard:dev}
+    build: !reset null
+  switchboard-3:
+    image: ${REPLICA_IMAGE:-switchboard:dev}
+    build: !reset null
