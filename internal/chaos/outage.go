@@ -89,6 +89,9 @@ type OutageSummary struct {
 	Run      RunSlow        `json:"run"`
 	Outages  []RedisOutage  `json:"outages"`
 	Restarts []RedisRestart `json:"restarts,omitempty"`
+	// AfterReady is, per Redis start with a ready line, the cache
+	// failures the replicas logged in the 5 s after Redis was ready.
+	AfterReady []AfterReady `json:"after_ready,omitempty"`
 }
 
 // RunSlow counts the whole run.
@@ -145,6 +148,19 @@ type RedisOutage struct {
 	// stretch, when its cache first failed without waiting and how many
 	// failed dials go-redis had logged on it by then.
 	Replicas []ReplicaDials `json:"replicas"`
+}
+
+// AfterReady counts the cache failures after a restarted Redis was
+// ready: a failure then is not Redis, but a replica that has not found it
+// again yet.
+type AfterReady struct {
+	// AtSeconds is the start; ReadySeconds when Redis was ready, from it.
+	AtSeconds    float64        `json:"at_seconds"`
+	ReadySeconds float64        `json:"ready_seconds"`
+	Failures     int            `json:"failures"`
+	ByClass      map[string]int `json:"by_class"`
+	// LastSeconds is the last failure, from ready.
+	LastSeconds *float64 `json:"last_seconds,omitempty"`
 }
 
 // ReplicaDials is one replica's way into fast failures in an outage.
@@ -224,6 +240,22 @@ func AnalyseOutage(in Input) (*OutageSummary, error) {
 	out := &OutageSummary{Meta: in.Meta, Hardware: main.Result.Hardware, LineMS: SlowLineMS, GapS: BurstGapSeconds}
 	if s.Store != nil {
 		out.Restarts = s.Store.Restarts
+		for _, r := range s.Store.Restarts {
+			if r.ReadySeconds == nil {
+				continue
+			}
+			ar := AfterReady{AtSeconds: r.AtSeconds, ReadySeconds: *r.ReadySeconds, ByClass: map[string]int{}}
+			from := r.AtSeconds + *r.ReadySeconds
+			for _, f := range fails {
+				if f.AtSeconds >= from && f.AtSeconds < from+5 {
+					ar.Failures++
+					ar.ByClass[f.Class]++
+					v := round3(f.AtSeconds - from)
+					ar.LastSeconds = &v
+				}
+			}
+			out.AfterReady = append(out.AfterReady, ar)
+		}
 	}
 
 	// Each slow request with its longest store call.

@@ -47,6 +47,8 @@ func TestAnalyseOutage(t *testing.T) {
 			cacheFailLine(20.26, 250, timeout),
 			cacheFailLine(21.85, 250, dial),
 			cacheFailLine(24, 0.4, dial), // a later, fast failure: its own round
+			// After Redis is ready (30.4 s): the pool's stale dial error.
+			cacheFailLine(31, 0.02, "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"),
 			{Unix: unixAt(21.9), Text: "redis: 2026/11/10 12:00:21 pool.go:1: redis: connection pool: failed to dial after 5 attempts: dial tcp: i/o timeout"},
 		},
 		"switchboard-3": {
@@ -109,7 +111,7 @@ func TestAnalyseOutage(t *testing.T) {
 		t.Errorf("second burst classes = %v", b.ByClass)
 	}
 	rounds := x.CacheRounds
-	if len(rounds) != 3 || rounds[0].Failures != 2 || rounds[0].SlowFailures != 2 || rounds[0].MaxWaitMS != 300 ||
+	if len(rounds) != 4 || rounds[0].Failures != 2 || rounds[0].SlowFailures != 2 || rounds[0].MaxWaitMS != 300 ||
 		rounds[1].FromSeconds != 1.85 || rounds[2].SlowFailures != 0 || rounds[2].ByClass[ErrClassDialTimeout] != 1 {
 		t.Errorf("cache rounds = %+v", rounds)
 	}
@@ -124,6 +126,10 @@ func TestAnalyseOutage(t *testing.T) {
 	if len(x.Replicas) != 1 || x.Replicas[0].Replica != "switchboard-1" || x.Replicas[0].FirstFastSeconds == nil ||
 		*x.Replicas[0].FirstFastSeconds != 4 || x.Replicas[0].DialsBefore != 1 || x.Replicas[0].SlowCacheFailures != 3 {
 		t.Errorf("replicas = %+v", x.Replicas)
+	}
+	if len(o.AfterReady) != 1 || o.AfterReady[0].Failures != 1 || o.AfterReady[0].ByClass[ErrClassDNS] != 1 ||
+		o.AfterReady[0].LastSeconds == nil || *o.AfterReady[0].LastSeconds != 0.6 {
+		t.Errorf("after ready = %+v", o.AfterReady)
 	}
 	if len(o.Restarts) != 1 || o.Restarts[0].ReadySeconds == nil || *o.Restarts[0].ReadySeconds != 0.4 {
 		t.Errorf("restarts = %+v", o.Restarts)
