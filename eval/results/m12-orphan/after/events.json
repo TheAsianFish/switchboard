@@ -1,0 +1,3 @@
+[
+{"name": "kill switchboard-2", "action": "kill", "target": "switchboard-2", "phase": "replica 2 down", "planned_seconds": 40.000, "issued_unix": 1794579550.667583842, "done_unix": 1794579551.047658527}
+]
