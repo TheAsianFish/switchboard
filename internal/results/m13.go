@@ -92,6 +92,12 @@ type M13BurstCell struct {
 	ByClass     string
 	InFlight    int
 	MedianWait  string
+	// BeforeDone counts the requests whose longest store call started
+	// before the cutting command returned; CallStarts is the range of
+	// those calls' starts and Done the range of the commands' return
+	// times, both from the command being issued.
+	BeforeDone       int
+	CallStarts, Done string
 }
 
 // M13Breaker summarises the per-replica dial counts against go-redis's
@@ -103,15 +109,19 @@ type M13Breaker struct {
 	// which the cache failed without waiting.
 	ReplicaOutages, Tripped int
 	// MinAtTrip and MaxAtTrip are the failed dials the replica had
-	// accumulated (carried from earlier outages that did not trip it,
-	// plus this one's before the first fast failure) when it first
-	// failed fast.
+	// accumulated (carried from earlier outages, plus this one's before
+	// the first fast failure) when it first failed fast, over the trips
+	// the count explains.
 	MinAtTrip, MaxAtTrip int
-	// Untripped lists the pairs that reached PoolSize but never failed
-	// fast; Carried counts trips whose own outage's dials were below
-	// PoolSize (the count carried from earlier outages made the rest).
-	Untripped []string
-	Carried   int
+	// Carried counts trips whose own outage's dials were below PoolSize
+	// and whose carried count made up the rest. Late counts pairs that
+	// reached PoolSize with no fast failure logged after (the breaker's
+	// background dial resets the count once Redis is back, so nothing
+	// carries from them). Restarted counts pairs whose process had been
+	// restarted since the previous outage (the count starts at zero).
+	// Unexplained lists the trips the count does not reach PoolSize for.
+	Carried, Late, Restarted int
+	Unexplained              []string
 	// FirstFast is the range of first-fast times.
 	FirstFast string
 }
@@ -252,15 +262,28 @@ func m13Breaker(s *chaos.OutageSummary) M13Breaker {
 	for i, o := range s.Outages {
 		for _, r := range o.Replicas {
 			b.ReplicaOutages++
+			if r.Restarted {
+				b.Restarted++
+				carry[r.Replica] = 0
+			}
 			total := carry[r.Replica] + r.DialsBefore
 			if r.FirstFastSeconds == nil {
 				carry[r.Replica] = total
 				if total >= b.PoolSize {
-					b.Untripped = append(b.Untripped, fmt.Sprintf("%s in outage %d (%d carried + %d)", r.Replica, i+1, total-r.DialsBefore, r.DialsBefore))
+					// The breaker tripped too late for a fast failure
+					// to show; its background dial starts the count
+					// again once Redis is back.
+					b.Late++
+					carry[r.Replica] = 0
 				}
 				continue
 			}
 			b.Tripped++
+			if total < b.PoolSize {
+				b.Unexplained = append(b.Unexplained, fmt.Sprintf("%s in outage %d (%d carried + %d)", r.Replica, i+1, total-r.DialsBefore, r.DialsBefore))
+				carry[r.Replica] = 0
+				continue
+			}
 			if r.DialsBefore < b.PoolSize {
 				b.Carried++
 			}
@@ -277,6 +300,19 @@ func m13Breaker(s *chaos.OutageSummary) M13Breaker {
 	return b
 }
 
+// m13OutageBursts are an outage's bursts from the cut on: a burst of
+// requests scheduled before the cut (observed after it) has no place in
+// the outage's order.
+func m13OutageBursts(o chaos.RedisOutage) []chaos.Burst {
+	var out []chaos.Burst
+	for _, b := range o.Bursts {
+		if b.FromSeconds >= 0 {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 // m13Bursts sets the arms' k-th bursts side by side: the first three,
 // then every later one together.
 func m13Bursts(before, after *M13Arm) []M13BurstRow {
@@ -291,16 +327,22 @@ func m13Bursts(before, after *M13Arm) []M13BurstRow {
 		}
 		comps, classes := map[string]int{}, map[string]int{}
 		lo, hi := math.Inf(1), math.Inf(-1)
+		clo, chi, dlo, dhi := math.Inf(1), math.Inf(-1), math.Inf(1), math.Inf(-1)
 		var waits []float64
 		for _, o := range a.S.Outages {
 			found := false
-			for j, b := range o.Bursts {
+			for j, b := range m13OutageBursts(o) {
 				if j != k && (k != 3 || j <= 3) {
 					continue
 				}
 				found = true
 				c.Requests += b.Requests
 				c.InFlight += b.InFlightAtCut
+				c.BeforeDone += b.StartedBeforeDone
+				if b.CallsFromSeconds != nil {
+					clo, chi = math.Min(clo, *b.CallsFromSeconds), math.Max(chi, *b.CallsToSeconds)
+				}
+				dlo, dhi = math.Min(dlo, o.DoneSeconds), math.Max(dhi, o.DoneSeconds)
 				lo, hi = math.Min(lo, b.FromSeconds), math.Max(hi, b.FromSeconds)
 				for x, v := range b.ByComponent {
 					comps[x] += v
@@ -314,7 +356,13 @@ func m13Bursts(before, after *M13Arm) []M13BurstRow {
 				c.Outages++
 			}
 		}
-		c.PerOutage, c.Starts, c.MedianWait = "–", "–", "–"
+		c.PerOutage, c.Starts, c.MedianWait, c.CallStarts, c.Done = "–", "–", "–", "–", "–"
+		if !math.IsInf(clo, 0) {
+			c.CallStarts = fmt.Sprintf("+%.2f to +%.2f s", clo, chi)
+		}
+		if !math.IsInf(dlo, 0) {
+			c.Done = fmt.Sprintf("+%.2f to +%.2f s", dlo, dhi)
+		}
 		if c.Outages > 0 {
 			c.PerOutage = fmt.Sprintf("%.1f", float64(c.Requests)/float64(len(a.S.Outages)))
 			c.Starts = fmt.Sprintf("+%.2f to +%.2f s", lo, hi)
@@ -463,7 +511,7 @@ func m13Checks(m *M13) []M11Check {
 		}
 		lookups := 0
 		for _, o := range b.S.Outages {
-			for j, br := range o.Bursts {
+			for j, br := range m13OutageBursts(o) {
 				if j == 1 || j == 2 {
 					lookups += br.ByComponent[telemetry.StoreCacheLookup]
 				}
@@ -474,10 +522,20 @@ func m13Checks(m *M13) []M11Check {
 			Measured:   fmt.Sprintf("%d of their %d slow requests waited longest on a cache lookup", lookups, later.Requests),
 			Held:       yesNo(later.Requests > 0 && lookups == later.Requests),
 		})
+		held := "not resolved"
+		switch {
+		case cut.Requests == 0:
+			held = "no"
+		case 2*cut.InFlight > cut.Requests:
+			held = "yes"
+		case 2*cut.BeforeDone < cut.Requests:
+			held = "no"
+		}
 		out = append(out, M11Check{
 			Hypothesis: "The burst at the cut is calls already in flight",
-			Measured:   fmt.Sprintf("%d of its %d slow requests had their store call in flight at the cut; they started %s after it, before the first failure turned the cache off", cut.InFlight, cut.Requests, cut.Starts),
-			Held:       yesNo(cut.Requests > 0 && 2*cut.InFlight > cut.Requests),
+			Measured: fmt.Sprintf("of its %d slow requests, %d had their store call start before the disconnect command was issued, %d after it was issued but before it returned (%s), when the cut may or may not have happened yet, and %d after it returned, after the cut for certain",
+				cut.Requests, cut.InFlight, cut.BeforeDone-cut.InFlight, cut.Done, cut.Requests-cut.BeforeDone),
+			Held: held,
 		})
 	}
 	if b != nil && a != nil {
@@ -500,9 +558,9 @@ func m13Checks(m *M13) []M11Check {
 		bb := b.Breaker
 		out = append(out, M11Check{
 			Hypothesis: "Three bursts, not eight, because go-redis answers from its last dial error after its third failed dial",
-			Measured: fmt.Sprintf("before: each replica failed fast after %d to %d failed dials (go-redis's breaker at PoolSize %d), %s after the cut; the third burst is where the third round of lookups takes the count past %d",
-				bb.MinAtTrip, bb.MaxAtTrip, bb.PoolSize, bb.FirstFast, bb.PoolSize),
-			Held: "no (the mechanism is right, the count is PoolSize, not three)",
+			Measured: fmt.Sprintf("before: in %d of %d replica-outages the cache first failed fast after %d to %d failed dials, %s after the cut (go-redis's breaker answers from its last dial error once PoolSize, %d, dials have failed)",
+				bb.Tripped, bb.ReplicaOutages, bb.MinAtTrip, bb.MaxAtTrip, bb.FirstFast, bb.PoolSize),
+			Held: yesNo(bb.Tripped > 0 && bb.MaxAtTrip <= 3),
 		})
 	}
 	if len(m.Retry) == len(M13Intervals) {

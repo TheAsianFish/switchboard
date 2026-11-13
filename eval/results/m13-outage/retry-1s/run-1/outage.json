@@ -68,6 +68,7 @@
     {
       "event": "kill redis",
       "at_seconds": 60.001,
+      "done_seconds": 0.909,
       "back_seconds": 15,
       "to_seconds": 120,
       "outage_p99_ms": 434.754,
@@ -89,6 +90,9 @@
             "timeout": 43
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 43,
+          "calls_from_seconds": 0.091,
+          "calls_to_seconds": 0.316,
           "replicas": 2,
           "median_wait_ms": 250.361
         },
@@ -101,6 +105,7 @@
           },
           "by_class": {},
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
           "replicas": 0,
           "median_wait_ms": 0
         },
@@ -113,6 +118,7 @@
           },
           "by_class": {},
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
           "replicas": 0,
           "median_wait_ms": 0
         },
@@ -125,6 +131,7 @@
           },
           "by_class": {},
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
           "replicas": 0,
           "median_wait_ms": 0
         },
@@ -137,6 +144,7 @@
           },
           "by_class": {},
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
           "replicas": 0,
           "median_wait_ms": 0
         },
@@ -149,6 +157,7 @@
           },
           "by_class": {},
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
           "replicas": 0,
           "median_wait_ms": 0
         }

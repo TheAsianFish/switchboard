@@ -120,6 +120,10 @@ type RunSlow struct {
 type RedisOutage struct {
 	Event     string  `json:"event"`
 	AtSeconds float64 `json:"at_seconds"`
+	// DoneSeconds is when the docker command that cut Redis off returned,
+	// from the event: the cut itself happened somewhere between the
+	// command being issued (the event) and it returning.
+	DoneSeconds float64 `json:"done_seconds"`
 	// BackSeconds is when Redis came back (start or connect) from the
 	// event; ToSeconds the end of the stretch.
 	BackSeconds *float64 `json:"back_seconds,omitempty"`
@@ -175,6 +179,10 @@ type ReplicaDials struct {
 	// DialsBefore counts the replica's "failed to dial" lines from the
 	// event to FirstFastSeconds (to the stretch's end without one).
 	DialsBefore int `json:"dials_before"`
+	// Restarted reports that the replica's process was started since the
+	// previous outage's event: go-redis's failed-dial count lives in the
+	// process, so a restart begins it again at zero.
+	Restarted bool `json:"restarted,omitempty"`
 	// SlowCacheFailures counts the replica's cache failures that waited
 	// 50 ms or more.
 	SlowCacheFailures int `json:"slow_cache_failures"`
@@ -193,8 +201,16 @@ type Burst struct {
 	// store call each waited on.
 	ByClass map[string]int `json:"by_class"`
 	// InFlightAtCut counts requests whose longest store call started
-	// before the outage's event: calls already in flight when Redis went.
-	InFlightAtCut int `json:"in_flight_at_cut"`
+	// before the outage's event (the docker command was issued), and
+	// StartedBeforeDone those whose call started before the command
+	// returned. The cut happened between the two, so a call counted in
+	// the second and not the first may or may not have been in flight.
+	InFlightAtCut     int `json:"in_flight_at_cut"`
+	StartedBeforeDone int `json:"started_before_done"`
+	// CallsFromSeconds and CallsToSeconds are the range of the requests'
+	// longest store calls' start times, from the event.
+	CallsFromSeconds *float64 `json:"calls_from_seconds,omitempty"`
+	CallsToSeconds   *float64 `json:"calls_to_seconds,omitempty"`
 	// Replicas counts the distinct replicas the burst's store calls came
 	// from.
 	Replicas int `json:"replicas"`
@@ -302,9 +318,9 @@ func AnalyseOutage(in Input) (*OutageSummary, error) {
 
 	// Redis going away, and coming back.
 	type redisEvent struct {
-		name string
-		at   float64
-		down bool
+		name     string
+		at, done float64
+		down     bool
 	}
 	var evs []redisEvent
 	for _, e := range s.Events {
@@ -312,13 +328,13 @@ func AnalyseOutage(in Input) (*OutageSummary, error) {
 			continue
 		}
 		down := e.Action == ActionKill || e.Action == ActionDisconnect
-		evs = append(evs, redisEvent{name: e.Name, at: e.AtSeconds, down: down})
+		evs = append(evs, redisEvent{name: e.Name, at: e.AtSeconds, done: e.DoneSeconds, down: down})
 	}
 	for i, e := range evs {
 		if !e.down {
 			continue
 		}
-		o := RedisOutage{Event: e.name, AtSeconds: e.at, ToSeconds: end, SlowByComponent: map[string]int{}}
+		o := RedisOutage{Event: e.name, AtSeconds: e.at, DoneSeconds: round3(e.done - e.at), ToSeconds: end, SlowByComponent: map[string]int{}}
 		for _, f := range evs[i+1:] {
 			if f.down {
 				o.ToSeconds = f.at
@@ -380,6 +396,17 @@ func AnalyseOutage(in Input) (*OutageSummary, error) {
 				if sr.longest.StartSeconds < e.at {
 					cur.InFlightAtCut++
 				}
+				if sr.longest.StartSeconds < e.done {
+					cur.StartedBeforeDone++
+				}
+				st := round3(sr.longest.StartSeconds - e.at)
+				if cur.CallsFromSeconds == nil || st < *cur.CallsFromSeconds {
+					cur.CallsFromSeconds = &st
+				}
+				if cur.CallsToSeconds == nil || st > *cur.CallsToSeconds {
+					v := st
+					cur.CallsToSeconds = &v
+				}
 			}
 		}
 		flush()
@@ -399,6 +426,17 @@ func AnalyseOutage(in Input) (*OutageSummary, error) {
 			}
 		}
 		o.Replicas = replicaDials(fails, pool, e.at, o.ToSeconds)
+		prev := math.Inf(-1)
+		if n := len(out.Outages); n > 0 {
+			prev = out.Outages[n-1].AtSeconds
+		}
+		for j := range o.Replicas {
+			for _, ev := range s.Events {
+				if ev.Target == o.Replicas[j].Replica && ev.Action == ActionStart && ev.AtSeconds > prev && ev.AtSeconds <= e.at {
+					o.Replicas[j].Restarted = true
+				}
+			}
+		}
 		out.Outages = append(out.Outages, o)
 	}
 	return out, nil
@@ -582,8 +620,8 @@ func DescribeOutage(o *OutageSummary) string {
 		fmt.Fprintf(&b, "  %s at %.1f s: %d slow (%s), p99 %.1f / %.1f ms\n", x.Event, x.AtSeconds, x.SlowRequests,
 			counts(x.SlowByComponent), x.OutageP99MS, x.BackP99MS)
 		for _, br := range x.Bursts {
-			fmt.Fprintf(&b, "    +%.2f..%.2f s: %d (%s; %s), %d in flight at the cut, median wait %.0f ms\n",
-				br.FromSeconds, br.ToSeconds, br.Requests, counts(br.ByComponent), counts(br.ByClass), br.InFlightAtCut, br.MedianWaitMS)
+			fmt.Fprintf(&b, "    %+.2f..%+.2f s: %d (%s; %s), calls started before the cut command was issued %d, before it returned (%+.2f s) %d, median wait %.0f ms\n",
+				br.FromSeconds, br.ToSeconds, br.Requests, counts(br.ByComponent), counts(br.ByClass), br.InFlightAtCut, x.DoneSeconds, br.StartedBeforeDone, br.MedianWaitMS)
 		}
 	}
 	return b.String()

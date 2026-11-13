@@ -68,6 +68,7 @@
     {
       "event": "kill redis",
       "at_seconds": 60.001,
+      "done_seconds": 0.167,
       "back_seconds": 15.001,
       "to_seconds": 120,
       "outage_p99_ms": 423.007,
@@ -89,6 +90,9 @@
             "timeout": 21
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 9,
+          "calls_from_seconds": 0.084,
+          "calls_to_seconds": 0.276,
           "replicas": 1,
           "median_wait_ms": 250.45
         },
@@ -103,6 +107,9 @@
             "timeout": 1
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 1.51,
+          "calls_to_seconds": 1.51,
           "replicas": 1,
           "median_wait_ms": 250.166
         },
@@ -118,6 +125,9 @@
             "timeout": 1
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 2.765,
+          "calls_to_seconds": 2.765,
           "replicas": 1,
           "median_wait_ms": 250.143
         },
@@ -132,6 +142,9 @@
             "timeout": 1
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 4.025,
+          "calls_to_seconds": 4.025,
           "replicas": 1,
           "median_wait_ms": 250.586
         },
@@ -146,6 +159,9 @@
             "timeout": 1
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 5.29,
+          "calls_to_seconds": 5.29,
           "replicas": 1,
           "median_wait_ms": 250.794
         },
@@ -160,6 +176,9 @@
             "timeout": 1
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 6.545,
+          "calls_to_seconds": 6.545,
           "replicas": 1,
           "median_wait_ms": 250.277
         },
@@ -174,6 +193,9 @@
             "timeout": 1
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 7.815,
+          "calls_to_seconds": 7.815,
           "replicas": 1,
           "median_wait_ms": 250.062
         },
@@ -186,6 +208,7 @@
           },
           "by_class": {},
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
           "replicas": 0,
           "median_wait_ms": 0
         },
@@ -198,6 +221,7 @@
           },
           "by_class": {},
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
           "replicas": 0,
           "median_wait_ms": 0
         },
@@ -210,6 +234,7 @@
           },
           "by_class": {},
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
           "replicas": 0,
           "median_wait_ms": 0
         }

@@ -68,6 +68,7 @@
     {
       "event": "disconnect redis",
       "at_seconds": 50.002,
+      "done_seconds": 0.218,
       "back_seconds": 7.998,
       "to_seconds": 62.001,
       "outage_p99_ms": 436.52,
@@ -88,6 +89,9 @@
             "timeout": 19
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 7,
+          "calls_from_seconds": 0.17,
+          "calls_to_seconds": 0.274,
           "replicas": 3,
           "median_wait_ms": 250.464
         },
@@ -102,6 +106,9 @@
             "timeout": 55
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 1.524,
+          "calls_to_seconds": 1.889,
           "replicas": 3,
           "median_wait_ms": 250.249
         },
@@ -116,6 +123,9 @@
             "timeout": 31
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 3.014,
+          "calls_to_seconds": 3.378,
           "replicas": 2,
           "median_wait_ms": 250.356
         }
@@ -269,6 +279,7 @@
     {
       "event": "disconnect redis",
       "at_seconds": 62.001,
+      "done_seconds": 0.209,
       "back_seconds": 7.999,
       "to_seconds": 74,
       "outage_p99_ms": 434.657,
@@ -289,6 +300,9 @@
             "timeout": 20
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 5,
+          "calls_from_seconds": 0.17,
+          "calls_to_seconds": 0.285,
           "replicas": 3,
           "median_wait_ms": 250.364
         },
@@ -303,6 +317,9 @@
             "timeout": 52
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 1.575,
+          "calls_to_seconds": 1.83,
           "replicas": 3,
           "median_wait_ms": 250.322
         },
@@ -317,6 +334,9 @@
             "timeout": 28
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 3.06,
+          "calls_to_seconds": 3.33,
           "replicas": 2,
           "median_wait_ms": 250.371
         }
@@ -480,6 +500,7 @@
     {
       "event": "disconnect redis",
       "at_seconds": 74,
+      "done_seconds": 0.184,
       "back_seconds": 8,
       "to_seconds": 85.999,
       "outage_p99_ms": 435.051,
@@ -500,6 +521,9 @@
             "timeout": 17
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 3,
+          "calls_from_seconds": 0.164,
+          "calls_to_seconds": 0.251,
           "replicas": 3,
           "median_wait_ms": 250.142
         },
@@ -514,6 +538,9 @@
             "timeout": 54
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 1.566,
+          "calls_to_seconds": 1.831,
           "replicas": 3,
           "median_wait_ms": 250.277
         },
@@ -528,6 +555,9 @@
             "timeout": 36
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 3.09,
+          "calls_to_seconds": 3.35,
           "replicas": 2,
           "median_wait_ms": 250.263
         }
@@ -691,6 +721,7 @@
     {
       "event": "disconnect redis",
       "at_seconds": 85.999,
+      "done_seconds": 0.193,
       "back_seconds": 8.001,
       "to_seconds": 98.001,
       "outage_p99_ms": 436.302,
@@ -711,6 +742,9 @@
             "timeout": 19
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 5,
+          "calls_from_seconds": 0.167,
+          "calls_to_seconds": 0.257,
           "replicas": 3,
           "median_wait_ms": 250.322
         },
@@ -725,6 +759,9 @@
             "timeout": 52
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 1.547,
+          "calls_to_seconds": 1.833,
           "replicas": 3,
           "median_wait_ms": 250.391
         },
@@ -739,6 +776,9 @@
             "timeout": 37
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 3.052,
+          "calls_to_seconds": 3.343,
           "replicas": 2,
           "median_wait_ms": 250.282
         }
@@ -892,6 +932,7 @@
     {
       "event": "disconnect redis",
       "at_seconds": 98.001,
+      "done_seconds": 0.188,
       "back_seconds": 7.999,
       "to_seconds": 110.001,
       "outage_p99_ms": 436.776,
@@ -913,6 +954,9 @@
             "timeout": 18
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 5,
+          "calls_from_seconds": 0.166,
+          "calls_to_seconds": 0.251,
           "replicas": 3,
           "median_wait_ms": 250.329
         },
@@ -927,6 +971,9 @@
             "timeout": 56
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 1.535,
+          "calls_to_seconds": 1.84,
           "replicas": 3,
           "median_wait_ms": 250.32
         },
@@ -941,6 +988,9 @@
             "timeout": 50
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 3.07,
+          "calls_to_seconds": 3.326,
           "replicas": 2,
           "median_wait_ms": 250.303
         },
@@ -953,6 +1003,7 @@
           },
           "by_class": {},
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
           "replicas": 0,
           "median_wait_ms": 0
         },
@@ -965,6 +1016,7 @@
           },
           "by_class": {},
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
           "replicas": 0,
           "median_wait_ms": 0
         }
@@ -1068,6 +1120,7 @@
     {
       "event": "disconnect redis",
       "at_seconds": 110.001,
+      "done_seconds": 0.191,
       "back_seconds": 8,
       "to_seconds": 121.999,
       "outage_p99_ms": 435.305,
@@ -1088,6 +1141,9 @@
             "timeout": 19
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 5,
+          "calls_from_seconds": 0.165,
+          "calls_to_seconds": 0.255,
           "replicas": 3,
           "median_wait_ms": 250.345
         },
@@ -1102,6 +1158,9 @@
             "timeout": 51
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 1.57,
+          "calls_to_seconds": 1.821,
           "replicas": 3,
           "median_wait_ms": 250.206
         },
@@ -1116,6 +1175,9 @@
             "timeout": 53
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 3.065,
+          "calls_to_seconds": 3.33,
           "replicas": 3,
           "median_wait_ms": 250.374
         }
@@ -1205,6 +1267,7 @@
           "replica": "switchboard-2",
           "first_fast_seconds": 4.585,
           "dials_before": 55,
+          "restarted": true,
           "slow_cache_failures": 48
         },
         {
@@ -1218,6 +1281,7 @@
     {
       "event": "disconnect redis",
       "at_seconds": 121.999,
+      "done_seconds": 0.336,
       "back_seconds": 8.001,
       "to_seconds": 133.999,
       "outage_p99_ms": 434.941,
@@ -1238,6 +1302,9 @@
             "timeout": 18
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 18,
+          "calls_from_seconds": 0.167,
+          "calls_to_seconds": 0.251,
           "replicas": 3,
           "median_wait_ms": 250.271
         },
@@ -1252,6 +1319,9 @@
             "timeout": 48
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 1.527,
+          "calls_to_seconds": 1.836,
           "replicas": 3,
           "median_wait_ms": 250.517
         },
@@ -1266,6 +1336,9 @@
             "timeout": 35
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 3.082,
+          "calls_to_seconds": 3.323,
           "replicas": 2,
           "median_wait_ms": 250.254
         }
@@ -1429,6 +1502,7 @@
     {
       "event": "disconnect redis",
       "at_seconds": 133.999,
+      "done_seconds": 0.194,
       "back_seconds": 8.001,
       "to_seconds": 150,
       "outage_p99_ms": 436.273,
@@ -1449,6 +1523,9 @@
             "timeout": 17
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 3,
+          "calls_from_seconds": 0.172,
+          "calls_to_seconds": 0.261,
           "replicas": 3,
           "median_wait_ms": 250.256
         },
@@ -1463,6 +1540,9 @@
             "timeout": 50
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 1.536,
+          "calls_to_seconds": 1.832,
           "replicas": 3,
           "median_wait_ms": 250.243
         },
@@ -1477,6 +1557,9 @@
             "timeout": 41
           },
           "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 3.032,
+          "calls_to_seconds": 3.308,
           "replicas": 3,
           "median_wait_ms": 250.304
         }

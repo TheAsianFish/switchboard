@@ -1547,21 +1547,28 @@ Changes made while building:
     the after arm and the retry runs run the commit with the probe.
   - An outage's slow requests are those observed from Redis's disconnect
     to the next one (the 8 s outage and the 4 s after it, as M8's
-    865 were counted), against Q6's fixed 363.52 ms line. A request was
-    "in flight at the cut" when its longest store call started before the
-    disconnect.
+    865 were counted), against Q6's fixed 363.52 ms line. The cut falls
+    between `docker network disconnect` being issued and returning (0.18
+    to 0.34 s), so a request's longest store call is placed against both: in
+    flight for certain if it started before the command was issued,
+    possibly if it started before the command returned, after the cut if
+    later.
   - "Store calls timing out", in the decision rule, counts slow store
     calls (any component) that failed on a timeout while Redis was down;
     "degraded after ready" subtracts Redis's own ready line from M9's
     degraded time.
   - Outcome (RESULTS.md, M13): the bursts after the cut were cache
-    lookups (all of them); the burst at the cut was not calls in flight
-    but lookups that started before the first failure; slow requests
+    lookups (all of them); the burst at the cut was mostly not calls in
+    flight but lookups that started after the cut and before the first
+    failure (96 of 147 after the disconnect command returned, 51 in its
+    window, 0 before it); slow requests
     fell from about 110 to about 26 per outage and from 878 to 211 in the
     run, just short of both targets, with the phase p99 unmoved. The
     three bursts are go-redis's dial breaker, which trips at its pool
     size (40 here) of failed dials, not at the third, and whose count
-    carries across outages once the probe makes failed dials scarce. At
+    by the logged counts carries across outages once the probe makes
+    failed dials scarce (10 of 11 fast-failing replica-outages; one is not
+    explained by the logged dials). At
     250 ms the degraded time after ready fell on average by about what
     the shorter probe predicts, but the ranges overlapped and more store
     calls timed out, so `retry_interval` stays 1 s; M9's two-timer

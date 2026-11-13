@@ -107,6 +107,13 @@ func TestAnalyseOutage(t *testing.T) {
 	if b := x.Bursts[0]; b.Replicas != 2 || b.ByClass[ErrClassTimeout] != 3 || b.MedianWaitMS != 260 {
 		t.Errorf("cut burst = %+v", b)
 	}
+	// The disconnect command returned 0.3 s after it was issued: the
+	// calls that started at 20.01 s and 20.03 s may have been in flight
+	// at the cut or not, the one that started at 19.95 s was.
+	if b := x.Bursts[0]; x.DoneSeconds != 0.3 || b.StartedBeforeDone != 3 || b.CallsFromSeconds == nil ||
+		*b.CallsFromSeconds != -0.05 || *b.CallsToSeconds != 0.03 {
+		t.Errorf("cut burst calls = %+v, command done %v", b, x.DoneSeconds)
+	}
 	if b := x.Bursts[1]; b.ByClass[ErrClassDialTimeout] != 2 {
 		t.Errorf("second burst classes = %v", b.ByClass)
 	}
@@ -141,5 +148,45 @@ func TestAnalyseOutageNeedsLogs(t *testing.T) {
 	in := Input{Meta: meta(), Events: events(), Streams: map[string]*Stream{StreamMain: synthMain(nil)}}
 	if _, err := AnalyseOutage(in); err == nil {
 		t.Fatal("analysed a run without logs")
+	}
+}
+
+// A replica started between two outages is marked restarted in the
+// second, since go-redis's failed-dial count starts again with the
+// process.
+func TestAnalyseOutageMarksRestartedReplicas(t *testing.T) {
+	t.Parallel()
+	ev := func(at float64, action, target string) Event {
+		return Event{Name: action + " " + target, Action: action, Target: target, Phase: target + " " + action,
+			PlannedSeconds: at, IssuedUnix: unixAt(at), DoneUnix: unixAt(at + 0.2)}
+	}
+	events := []Event{
+		ev(5, ActionDisconnect, RedisTarget), ev(10, ActionConnect, RedisTarget),
+		ev(12, ActionKill, "switchboard-2"), ev(15, ActionStart, "switchboard-2"),
+		ev(20, ActionDisconnect, RedisTarget), ev(25, ActionConnect, RedisTarget),
+	}
+	const dial = "cache: get: dial tcp 172.18.0.2:6379: i/o timeout"
+	logs := map[string][]LogLine{
+		"switchboard-1": {cacheFailLine(5.3, 250, dial), cacheFailLine(20.3, 250, dial)},
+		"switchboard-2": {cacheFailLine(5.3, 250, dial), cacheFailLine(20.3, 250, dial)},
+	}
+	st := synthMain(func(int, float64) (string, float64) { return "", 0 })
+	o, err := AnalyseOutage(Input{Meta: meta(), Events: events, Streams: map[string]*Stream{StreamMain: st}, Logs: logs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(o.Outages) != 2 {
+		t.Fatalf("outages = %+v", o.Outages)
+	}
+	got := map[string][2]bool{}
+	for i, x := range o.Outages {
+		for _, r := range x.Replicas {
+			v := got[r.Replica]
+			v[i] = r.Restarted
+			got[r.Replica] = v
+		}
+	}
+	if got["switchboard-1"] != [2]bool{} || got["switchboard-2"] != [2]bool{false, true} {
+		t.Errorf("restarted = %v", got)
 	}
 }
