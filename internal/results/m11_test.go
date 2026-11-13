@@ -162,10 +162,11 @@ func TestBuildM11RuleSlipped(t *testing.T) {
 func TestBuildM11Checks(t *testing.T) {
 	t.Parallel()
 	const (
-		third   = 4
-		shrink  = 5
-		pushed  = 6
-		planted = 9
+		third    = 4
+		shrink   = 5
+		pushed   = 6
+		planted  = 9
+		balanced = 10
 	)
 	tests := []struct {
 		name string
@@ -176,22 +177,25 @@ func TestBuildM11Checks(t *testing.T) {
 	}{
 		{"baseline third way", nil, third, "By the fault log, no lost spend needs a third way", "yes"},
 		{"other seeds", func(main, _ *budgetsim.Arm) { main.Classes[2].Seeds = 2 }, third, "By the fault log, no lost spend needs a third way", "no"},
-		{"baseline shrink", nil, shrink, "Each listed class shrinks to four steps or fewer", "yes"},
+		{"baseline shrink", nil, shrink, "Each listed class shrinks to four steps or fewer, by the fault log", "yes"},
 		{"killed pending length 5", func(main, _ *budgetsim.Arm) {
 			main.Classes[0].Lengths = []budgetsim.LenCount{{Steps: 2, Seeds: 1234}, {Steps: 5, Seeds: 5}}
-		}, shrink, "Each listed class shrinks to four steps or fewer", "no"},
+		}, shrink, "Each listed class shrinks to four steps or fewer, by the fault log", "no"},
 		{"baseline pushed", nil, pushed, "I2 is pushed: billed passes the limit on at least 10% of seeds", "yes"},
 		{"over limit under 10%", func(main, _ *budgetsim.Arm) { main.OverLimit = 999 }, pushed, "I2 is pushed: billed passes the limit on at least 10% of seeds", "no"},
 		{"baseline planted", nil, planted, "The planted bug is found outside both listed classes", "yes"},
 		{"planted not found", func(_, p *budgetsim.Arm) { p.PlantedFound = 0 }, planted, "The planted bug is found outside both listed classes", "no"},
 		{"planted unaccounted none", func(_, p *budgetsim.Arm) { p.UnaccountedPlanted = 0 }, planted, "The planted bug is found outside both listed classes", "no"},
 		{"main has unaccounted", func(main, _ *budgetsim.Arm) { main.Classes[3].Seeds = 1 }, planted, "The planted bug is found outside both listed classes", "no"},
+		{"baseline balanced", nil, balanced, "The fault log accounts for every seed's money (spent = billed − the kills' and the planted bug's losses + double charges)", "yes"},
+		{"main unbalanced", func(main, _ *budgetsim.Arm) { main.Unbalanced = 1 }, balanced, "The fault log accounts for every seed's money (spent = billed − the kills' and the planted bug's losses + double charges)", "no"},
+		{"planted unbalanced", func(_, p *budgetsim.Arm) { p.Unbalanced = 1 }, balanced, "The fault log accounts for every seed's money (spent = billed − the kills' and the planted bug's losses + double charges)", "no"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			m := m11Build(t, tt.mut)
-			if len(m.Checks) != 10 {
+			if len(m.Checks) != 11 {
 				t.Fatalf("%d checks", len(m.Checks))
 			}
 			c := m.Checks[tt.row]
@@ -286,16 +290,79 @@ func TestLoadM11(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "summary.json"), b, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		for _, a := range []string{budgetsim.ArmMain, budgetsim.ArmPlanted} {
-			if err := budgetsim.WriteRecords(filepath.Join(dir, budgetsim.RecordsFile(a)), nil); err != nil {
+		// The main arm's 1,239 lost-spend seeds: 3 with no class needed on
+		// its own, and one over-counted seed that lost nothing.
+		lost := func(n, unclassified int) []budgetsim.Record {
+			var recs []budgetsim.Record
+			for i := range n {
+				r := budgetsim.Record{Seed: uint64(i), Billed: 10, Spent: 5}
+				if i >= unclassified {
+					r.Classes = []budgetsim.RecordClass{{Class: budget.ClassKilledPending, Steps: 3}}
+				}
+				recs = append(recs, r)
+			}
+			return append(recs, budgetsim.Record{Seed: 99999, Billed: 5, Spent: 10})
+		}
+		write := func(arm string, recs []budgetsim.Record) {
+			if err := budgetsim.WriteRecords(filepath.Join(dir, budgetsim.RecordsFile(arm)), recs); err != nil {
 				t.Fatal(err)
 			}
 		}
+		write(budgetsim.ArmMain, lost(1239, 3))
+		write(budgetsim.ArmPlanted, lost(9, 0))
 		m, err := loadM11(dir)
 		if err != nil || m == nil || m.Main == nil {
 			t.Fatalf("got %v, %v", m, err)
 		}
+		if m.Main.Unclassified != "3" || m.Main.UnclassifiedShare != "0.2%" || m.Planted.Unclassified != "0" {
+			t.Errorf("unclassified main %q (%q), planted %q", m.Main.Unclassified, m.Main.UnclassifiedShare, m.Planted.Unclassified)
+		}
+		// Records that disagree with summary.json's count are refused.
+		write(budgetsim.ArmPlanted, lost(8, 0))
+		if m, err := loadM11(dir); err == nil || m != nil {
+			t.Errorf("records short of the summary: got %v, %v; want an error", m, err)
+		}
 	})
+}
+
+func TestBuildM11InvariantOrder(t *testing.T) {
+	t.Parallel()
+	s := m11Summary()
+	v := s.Arms[0].Violations
+	v[1], v[2] = v[2], v[1]
+	if _, err := buildM11(s); err == nil {
+		t.Error("I3 before I2: no error")
+	}
+}
+
+func TestBuildM11InvariantRows(t *testing.T) {
+	t.Parallel()
+	const i2Row, i3Row, ruleRow = 7, 8, 1
+	m := m11Build(t, func(main, _ *budgetsim.Arm) {
+		main.Violations[1].Seeds = 2
+		main.Violations[2].Seeds = 1
+		main.Violations[0].ByClass[0].Seeds = 0
+	})
+	for _, c := range []struct {
+		row  int
+		hyp  string
+		want string
+	}{
+		{i2Row, "I2 holds on every seed", "no"},
+		{i3Row, "I3 holds on every seed", "no"},
+		{ruleRow, "PLAN.md's rule rediscovers both listed classes", "no"},
+	} {
+		got := m.Checks[c.row]
+		if got.Hypothesis != c.hyp || got.Held != c.want {
+			t.Errorf("row %d = %q %q, want %q %q", c.row, got.Hypothesis, got.Held, c.hyp, c.want)
+		}
+	}
+	if !strings.Contains(m.Headline, "I2 failed on 2 seeds and I3 on 1") || strings.Contains(m.Headline, "held on every seed") {
+		t.Errorf("headline %q does not report the I2 and I3 failures", m.Headline)
+	}
+	if !strings.Contains(m.Headline, "no lost spend needed a third way") {
+		t.Errorf("headline %q does not say no third way was needed", m.Headline)
+	}
 }
 
 func TestStepsShareSeedCount(t *testing.T) {

@@ -424,7 +424,8 @@ func TestSimBoundNeedsHoldsToOutliveNoRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.Billed != 400 || o.I2 || !o.I1 || !o.Balanced() {
-		t.Fatalf("billed %d (bound %d), I2 %v I1 %v balanced %v; want 400, false, true, true", o.Billed, o.Bound, o.I2, o.I1, o.Balanced())
+	// Three processes, three hold TTLs plus 3 s: 150 × (1 + 45m3s / 1h).
+	if o.Billed != 400 || o.Bound != 262 || o.I2 || !o.I1 || !o.Balanced() {
+		t.Fatalf("billed %d bound %d, I2 %v I1 %v balanced %v; want 400, 262, false, true, true", o.Billed, o.Bound, o.I2, o.I1, o.Balanced())
 	}
 }

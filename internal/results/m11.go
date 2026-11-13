@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -49,6 +48,9 @@ type M11Arm struct {
 	Classes []M11ClassRow
 	// I1 is the number of seeds that lost spend.
 	I1 string
+	// Unclassified is the number of those seeds no class is needed for
+	// on its own (read from the records file), and its share of I1.
+	Unclassified, UnclassifiedShare string
 	// RuleExamples are the rule's minimal schedules, one per invariant and
 	// class seen; Examples the fault-log classes' shortest.
 	RuleExamples []M11Example
@@ -56,9 +58,10 @@ type M11Arm struct {
 	OverLimit    string
 	Closest      string
 	OverCounted  string
-	// Fired and Found are PlantedFired and PlantedFound, and
-	// OverCountedLostReply OverCountedLost, formatted.
-	Fired, Found, OverCountedLostReply string
+	// Fired, PlantedLostSeeds and Found are PlantedFired, PlantedLost and
+	// PlantedFound, OverCountedLostReply OverCountedLost, and Unbalanced
+	// the seeds the fault log does not balance, formatted.
+	Fired, PlantedLostSeeds, Found, OverCountedLostReply, Unbalanced string
 }
 
 // Example returns the fault-log class's minimal schedule, or nil.
@@ -115,12 +118,40 @@ func loadM11(dir string) (*M11, error) {
 	if err != nil {
 		return nil, err
 	}
+	unclassified := map[string]int{}
 	for _, a := range s.Arms {
-		if _, err := os.Stat(filepath.Join(dir, budgetsim.RecordsFile(a.Name))); err != nil {
+		recs, err := budgetsim.ReadRecords(filepath.Join(dir, budgetsim.RecordsFile(a.Name)))
+		if err != nil {
 			return nil, fmt.Errorf("results: m11: %w", err)
 		}
+		lost := 0
+		for _, r := range recs {
+			if r.Billed > r.Spent {
+				lost++
+				if len(r.Classes) == 0 {
+					unclassified[a.Name]++
+				}
+			}
+		}
+		if len(a.Violations) > 0 && a.Violations[0].Seeds != lost {
+			return nil, fmt.Errorf("results: m11: arm %q: summary.json has %d seeds that lost spend, its records %d", a.Name, a.Violations[0].Seeds, lost)
+		}
 	}
-	return buildM11(s)
+	m, err := buildM11(s)
+	if err != nil {
+		return nil, err
+	}
+	m.Main.setUnclassified(unclassified[budgetsim.ArmMain])
+	m.Planted.setUnclassified(unclassified[budgetsim.ArmPlanted])
+	return m, nil
+}
+
+// setUnclassified records how many seeds lost spend without needing any
+// one class: the shortfall fits inside more than one way's loss, so no
+// single way is needed on its own.
+func (a *M11Arm) setUnclassified(n int) {
+	a.Unclassified = seedCount(n)
+	a.UnclassifiedShare = share(n, a.Violations[0].Seeds)
 }
 
 func buildM11(s budgetsim.Summary) (*M11, error) {
@@ -139,6 +170,11 @@ func buildM11(s budgetsim.Summary) (*M11, error) {
 		if len(s.Arms[i].Violations) != len(budget.Invariants) || len(s.Arms[i].Exercised) == 0 {
 			return nil, fmt.Errorf("results: m11: arm %q needs %d invariants and its faults", s.Arms[i].Name, len(budget.Invariants))
 		}
+		for j, v := range s.Arms[i].Violations {
+			if v.Invariant != budget.Invariants[j] {
+				return nil, fmt.Errorf("results: m11: arm %q: invariant %d is %q, want %q", s.Arms[i].Name, j, v.Invariant, budget.Invariants[j])
+			}
+		}
 		a := buildM11Arm(s.Arms[i])
 		switch a.Name {
 		case budgetsim.ArmMain:
@@ -155,8 +191,16 @@ func buildM11(s budgetsim.Summary) (*M11, error) {
 	m.LongShrinks = over4(m.Main.class(budget.ClassKilledPending))+over4(m.Main.class(budget.ClassExpiredHold)) > 0
 	m.RuleSlipped = i1.Seeds > 0 && m.Main.rule("I1", budget.ClassExpiredHold).Seeds == i1.Seeds
 	mc := m.Main.class(budget.ClassOther)
-	m.Headline = fmt.Sprintf("%s seeded fault schedules on three replicas: %s lost spend; by the fault log, %s needed a third way (a request admitted on grace and in flight when its process died), shortest %s; I2 and I3 held on every seed; a planted bug was found in %s of the %s seeds it hit",
-		m.Main.Seeds, m.Main.I1, seedCount(mc.Seeds), steps(shortest(mc)), seedCount(m.Planted.PlantedFound), seedCount(m.Planted.PlantedFired))
+	third := "no lost spend needed a third way"
+	if mc.Seeds > 0 {
+		third = fmt.Sprintf("%s needed a third way (a request admitted on grace and in flight when its process died), shortest %s", seedCount(mc.Seeds), steps(shortest(mc)))
+	}
+	held := "I2 and I3 held on every seed"
+	if i2, i3 := m.Main.Violations[1].Seeds, m.Main.Violations[2].Seeds; i2+i3 > 0 {
+		held = fmt.Sprintf("I2 failed on %s seeds and I3 on %s", seedCount(i2), seedCount(i3))
+	}
+	m.Headline = fmt.Sprintf("%s seeded fault schedules on three replicas: %s lost spend; by the fault log, %s; %s; a planted bug was found in %s of the %s seeds it hit",
+		m.Main.Seeds, m.Main.I1, third, held, seedCount(m.Planted.PlantedFound), seedCount(m.Planted.PlantedFired))
 	return m, nil
 }
 
@@ -208,7 +252,8 @@ func buildM11Arm(a budgetsim.Arm) *M11Arm {
 		x.Closest = fmt.Sprintf("%d over the limit against a bound of %d (seed %d)", c.Overshoot, c.Bound, c.Seed)
 	}
 	x.OverCounted = seedCount(a.OverCounted)
-	x.Fired, x.Found = seedCount(a.PlantedFired), seedCount(a.PlantedFound)
+	x.Fired, x.PlantedLostSeeds, x.Found = seedCount(a.PlantedFired), seedCount(a.PlantedLost), seedCount(a.PlantedFound)
+	x.Unbalanced = seedCount(a.Unbalanced)
 	x.OverCountedLostReply = seedCount(a.OverCountedLost)
 	return x
 }
@@ -306,7 +351,7 @@ func m11Checks(main, planted *M11Arm) []M11Check {
 		worst = max(worst, l)
 		parts = append(parts, fmt.Sprintf("%s: %d (%s of %s over four)", cl.Class, l, seedCount(over4(cl)), seedCount(cl.Seeds)))
 	}
-	c = append(c, M11Check{"Each listed class shrinks to four steps or fewer", "longest " + strings.Join(parts, "; "), yes(worst > 0 && worst <= 4)})
+	c = append(c, M11Check{"Each listed class shrinks to four steps or fewer, by the fault log", "longest " + strings.Join(parts, "; "), yes(worst > 0 && worst <= 4)})
 	c = append(c, M11Check{
 		"I2 is pushed: billed passes the limit on at least 10% of seeds",
 		fmt.Sprintf("%s of %s (%s)", main.OverLimit, main.Seeds, share(main.Arm.OverLimit, main.Arm.Seeds)),
@@ -327,9 +372,14 @@ func m11Checks(main, planted *M11Arm) []M11Check {
 	po := planted.rule("I1", budget.ClassOther)
 	c = append(c, M11Check{
 		"The planted bug is found outside both listed classes",
-		fmt.Sprintf("fired on %s seeds; their loss unaccounted by any kill on %s; %s minimal schedules unaccounted, %s with the bug firing (shortest %s); PLAN.md's rule filed %s planted-arm I1 seeds as other against %s in the main arm",
-			seedCount(planted.PlantedFired), seedCount(planted.PlantedFound), seedCount(pu.Seeds), seedCount(planted.UnaccountedPlanted), steps(shortest(pu)), seedCount(po.Seeds), seedCount(ot.Seeds)),
+		fmt.Sprintf("fired on %s seeds, kept spend out of the store on %s; their loss unaccounted by any kill on %s; %s minimal schedules unaccounted, %s with the bug firing (shortest %s); PLAN.md's rule filed %s planted-arm I1 seeds as other against %s in the main arm",
+			seedCount(planted.PlantedFired), seedCount(planted.PlantedLost), seedCount(planted.PlantedFound), seedCount(pu.Seeds), seedCount(planted.UnaccountedPlanted), steps(shortest(pu)), seedCount(po.Seeds), seedCount(ot.Seeds)),
 		yes(planted.PlantedFound > 0 && planted.UnaccountedPlanted > 0 && main.class(budget.ClassUnaccounted).Seeds == 0),
+	})
+	c = append(c, M11Check{
+		"The fault log accounts for every seed's money (spent = billed − the kills' and the planted bug's losses + double charges)",
+		fmt.Sprintf("unbalanced seeds: %s in the main arm, %s in the planted arm", main.Unbalanced, planted.Unbalanced),
+		yes(main.Arm.Unbalanced == 0 && planted.Arm.Unbalanced == 0),
 	})
 	return c
 }
