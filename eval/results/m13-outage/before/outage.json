@@ -1,0 +1,1878 @@
+{
+  "meta": {
+    "commit": "273e803",
+    "gateway_commit": "42f5f0c",
+    "retry_interval": "1s",
+    "date": "2026-11-13T21:10:22Z",
+    "command": "make chaos-probe RUN=before",
+    "replicas": 3,
+    "duration_seconds": 150,
+    "time_scale": 1,
+    "schedule": "flap",
+    "redis_persist": "none",
+    "redis": {
+      "appendonly": "no",
+      "appendfsync": "everysec",
+      "data_fs": "overlayfs",
+      "aof_bytes_at_end": 0
+    },
+    "limit": {
+      "model": "fake-limited",
+      "rate": 10,
+      "period_seconds": 1
+    },
+    "budget": {
+      "model": "fake-budget",
+      "usd": "0.20",
+      "grace_usd": "0.01",
+      "grace_refill": "1h",
+      "input_price": "3",
+      "output_price": "15"
+    },
+    "fake_provider": {
+      "latency": "20ms",
+      "tokens": 30,
+      "token_interval": "5ms"
+    }
+  },
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "kernel": "7.0.0-1019-azure"
+  },
+  "line_ms": 363.52,
+  "burst_gap_seconds": 0.4,
+  "run": {
+    "requests": 29988,
+    "slow_requests": 878,
+    "slow_by_component": {
+      "cache_lookup": 876,
+      "none": 2
+    },
+    "slow_store_calls": {
+      "budget": 77,
+      "cache_fill": 191,
+      "cache_lookup": 909,
+      "limiter": 91
+    },
+    "slow_store_calls_timed_out": 1268,
+    "repeat_ok": 9092,
+    "repeat_hits": 4796,
+    "repeat_hit_rate": 0.527497
+  },
+  "outages": [
+    {
+      "event": "disconnect redis",
+      "at_seconds": 50.002,
+      "back_seconds": 7.998,
+      "to_seconds": 62.001,
+      "outage_p99_ms": 436.52,
+      "back_p99_ms": 187.753,
+      "slow_requests": 105,
+      "slow_by_component": {
+        "cache_lookup": 105
+      },
+      "bursts": [
+        {
+          "from_seconds": 0.168,
+          "to_seconds": 0.273,
+          "requests": 19,
+          "by_component": {
+            "cache_lookup": 19
+          },
+          "by_class": {
+            "timeout": 19
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.464
+        },
+        {
+          "from_seconds": 1.523,
+          "to_seconds": 1.888,
+          "requests": 55,
+          "by_component": {
+            "cache_lookup": 55
+          },
+          "by_class": {
+            "timeout": 55
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.249
+        },
+        {
+          "from_seconds": 3.013,
+          "to_seconds": 3.378,
+          "requests": 31,
+          "by_component": {
+            "cache_lookup": 31
+          },
+          "by_class": {
+            "timeout": 31
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 2,
+          "median_wait_ms": 250.356
+        }
+      ],
+      "cache_rounds": [
+        {
+          "from_seconds": 0.26,
+          "to_seconds": 0.591,
+          "failures": 48,
+          "slow_failures": 48,
+          "max_wait_ms": 253.895,
+          "by_class": {
+            "timeout": 48
+          }
+        },
+        {
+          "from_seconds": 1.774,
+          "to_seconds": 2.139,
+          "failures": 55,
+          "slow_failures": 55,
+          "max_wait_ms": 251.075,
+          "by_class": {
+            "timeout": 55
+          }
+        },
+        {
+          "from_seconds": 3.064,
+          "to_seconds": 3.629,
+          "failures": 32,
+          "slow_failures": 31,
+          "max_wait_ms": 251.051,
+          "by_class": {
+            "dns": 1,
+            "timeout": 31
+          }
+        },
+        {
+          "from_seconds": 4.069,
+          "to_seconds": 4.069,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.026,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 4.524,
+          "to_seconds": 4.634,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.032,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 5.109,
+          "to_seconds": 5.109,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.017,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 5.534,
+          "to_seconds": 5.64,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.031,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 6.114,
+          "to_seconds": 6.114,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.036,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 6.544,
+          "to_seconds": 6.679,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.043,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 7.115,
+          "to_seconds": 7.115,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.036,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 7.566,
+          "to_seconds": 7.684,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.028,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 8.142,
+          "to_seconds": 8.142,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.031,
+          "by_class": {
+            "dns": 1
+          }
+        }
+      ],
+      "pool_lines": 153
+    },
+    {
+      "event": "disconnect redis",
+      "at_seconds": 62.001,
+      "back_seconds": 7.999,
+      "to_seconds": 74,
+      "outage_p99_ms": 434.657,
+      "back_p99_ms": 185.448,
+      "slow_requests": 100,
+      "slow_by_component": {
+        "cache_lookup": 100
+      },
+      "bursts": [
+        {
+          "from_seconds": 0.169,
+          "to_seconds": 0.284,
+          "requests": 20,
+          "by_component": {
+            "cache_lookup": 20
+          },
+          "by_class": {
+            "timeout": 20
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.364
+        },
+        {
+          "from_seconds": 1.574,
+          "to_seconds": 1.829,
+          "requests": 52,
+          "by_component": {
+            "cache_lookup": 52
+          },
+          "by_class": {
+            "timeout": 52
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.322
+        },
+        {
+          "from_seconds": 3.059,
+          "to_seconds": 3.329,
+          "requests": 28,
+          "by_component": {
+            "cache_lookup": 28
+          },
+          "by_class": {
+            "timeout": 28
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 2,
+          "median_wait_ms": 250.371
+        }
+      ],
+      "cache_rounds": [
+        {
+          "from_seconds": 0.265,
+          "to_seconds": 0.584,
+          "failures": 47,
+          "slow_failures": 47,
+          "max_wait_ms": 251.051,
+          "by_class": {
+            "timeout": 47
+          }
+        },
+        {
+          "from_seconds": 1.826,
+          "to_seconds": 2.081,
+          "failures": 52,
+          "slow_failures": 52,
+          "max_wait_ms": 251.024,
+          "by_class": {
+            "timeout": 52
+          }
+        },
+        {
+          "from_seconds": 3.069,
+          "to_seconds": 3.581,
+          "failures": 29,
+          "slow_failures": 28,
+          "max_wait_ms": 251.03,
+          "by_class": {
+            "dns": 1,
+            "timeout": 28
+          }
+        },
+        {
+          "from_seconds": 4.075,
+          "to_seconds": 4.075,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.021,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 4.555,
+          "to_seconds": 4.585,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.032,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 5.075,
+          "to_seconds": 5.075,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.028,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 5.561,
+          "to_seconds": 5.585,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.026,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 6.105,
+          "to_seconds": 6.105,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.025,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 6.585,
+          "to_seconds": 6.629,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.025,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 7.117,
+          "to_seconds": 7.117,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.02,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 7.59,
+          "to_seconds": 7.63,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.065,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 8.135,
+          "to_seconds": 8.135,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.049,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 8.6,
+          "to_seconds": 8.6,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.043,
+          "by_class": {
+            "dns": 1
+          }
+        }
+      ],
+      "pool_lines": 151
+    },
+    {
+      "event": "disconnect redis",
+      "at_seconds": 74,
+      "back_seconds": 8,
+      "to_seconds": 85.999,
+      "outage_p99_ms": 435.051,
+      "back_p99_ms": 184.08,
+      "slow_requests": 107,
+      "slow_by_component": {
+        "cache_lookup": 107
+      },
+      "bursts": [
+        {
+          "from_seconds": 0.16,
+          "to_seconds": 0.25,
+          "requests": 17,
+          "by_component": {
+            "cache_lookup": 17
+          },
+          "by_class": {
+            "timeout": 17
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.142
+        },
+        {
+          "from_seconds": 1.565,
+          "to_seconds": 1.83,
+          "requests": 54,
+          "by_component": {
+            "cache_lookup": 54
+          },
+          "by_class": {
+            "timeout": 54
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.277
+        },
+        {
+          "from_seconds": 3.09,
+          "to_seconds": 3.35,
+          "requests": 36,
+          "by_component": {
+            "cache_lookup": 36
+          },
+          "by_class": {
+            "timeout": 36
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 2,
+          "median_wait_ms": 250.263
+        }
+      ],
+      "cache_rounds": [
+        {
+          "from_seconds": 0.246,
+          "to_seconds": 0.57,
+          "failures": 45,
+          "slow_failures": 45,
+          "max_wait_ms": 250.948,
+          "by_class": {
+            "timeout": 45
+          }
+        },
+        {
+          "from_seconds": 1.816,
+          "to_seconds": 2.082,
+          "failures": 54,
+          "slow_failures": 54,
+          "max_wait_ms": 251.056,
+          "by_class": {
+            "timeout": 54
+          }
+        },
+        {
+          "from_seconds": 3.081,
+          "to_seconds": 3.6,
+          "failures": 37,
+          "slow_failures": 36,
+          "max_wait_ms": 250.843,
+          "by_class": {
+            "dns": 1,
+            "timeout": 36
+          }
+        },
+        {
+          "from_seconds": 4.096,
+          "to_seconds": 4.096,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.03,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 4.586,
+          "to_seconds": 4.601,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.035,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 5.106,
+          "to_seconds": 5.106,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.024,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 5.591,
+          "to_seconds": 5.611,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.044,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 6.12,
+          "to_seconds": 6.12,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.031,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 6.596,
+          "to_seconds": 6.616,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.03,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 7.126,
+          "to_seconds": 7.126,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.026,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 7.616,
+          "to_seconds": 7.635,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.028,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 8.145,
+          "to_seconds": 8.145,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.031,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 8.641,
+          "to_seconds": 8.641,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.02,
+          "by_class": {
+            "dns": 1
+          }
+        }
+      ],
+      "pool_lines": 158
+    },
+    {
+      "event": "disconnect redis",
+      "at_seconds": 85.999,
+      "back_seconds": 8.001,
+      "to_seconds": 98.001,
+      "outage_p99_ms": 436.302,
+      "back_p99_ms": 186.481,
+      "slow_requests": 108,
+      "slow_by_component": {
+        "cache_lookup": 108
+      },
+      "bursts": [
+        {
+          "from_seconds": 0.166,
+          "to_seconds": 0.256,
+          "requests": 19,
+          "by_component": {
+            "cache_lookup": 19
+          },
+          "by_class": {
+            "timeout": 19
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.322
+        },
+        {
+          "from_seconds": 1.546,
+          "to_seconds": 1.831,
+          "requests": 52,
+          "by_component": {
+            "cache_lookup": 52
+          },
+          "by_class": {
+            "timeout": 52
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.391
+        },
+        {
+          "from_seconds": 3.051,
+          "to_seconds": 3.341,
+          "requests": 37,
+          "by_component": {
+            "cache_lookup": 37
+          },
+          "by_class": {
+            "timeout": 37
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 2,
+          "median_wait_ms": 250.282
+        }
+      ],
+      "cache_rounds": [
+        {
+          "from_seconds": 0.251,
+          "to_seconds": 0.576,
+          "failures": 46,
+          "slow_failures": 46,
+          "max_wait_ms": 251.451,
+          "by_class": {
+            "timeout": 46
+          }
+        },
+        {
+          "from_seconds": 1.797,
+          "to_seconds": 2.084,
+          "failures": 52,
+          "slow_failures": 52,
+          "max_wait_ms": 251.088,
+          "by_class": {
+            "timeout": 52
+          }
+        },
+        {
+          "from_seconds": 3.068,
+          "to_seconds": 3.593,
+          "failures": 38,
+          "slow_failures": 37,
+          "max_wait_ms": 251.059,
+          "by_class": {
+            "dns": 1,
+            "timeout": 37
+          }
+        },
+        {
+          "from_seconds": 4.112,
+          "to_seconds": 4.112,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.033,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 4.547,
+          "to_seconds": 4.597,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.056,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 5.117,
+          "to_seconds": 5.117,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.031,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 5.571,
+          "to_seconds": 5.632,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.026,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 6.127,
+          "to_seconds": 6.127,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.032,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 6.571,
+          "to_seconds": 6.648,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.026,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 7.137,
+          "to_seconds": 7.137,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.038,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 7.572,
+          "to_seconds": 7.652,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.038,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 8.157,
+          "to_seconds": 8.157,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.031,
+          "by_class": {
+            "dns": 1
+          }
+        }
+      ],
+      "pool_lines": 151
+    },
+    {
+      "event": "disconnect redis",
+      "at_seconds": 98.001,
+      "back_seconds": 7.999,
+      "to_seconds": 110.001,
+      "outage_p99_ms": 436.776,
+      "back_p99_ms": 189.737,
+      "slow_requests": 126,
+      "slow_by_component": {
+        "cache_lookup": 124,
+        "none": 2
+      },
+      "bursts": [
+        {
+          "from_seconds": 0.164,
+          "to_seconds": 0.249,
+          "requests": 18,
+          "by_component": {
+            "cache_lookup": 18
+          },
+          "by_class": {
+            "timeout": 18
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.329
+        },
+        {
+          "from_seconds": 1.534,
+          "to_seconds": 1.839,
+          "requests": 56,
+          "by_component": {
+            "cache_lookup": 56
+          },
+          "by_class": {
+            "timeout": 56
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.32
+        },
+        {
+          "from_seconds": 3.069,
+          "to_seconds": 3.324,
+          "requests": 50,
+          "by_component": {
+            "cache_lookup": 50
+          },
+          "by_class": {
+            "timeout": 50
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 2,
+          "median_wait_ms": 250.303
+        },
+        {
+          "from_seconds": 5.304,
+          "to_seconds": 5.304,
+          "requests": 1,
+          "by_component": {
+            "none": 1
+          },
+          "by_class": {},
+          "in_flight_at_cut": 0,
+          "replicas": 0,
+          "median_wait_ms": 0
+        },
+        {
+          "from_seconds": 8.319,
+          "to_seconds": 8.319,
+          "requests": 1,
+          "by_component": {
+            "none": 1
+          },
+          "by_class": {},
+          "in_flight_at_cut": 0,
+          "replicas": 0,
+          "median_wait_ms": 0
+        }
+      ],
+      "cache_rounds": [
+        {
+          "from_seconds": 0.245,
+          "to_seconds": 0.57,
+          "failures": 48,
+          "slow_failures": 48,
+          "max_wait_ms": 252.006,
+          "by_class": {
+            "timeout": 48
+          }
+        },
+        {
+          "from_seconds": 1.785,
+          "to_seconds": 2.091,
+          "failures": 56,
+          "slow_failures": 56,
+          "max_wait_ms": 251.076,
+          "by_class": {
+            "timeout": 56
+          }
+        },
+        {
+          "from_seconds": 3.021,
+          "to_seconds": 3.576,
+          "failures": 51,
+          "slow_failures": 50,
+          "max_wait_ms": 253.513,
+          "by_class": {
+            "dns": 1,
+            "timeout": 50
+          }
+        },
+        {
+          "from_seconds": 4.575,
+          "to_seconds": 4.585,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.035,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 5.59,
+          "to_seconds": 5.599,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.019,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 6.595,
+          "to_seconds": 6.6,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.03,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 7.595,
+          "to_seconds": 7.601,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.026,
+          "by_class": {
+            "dns": 2
+          }
+        }
+      ],
+      "pool_lines": 174
+    },
+    {
+      "event": "disconnect redis",
+      "at_seconds": 110.001,
+      "back_seconds": 8,
+      "to_seconds": 121.999,
+      "outage_p99_ms": 435.305,
+      "back_p99_ms": 184.655,
+      "slow_requests": 123,
+      "slow_by_component": {
+        "cache_lookup": 123
+      },
+      "bursts": [
+        {
+          "from_seconds": 0.164,
+          "to_seconds": 0.254,
+          "requests": 19,
+          "by_component": {
+            "cache_lookup": 19
+          },
+          "by_class": {
+            "timeout": 19
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.345
+        },
+        {
+          "from_seconds": 1.569,
+          "to_seconds": 1.819,
+          "requests": 51,
+          "by_component": {
+            "cache_lookup": 51
+          },
+          "by_class": {
+            "timeout": 51
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.206
+        },
+        {
+          "from_seconds": 3.064,
+          "to_seconds": 3.329,
+          "requests": 53,
+          "by_component": {
+            "cache_lookup": 53
+          },
+          "by_class": {
+            "timeout": 53
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.374
+        }
+      ],
+      "cache_rounds": [
+        {
+          "from_seconds": 0.25,
+          "to_seconds": 0.578,
+          "failures": 47,
+          "slow_failures": 47,
+          "max_wait_ms": 251.284,
+          "by_class": {
+            "timeout": 47
+          }
+        },
+        {
+          "from_seconds": 1.821,
+          "to_seconds": 2.071,
+          "failures": 51,
+          "slow_failures": 51,
+          "max_wait_ms": 251.19,
+          "by_class": {
+            "timeout": 51
+          }
+        },
+        {
+          "from_seconds": 3.316,
+          "to_seconds": 3.58,
+          "failures": 53,
+          "slow_failures": 53,
+          "max_wait_ms": 251.073,
+          "by_class": {
+            "timeout": 53
+          }
+        },
+        {
+          "from_seconds": 4.545,
+          "to_seconds": 4.585,
+          "failures": 3,
+          "slow_failures": 0,
+          "max_wait_ms": 0.032,
+          "by_class": {
+            "dns": 3
+          }
+        },
+        {
+          "from_seconds": 5.56,
+          "to_seconds": 5.59,
+          "failures": 3,
+          "slow_failures": 0,
+          "max_wait_ms": 0.037,
+          "by_class": {
+            "dns": 3
+          }
+        },
+        {
+          "from_seconds": 6.565,
+          "to_seconds": 6.605,
+          "failures": 3,
+          "slow_failures": 0,
+          "max_wait_ms": 0.029,
+          "by_class": {
+            "dns": 3
+          }
+        },
+        {
+          "from_seconds": 7.571,
+          "to_seconds": 7.616,
+          "failures": 3,
+          "slow_failures": 0,
+          "max_wait_ms": 0.027,
+          "by_class": {
+            "dns": 3
+          }
+        }
+      ],
+      "pool_lines": 177
+    },
+    {
+      "event": "disconnect redis",
+      "at_seconds": 121.999,
+      "back_seconds": 8.001,
+      "to_seconds": 133.999,
+      "outage_p99_ms": 434.941,
+      "back_p99_ms": 187.791,
+      "slow_requests": 101,
+      "slow_by_component": {
+        "cache_lookup": 101
+      },
+      "bursts": [
+        {
+          "from_seconds": 0.166,
+          "to_seconds": 0.251,
+          "requests": 18,
+          "by_component": {
+            "cache_lookup": 18
+          },
+          "by_class": {
+            "timeout": 18
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.271
+        },
+        {
+          "from_seconds": 1.526,
+          "to_seconds": 1.836,
+          "requests": 48,
+          "by_component": {
+            "cache_lookup": 48
+          },
+          "by_class": {
+            "timeout": 48
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.517
+        },
+        {
+          "from_seconds": 3.081,
+          "to_seconds": 3.321,
+          "requests": 35,
+          "by_component": {
+            "cache_lookup": 35
+          },
+          "by_class": {
+            "timeout": 35
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 2,
+          "median_wait_ms": 250.254
+        }
+      ],
+      "cache_rounds": [
+        {
+          "from_seconds": 0.253,
+          "to_seconds": 0.582,
+          "failures": 46,
+          "slow_failures": 46,
+          "max_wait_ms": 251.291,
+          "by_class": {
+            "timeout": 46
+          }
+        },
+        {
+          "from_seconds": 1.777,
+          "to_seconds": 2.087,
+          "failures": 48,
+          "slow_failures": 48,
+          "max_wait_ms": 251.73,
+          "by_class": {
+            "timeout": 48
+          }
+        },
+        {
+          "from_seconds": 3.022,
+          "to_seconds": 3.574,
+          "failures": 36,
+          "slow_failures": 35,
+          "max_wait_ms": 251.05,
+          "by_class": {
+            "dns": 1,
+            "timeout": 35
+          }
+        },
+        {
+          "from_seconds": 4.037,
+          "to_seconds": 4.037,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.024,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 4.572,
+          "to_seconds": 4.592,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.031,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 5.052,
+          "to_seconds": 5.052,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.025,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 5.602,
+          "to_seconds": 5.622,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.04,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 6.067,
+          "to_seconds": 6.067,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.03,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 6.612,
+          "to_seconds": 6.642,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.042,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 7.068,
+          "to_seconds": 7.068,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.025,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 7.617,
+          "to_seconds": 7.657,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.029,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 8.077,
+          "to_seconds": 8.077,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.074,
+          "by_class": {
+            "dns": 1
+          }
+        },
+        {
+          "from_seconds": 8.627,
+          "to_seconds": 8.627,
+          "failures": 1,
+          "slow_failures": 0,
+          "max_wait_ms": 0.025,
+          "by_class": {
+            "dns": 1
+          }
+        }
+      ],
+      "pool_lines": 154
+    },
+    {
+      "event": "disconnect redis",
+      "at_seconds": 133.999,
+      "back_seconds": 8.001,
+      "to_seconds": 150,
+      "outage_p99_ms": 436.273,
+      "back_p99_ms": 186.073,
+      "slow_requests": 108,
+      "slow_by_component": {
+        "cache_lookup": 108
+      },
+      "bursts": [
+        {
+          "from_seconds": 0.171,
+          "to_seconds": 0.261,
+          "requests": 17,
+          "by_component": {
+            "cache_lookup": 17
+          },
+          "by_class": {
+            "timeout": 17
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.256
+        },
+        {
+          "from_seconds": 1.536,
+          "to_seconds": 1.831,
+          "requests": 50,
+          "by_component": {
+            "cache_lookup": 50
+          },
+          "by_class": {
+            "timeout": 50
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.243
+        },
+        {
+          "from_seconds": 3.031,
+          "to_seconds": 3.306,
+          "requests": 41,
+          "by_component": {
+            "cache_lookup": 41
+          },
+          "by_class": {
+            "timeout": 41
+          },
+          "in_flight_at_cut": 0,
+          "replicas": 3,
+          "median_wait_ms": 250.304
+        }
+      ],
+      "cache_rounds": [
+        {
+          "from_seconds": 0.252,
+          "to_seconds": 0.577,
+          "failures": 44,
+          "slow_failures": 44,
+          "max_wait_ms": 251.047,
+          "by_class": {
+            "timeout": 44
+          }
+        },
+        {
+          "from_seconds": 1.787,
+          "to_seconds": 2.082,
+          "failures": 50,
+          "slow_failures": 50,
+          "max_wait_ms": 251.211,
+          "by_class": {
+            "timeout": 50
+          }
+        },
+        {
+          "from_seconds": 3.142,
+          "to_seconds": 3.558,
+          "failures": 42,
+          "slow_failures": 41,
+          "max_wait_ms": 251.079,
+          "by_class": {
+            "dns": 1,
+            "timeout": 41
+          }
+        },
+        {
+          "from_seconds": 4.387,
+          "to_seconds": 4.587,
+          "failures": 3,
+          "slow_failures": 0,
+          "max_wait_ms": 0.03,
+          "by_class": {
+            "dns": 3
+          }
+        },
+        {
+          "from_seconds": 5.397,
+          "to_seconds": 5.618,
+          "failures": 3,
+          "slow_failures": 0,
+          "max_wait_ms": 0.027,
+          "by_class": {
+            "dns": 3
+          }
+        },
+        {
+          "from_seconds": 6.402,
+          "to_seconds": 6.622,
+          "failures": 3,
+          "slow_failures": 0,
+          "max_wait_ms": 0.047,
+          "by_class": {
+            "dns": 3
+          }
+        },
+        {
+          "from_seconds": 7.412,
+          "to_seconds": 7.627,
+          "failures": 3,
+          "slow_failures": 0,
+          "max_wait_ms": 0.033,
+          "by_class": {
+            "dns": 3
+          }
+        }
+      ],
+      "pool_lines": 159
+    }
+  ],
+  "restarts": [
+    {
+      "at_seconds": 58,
+      "errors": [
+        {
+          "class": "dns",
+          "lines": 4,
+          "pool_lines": 3,
+          "first_seconds": 0.088,
+          "last_seconds": 0.144,
+          "example": "redis: 2026/11/13 21:11:20 pool.go:770: redis: connection pool: failed to dial after 5 attempts: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+        }
+      ],
+      "loading_errors": 0,
+      "recoveries": [
+        {
+          "replica": "switchboard-1",
+          "component": "budget",
+          "seconds": 1.9
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "cache",
+          "seconds": 0.692
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "ratelimit",
+          "seconds": 1.733
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "budget",
+          "seconds": 0.701
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "cache",
+          "seconds": 1.146
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "ratelimit",
+          "seconds": 1.199
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "budget",
+          "seconds": 1.4
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "cache",
+          "seconds": 0.577
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "ratelimit",
+          "seconds": 1.133
+        }
+      ],
+      "degraded_seconds": 1.9
+    },
+    {
+      "at_seconds": 70,
+      "errors": [
+        {
+          "class": "dns",
+          "lines": 2,
+          "pool_lines": 0,
+          "first_seconds": 0.136,
+          "last_seconds": 0.601,
+          "example": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+        }
+      ],
+      "loading_errors": 0,
+      "recoveries": [
+        {
+          "replica": "switchboard-1",
+          "component": "budget",
+          "seconds": 0.699
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "cache",
+          "seconds": 0.632
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "ratelimit",
+          "seconds": 1.166
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "budget",
+          "seconds": 2
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "cache",
+          "seconds": 1.141
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "ratelimit",
+          "seconds": 1.233
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "budget",
+          "seconds": 0.801
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "cache",
+          "seconds": 1.611
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "ratelimit",
+          "seconds": 1.1
+        }
+      ],
+      "degraded_seconds": 2
+    },
+    {
+      "at_seconds": 82,
+      "errors": [
+        {
+          "class": "dns",
+          "lines": 2,
+          "pool_lines": 0,
+          "first_seconds": 0.145,
+          "last_seconds": 0.641,
+          "example": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+        }
+      ],
+      "loading_errors": 0,
+      "recoveries": [
+        {
+          "replica": "switchboard-1",
+          "component": "budget",
+          "seconds": 0.4
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "cache",
+          "seconds": 1.151
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "ratelimit",
+          "seconds": 0.867
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "budget",
+          "seconds": 0.6
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "cache",
+          "seconds": 0.636
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "ratelimit",
+          "seconds": 1.399
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "budget",
+          "seconds": 3.199
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "cache",
+          "seconds": 1.666
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "ratelimit",
+          "seconds": 1.3
+        }
+      ],
+      "degraded_seconds": 3.199
+    },
+    {
+      "at_seconds": 94,
+      "errors": [
+        {
+          "class": "dns",
+          "lines": 1,
+          "pool_lines": 0,
+          "first_seconds": 0.156,
+          "last_seconds": 0.156,
+          "example": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+        }
+      ],
+      "loading_errors": 0,
+      "recoveries": [
+        {
+          "replica": "switchboard-1",
+          "component": "budget",
+          "seconds": 1.499
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "cache",
+          "seconds": 0.582
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "ratelimit",
+          "seconds": 1.1
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "budget",
+          "seconds": 0.899
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "cache",
+          "seconds": 0.664
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "ratelimit",
+          "seconds": 1.367
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "budget",
+          "seconds": 1.799
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "cache",
+          "seconds": 1.177
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "ratelimit",
+          "seconds": 1.233
+        }
+      ],
+      "degraded_seconds": 1.799
+    },
+    {
+      "at_seconds": 106,
+      "errors": [
+        {
+          "class": "dns",
+          "lines": 2,
+          "pool_lines": 2,
+          "first_seconds": 0.008,
+          "last_seconds": 0.008,
+          "example": "redis: 2026/11/13 21:12:08 pool.go:770: redis: connection pool: failed to dial after 5 attempts: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+        }
+      ],
+      "loading_errors": 0,
+      "recoveries": [
+        {
+          "replica": "switchboard-1",
+          "component": "budget",
+          "seconds": 1.7
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "cache",
+          "seconds": 0.622
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "ratelimit",
+          "seconds": 0.8
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "budget",
+          "seconds": 1.2
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "cache",
+          "seconds": 0.608
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "ratelimit",
+          "seconds": 0.9
+        }
+      ],
+      "degraded_seconds": 1.7
+    },
+    {
+      "at_seconds": 118.001,
+      "errors": [],
+      "loading_errors": 0,
+      "recoveries": [
+        {
+          "replica": "switchboard-1",
+          "component": "budget",
+          "seconds": 1.4
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "cache",
+          "seconds": 0.626
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "ratelimit",
+          "seconds": 1.032
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "budget",
+          "seconds": 1.499
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "cache",
+          "seconds": 0.611
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "ratelimit",
+          "seconds": 1.132
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "budget",
+          "seconds": 1.598
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "cache",
+          "seconds": 0.586
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "ratelimit",
+          "seconds": 1.199
+        }
+      ],
+      "degraded_seconds": 1.598
+    },
+    {
+      "at_seconds": 130,
+      "errors": [
+        {
+          "class": "dns",
+          "lines": 2,
+          "pool_lines": 0,
+          "first_seconds": 0.076,
+          "last_seconds": 0.626,
+          "example": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+        }
+      ],
+      "loading_errors": 0,
+      "recoveries": [
+        {
+          "replica": "switchboard-1",
+          "component": "budget",
+          "seconds": 1.201
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "cache",
+          "seconds": 1.656
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "ratelimit",
+          "seconds": 1.267
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "budget",
+          "seconds": 0.501
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "cache",
+          "seconds": 1.101
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "ratelimit",
+          "seconds": 0.501
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "budget",
+          "seconds": 0.899
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "cache",
+          "seconds": 0.658
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "ratelimit",
+          "seconds": 1.366
+        }
+      ],
+      "degraded_seconds": 1.656
+    },
+    {
+      "at_seconds": 142,
+      "errors": [],
+      "loading_errors": 0,
+      "recoveries": [
+        {
+          "replica": "switchboard-1",
+          "component": "budget",
+          "seconds": 0.6
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "cache",
+          "seconds": 0.636
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "ratelimit",
+          "seconds": 1.533
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "budget",
+          "seconds": 1.1
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "cache",
+          "seconds": 0.411
+        },
+        {
+          "replica": "switchboard-2",
+          "component": "ratelimit",
+          "seconds": 0.203
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "budget",
+          "seconds": 1.899
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "cache",
+          "seconds": 0.642
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "ratelimit",
+          "seconds": 1.233
+        }
+      ],
+      "degraded_seconds": 1.899
+    }
+  ]
+}

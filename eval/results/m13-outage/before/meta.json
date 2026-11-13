@@ -1,0 +1,16 @@
+{
+  "commit": "273e803",
+  "gateway_commit": "42f5f0c",
+  "date": "2026-11-13T21:10:22Z",
+  "command": "make chaos-probe RUN=before",
+  "replicas": 3,
+  "retry_interval": "1s",
+  "duration_seconds": 150.000,
+  "time_scale": 1,
+  "schedule": "flap",
+  "redis_persist": "none",
+  "redis": {"appendonly": "no", "appendfsync": "everysec", "data_fs": "overlayfs", "aof_bytes_at_end": 0},
+  "limit": {"model": "fake-limited", "rate": 10, "period_seconds": 1},
+  "budget": {"model": "fake-budget", "usd": "0.20", "grace_usd": "0.01", "grace_refill": "1h", "input_price": "3", "output_price": "15"},
+  "fake_provider": {"latency": "20ms", "tokens": 30, "token_interval": "5ms"}
+}
