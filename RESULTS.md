@@ -1441,8 +1441,11 @@ Then, against two sums, what the provider billed and the store's `spent`:
   (1 + T / refill) + the admitted under-estimates, T the schedule's
   clock time. The stretch starts at the first step with no grace hold
   open, so `degrade.go`'s extra grace per process does not arise.
-- I3, no invented spend: `spent` > billed only on a schedule where a reply
-  was lost.
+- I3, no invented spend: `spent` exceeds billed by at most the double
+  charges, the spend a call applied before its reply was lost and that
+  the replica later flushed again. (PLAN.md's wording, `spent` > billed
+  only after a lost reply, follows from it and is weaker: it would let
+  any lost reply excuse any amount.)
 
 A failing schedule is shrunk greedily (drop runs of steps, halving, then
 single steps until no one removal keeps the failure), so every step left is
@@ -1452,21 +1455,28 @@ needed. Then two classifications:
   schedule kills a process holding pending spend, "expired hold" if a
   hold expires on the store unsettled, otherwise "other".
 - *The fault log*, added while building (below): each kill records where
-  the dead process's money sat (pending spend, requests in flight with a
-  Redis hold, requests in flight on a grace hold). A way of losing spend
-  is needed when the shortfall (billed − `spent`) is more than every
-  other recorded loss could cover. "Other" is a shortfall beyond pending
-  spend and Redis holds together, and "unaccounted" a shortfall beyond
-  everything every killed process held. Each class a seed needs is
+  the dead process's money sat (pending spend the store had not already
+  applied, requests in flight with a Redis hold, requests in flight on a
+  grace hold), and the simulator reads `spent` around every call it lets
+  through, so a lost reply's applied spend that the replica charges
+  again is recorded as a double charge. The loss is billed − `spent` +
+  the double charges; without adding them back, one lost reply's second
+  charge could hide a loss of the same size elsewhere. A way of losing
+  spend is needed when the loss is more than every other recorded loss
+  could cover. "Other" is a loss beyond pending spend and Redis holds
+  together, and "unaccounted" a loss beyond everything every killed
+  process held. Every seed must also balance exactly: `spent` = billed −
+  the recorded losses + the double charges. Each class a seed needs is
   shrunk on its own, keeping that class, so the shrinker cannot slip
   from one way to another.
 
 The planted arm runs the same seeds with a test-only switch on the Redis
 ledger: one settle in a hundred (by a hash of seed and request id, so
-shrinking keeps it) releases its hold and records nothing as spent.
+shrinking keeps it) releases its hold and records nothing as spent. It
+counts as fired when the store applies the emptied settle.
 
-**Faults exercised** (100,000 seeds, 2,048,186 steps, 1,648,286 schedules run with shrinking,
-24.4 min on 4 workers):
+**Faults exercised** (100,000 seeds, 2,048,186 steps, 1,697,748 schedules run with shrinking,
+20.4 min for this arm on 4 workers):
 
 | Fault | Seeds | Share |
 |-------|------:|------:|
@@ -1486,14 +1496,17 @@ shrinking keeps it) releases its hold and records nothing as spent.
 | I2 | 0 | 0 | 0 | 0 | – |
 | I3 | 0 | 0 | 0 | 0 | – |
 
+
+Minimal schedule for *I1, expired hold* under the rule (seed 1; billed 5, spent 0; killed processes held 0 pending, 0 in Redis holds, 5 in grace holds): r0 reserve q7 hold 20 cost 5, reply lost; r0 killed, new process.
+
 **Lost spend by the fault log** (a seed can need more than one way; share of the
-35,019 seeds that lost spend):
+35,019 seeds that lost spend; 0 of them (0.0%) need no one way on its own):
 
 | Class | Seeds | Share | Minimal lengths (steps: seeds) | Longest |
 |-------|------:|------:|-------|------:|
-| killed pending | 11,271 | 32.2% | 3: 3,226, 4: 7,778, 5: 262, 6: 5 | 6 |
-| expired hold | 19,686 | 56.2% | 2: 19,686 | 2 |
-| other | 17,686 | 50.5% | 2: 8,110, 3: 9,389, 4: 177, 5: 9, 6: 1 | 6 |
+| killed pending | 11,620 | 33.2% | 3: 3,364, 4: 7,975, 5: 276, 6: 5 | 6 |
+| expired hold | 20,581 | 58.8% | 2: 20,581 | 2 |
+| other | 18,793 | 53.7% | 2: 8,668, 3: 9,688, 4: 437 | 4 |
 | unaccounted | 0 | 0.0% | – | – |
 
 **Hypotheses (PLAN.md, M11) against the run.**
@@ -1503,13 +1516,14 @@ shrinking keeps it) releases its hold and records nothing as spent.
 | Every fault exercised by at least 10% of seeds | least exercised: reply lost on settle, 19.1% of seeds | yes |
 | PLAN.md's rule rediscovers both listed classes | killed pending 0, expired hold 35,019 of 35,019 seeds that lost spend | no |
 | Under PLAN.md's rule, every I1 failure is killed pending or expired hold | other: 0 | yes |
-| By the fault log, both listed classes are rediscovered | killed pending 11,271, expired hold 19,686 | yes |
-| By the fault log, no lost spend needs a third way | other: 17,686 of 35,019 (50.5%) | no |
-| Each listed class shrinks to four steps or fewer | longest killed pending: 6 (267 of 11,271 over four); expired hold: 2 (0 of 19,686 over four) | no |
+| By the fault log, both listed classes are rediscovered | killed pending 11,620, expired hold 20,581 | yes |
+| By the fault log, no lost spend needs a third way | other: 18,793 of 35,019 (53.7%) | no |
+| Each listed class shrinks to four steps or fewer, by the fault log | longest killed pending: 6 (281 of 11,620 over four); expired hold: 2 (0 of 20,581 over four) | no |
 | I2 is pushed: billed passes the limit on at least 10% of seeds | 39,842 of 100,000 (39.8%) | yes |
 | I2 holds on every seed | 0 violations; 39,842 seeds over the limit, closest: 163 over the limit against a bound of 200 (seed 26072) | yes |
 | I3 holds on every seed | 0 violations; 11,520 seeds ended with spent above billed, 11,520 of them after a lost reply | yes |
-| The planted bug is found outside both listed classes | fired on 2,329 seeds; their loss unaccounted by any kill on 1,567; 1,567 minimal schedules unaccounted, 1,567 with the bug firing (shortest 1 step); PLAN.md's rule filed 2,290 planted-arm I1 seeds as other against 0 in the main arm | yes |
+| The planted bug is found outside both listed classes | fired on 2,087 seeds, kept spend out of the store on 1,814; their loss unaccounted by any kill on 1,814; 1,646 minimal schedules unaccounted, 1,646 with the bug firing (shortest 1 step); PLAN.md's rule filed 2,290 planted-arm I1 seeds as other against 0 in the main arm | yes |
+| The fault log accounts for every seed's money (spent = billed − the kills' and the planted bug's losses + double charges) | unbalanced seeds: 0 in the main arm, 0 in the planted arm | yes |
 
 **Why PLAN.md's rule saw only one class.** Greedy shrinking slips. A
 killed process loses pending spend only if it settled a request during
@@ -1524,12 +1538,16 @@ made while building; PLAN.md records it.
 
 **Why some schedules stay longer than four steps.** A settle step settles
 its slot's oldest request, so reaching the request whose cost is lost
-can take settling older ones first. And the replica can enter degraded
-mode through a lost reply instead of an outage, which needs a request of
-its own. Greedy shrinking keeps each such step because removing it
-changes which request the kill finds in flight or pending. The way of
-losing money is the same three or four steps in the two I traced (seeds 12561 and 22854); the
-hypothesis's "four steps or fewer" is still answered as written, no.
+can take settling older ones first, even ones that cost nothing. And the
+shrinker only removes steps; it cannot replace one, so a step drawn as
+"settle, reply lost" that runs during an outage stays as what is in
+effect a plain settle. In the schedule I traced (seed 12561, six steps:
+reserve a request costing 0, reserve one costing 30, settle, store
+unreachable, settle with its reply lost, kill) the way of losing money
+is the outage, settle and kill of the three-step schedule in
+`TestSimSchedules` ("killed holding pending spend"); the
+first settle is there only to get past the request that cost nothing.
+The hypothesis's "four steps or fewer" is still answered as written, no.
 
 **The minimal schedules.** Each is the shortest seen for its class
 (lowest seed on a tie), with the run's trace; quiescence lines are the
@@ -1566,11 +1584,12 @@ quiesce: every replica flushed
 quiesce: clock past hold TTL
 ```
 
-**The planted bug.** It fired on 2,329 of 100,000 seeds. On 1,567 of them the
-shortfall exceeded everything the killed processes held. On the rest the
-emptied settle cost nothing, or its reply was lost too, so the replica
-kept the cost as pending and charged it again, or another lost reply's
-double charge covered it. Its shortest unaccounted schedule:
+**The planted bug.** The store applied an emptied settle on 2,087 of 100,000 seeds,
+and on 1,814 of them that kept spend out of the store; on the others the
+request cost nothing, or the settle's reply was lost too, so the replica
+kept the cost as pending and charged it then. On 1,814 seeds the loss
+exceeded everything the killed processes held. Its shortest unaccounted
+schedule:
 
 ```
 r0 reserve q3 hold 20 cost 5: admitted on Redis, provider bills 5
@@ -1595,9 +1614,18 @@ quiesce: clock past hold TTL
   the integration tests' job (`make test-integration`).
 - The bound in I2 holds here with every grace allowance fully spendable
   in one schedule; a clean I2 says the formula covers what these
-  schedules produced, not that it is tight.
+  schedules produced, not that it is tight. Nor that it always holds:
+  holds that expire under requests still in flight on a live process
+  free budget with no outage, and four rounds of reserves 15 minutes
+  apart bill 400 against a bound of 262
+  (`TestSimBoundNeedsHoldsToOutliveNoRequest`). The gateway's config
+  rules that state out (`reservation_ttl` must be longer than every
+  provider's timeout), the generator does not, and no seed reached it.
+- I1 is a net check: a double charge can pay for a loss elsewhere and
+  leave `spent` ≥ billed. The balance check is what rules out an
+  unrecorded loss hidden that way.
 
-- Run: commit `eacba2c`, 2026-11-13T06:11:13Z, `switchboard eval budget-sim -seeds 100000 -first 0`; AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Run: commit `9db3868`, 2026-11-13T07:21:49Z, `switchboard eval budget-sim -seeds 100000 -first 0`; AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
 - Cost: $0 (no model, no provider; the fake clock's hours take
   milliseconds).
 
@@ -1637,13 +1665,16 @@ observed.
   allowance was already spent).
 - **A request admitted on grace and in flight when its process dies is
   lost.** Found by M11. The cost is neither pending spend nor a hold on
-  Redis: only the dead process's grace allowance knew it. Shortest
-  schedule (seed 1): r0 reserve q7 hold 20 cost 5, reply lost; r0 killed, new process. A lost reply on a reserve gets
-  there without an outage: the store holds the request, the replica sees a
-  failure and admits it on grace, and the orphaned hold expires
-  separately. `degrade.go`'s loss bound (what the allowance admitted)
-  covers the amount; this list did not name it, and charging expired holds
-  (M12) cannot reach it, since no hold carries the cost.
+  Redis that belongs to it: only the dead process's grace allowance knew
+  it. Shortest schedule (seed 1): r0 reserve q7 hold 20 cost 5, reply lost; r0 killed, new process. A lost reply on
+  a reserve gets there without an outage: the store holds the request, the
+  replica sees a failure and admits it on grace, and the orphaned hold
+  expires separately. `degrade.go`'s loss bound (what the allowance
+  admitted) covers the amount; this list did not name it. Charging an
+  expired hold at its held amount (M12) would cover the lost-reply path
+  up to the request's estimate, since the orphaned hold is that
+  estimate, but not the outage path (store unreachable, reserve, kill:
+  `TestSimSchedules`), where no hold exists.
 - **A hold whose replica died while Redis was up expires without its
   cost reaching `spent`.** The request was sent upstream; nobody settles
   it, and after the reservation TTL the hold is released. M11's shortest

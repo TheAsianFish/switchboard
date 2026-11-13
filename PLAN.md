@@ -1472,13 +1472,29 @@ Changes made while building:
     planted arm's "unaccounted" class: a minimal schedule whose shortfall
     no kill accounts for and in which the planted bug fired. The planted
     victim is chosen by a hash of seed and request id, so shrinking keeps
-    it; a run where it emptied a settle whose reply was then lost (the
-    replica charges the cost again from pending) loses nothing, and is
-    counted as fired but not found.
+    it. It counts as fired when the store applies the emptied settle; a
+    run where that settle's reply was then lost (the replica charges the
+    cost from pending) loses nothing, and is fired but not found.
+  - Exact accounting. The first committed run read the classes from
+    billed − `spent`, which a lost settle reply's second charge shrinks:
+    720 of its 35,019 lost-spend seeds needed no class, because the loss
+    fit inside another recorded one, and killing a process counted
+    pending the store already had as lost. The simulator now reads
+    `spent` around every call it lets through, records a lost reply's
+    applied spend that is flushed again as a double charge (and as no
+    loss if its process dies first), and requires every seed to balance:
+    `spent` = billed − recorded losses + double charges. I3 became the
+    exact form of PLAN.md's: `spent` above billed only by the double
+    charges. The run was repeated with these changes.
   - For M12: the third way, a request admitted on grace and in flight
-    when its process dies, carries no hold on Redis, so charging expired
-    holds cannot reach it. M12's check on this simulator should expect
-    "expired hold" to go and "killed pending" and "other" to stay.
+    when its process dies, carries no hold on Redis of its own. Reached
+    through an outage, charging expired holds cannot touch it; reached
+    through a lost reserve reply, the orphaned hold the store kept
+    expires too, and charging it at its held amount pays for the request
+    up to its estimate. M12's check on this simulator should expect
+    "expired hold" to go, "killed pending" to stay, and "other" to keep
+    only its outage schedules (and lost-reply ones that cost more than
+    their estimate).
   - Outcome (RESULTS.md, M11): the hypothesis is false. The fault log
     rediscovers both listed ways and finds a third, a request admitted on
     grace and in flight when its process dies; I2 and I3 held on every

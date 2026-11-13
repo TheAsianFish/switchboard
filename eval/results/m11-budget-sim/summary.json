@@ -1,7 +1,7 @@
 {
   "meta": {
-    "commit": "eacba2c",
-    "date": "2026-11-13T06:11:13Z",
+    "commit": "9db3868",
+    "date": "2026-11-13T07:21:49Z",
     "command": "switchboard eval budget-sim -seeds 100000 -first 0",
     "workers": 4,
     "hardware": {
@@ -97,8 +97,8 @@
       "first_seed": 0,
       "seeds": 100000,
       "steps": 2048186,
-      "runs": 1648286,
-      "wall_seconds": 1464.82,
+      "runs": 1697748,
+      "wall_seconds": 1224.78,
       "exercised": [
         {
           "name": "store unreachable",
@@ -223,19 +223,19 @@
       "classes": [
         {
           "class": "killed pending",
-          "seeds": 11271,
+          "seeds": 11620,
           "lengths": [
             {
               "steps": 3,
-              "seeds": 3226
+              "seeds": 3364
             },
             {
               "steps": 4,
-              "seeds": 7778
+              "seeds": 7975
             },
             {
               "steps": 5,
-              "seeds": 262
+              "seeds": 276
             },
             {
               "steps": 6,
@@ -268,11 +268,11 @@
         },
         {
           "class": "expired hold",
-          "seeds": 19686,
+          "seeds": 20581,
           "lengths": [
             {
               "steps": 2,
-              "seeds": 19686
+              "seeds": 20581
             }
           ],
           "example": {
@@ -299,27 +299,19 @@
         },
         {
           "class": "other",
-          "seeds": 17686,
+          "seeds": 18793,
           "lengths": [
             {
               "steps": 2,
-              "seeds": 8110
+              "seeds": 8668
             },
             {
               "steps": 3,
-              "seeds": 9389
+              "seeds": 9688
             },
             {
               "steps": 4,
-              "seeds": 177
-            },
-            {
-              "steps": 5,
-              "seeds": 9
-            },
-            {
-              "steps": 6,
-              "seeds": 1
+              "seeds": 437
             }
           ],
           "example": {
@@ -351,7 +343,9 @@
         }
       ],
       "planted_fired": 0,
+      "planted_lost": 0,
       "planted_found": 0,
+      "unbalanced": 0,
       "unaccounted_planted": 0,
       "over_limit": 39842,
       "closest": {
@@ -368,8 +362,8 @@
       "first_seed": 0,
       "seeds": 100000,
       "steps": 2048186,
-      "runs": 1681709,
-      "wall_seconds": 1221.78,
+      "runs": 1730723,
+      "wall_seconds": 1231.02,
       "exercised": [
         {
           "name": "store unreachable",
@@ -519,19 +513,19 @@
       "classes": [
         {
           "class": "killed pending",
-          "seeds": 11336,
+          "seeds": 11649,
           "lengths": [
             {
               "steps": 3,
-              "seeds": 3270
+              "seeds": 3409
             },
             {
               "steps": 4,
-              "seeds": 7804
+              "seeds": 7963
             },
             {
               "steps": 5,
-              "seeds": 257
+              "seeds": 272
             },
             {
               "steps": 6,
@@ -564,11 +558,11 @@
         },
         {
           "class": "expired hold",
-          "seeds": 19746,
+          "seeds": 20621,
           "lengths": [
             {
               "steps": 2,
-              "seeds": 19746
+              "seeds": 20621
             }
           ],
           "example": {
@@ -595,31 +589,23 @@
         },
         {
           "class": "other",
-          "seeds": 19025,
+          "seeds": 20155,
           "lengths": [
             {
               "steps": 1,
-              "seeds": 1910
+              "seeds": 1983
             },
             {
               "steps": 2,
-              "seeds": 7843
+              "seeds": 8385
             },
             {
               "steps": 3,
-              "seeds": 9091
+              "seeds": 9367
             },
             {
               "steps": 4,
-              "seeds": 172
-            },
-            {
-              "steps": 5,
-              "seeds": 8
-            },
-            {
-              "steps": 6,
-              "seeds": 1
+              "seeds": 420
             }
           ],
           "example": {
@@ -645,11 +631,11 @@
         },
         {
           "class": "unaccounted",
-          "seeds": 1567,
+          "seeds": 1646,
           "lengths": [
             {
               "steps": 1,
-              "seeds": 1567
+              "seeds": 1646
             }
           ],
           "example": {
@@ -674,9 +660,11 @@
           }
         }
       ],
-      "planted_fired": 2329,
-      "planted_found": 1567,
-      "unaccounted_planted": 1567,
+      "planted_fired": 2087,
+      "planted_lost": 1814,
+      "planted_found": 1814,
+      "unbalanced": 0,
+      "unaccounted_planted": 1646,
       "over_limit": 39882,
       "closest": {
         "seed": 26072,

@@ -61,7 +61,7 @@ the method, the intervals, the hardware and the cost of every row.
 | [M8: budget grace under a flapping store](RESULTS.md#m8-budget-grace-under-a-flapping-store) | Eight Redis outages on a spent budget: overshoot $0.2166 when grace reset every outage, $0.0362 with a refilled allowance (bound $0.0410); a replica killed while degraded lost $0.004185 before, $0 after | `make chaos-flap` |
 | [M9: budgets across a Redis restart](RESULTS.md#m9-budgets-across-a-redis-restart) | Budget across a Redis restart: overshoot $0.198040 with no append-only file, $0.017620 with `everysec`, $0.017620 with `always`; `everysec` adds +0.07 ms at p99 (non-streaming total, against none; -1.06 ms in a second pass); `always` adds +6.18 ms at p99 (non-streaming total, against none; +5.83 ms in a second pass); compose default by the pre-stated rule: `everysec` | `make chaos-persist`, `make bench-persist` |
 | [M10: a stalled provider and the first-token timeout](RESULTS.md#m10-a-stalled-provider-and-the-first-token-timeout) | Provider stalled at 20 req/s: breaker opened 0 times in 60 s before; with a 2 s first-token timeout, open 2.249 s into the stall, refusals p99 1.57 ms, closed 0.477 s after it ended (11.476 s when the stall ended just after a probe) | `make bench-stall` |
-| [M11: is the list of ways a budget loses spend complete?](RESULTS.md#m11-is-the-list-of-ways-a-budget-loses-spend-complete) | 100,000 seeded fault schedules on three replicas: 35,019 lost spend; by the fault log, 17,686 needed a third way (a request admitted on grace and in flight when its process died), shortest 2 steps; I2 and I3 held on every seed; a planted bug was found in 1,567 of the 2,329 seeds it hit | `make sim-budget` |
+| [M11: is the list of ways a budget loses spend complete?](RESULTS.md#m11-is-the-list-of-ways-a-budget-loses-spend-complete) | 100,000 seeded fault schedules on three replicas: 35,019 lost spend; by the fault log, 18,793 needed a third way (a request admitted on grace and in flight when its process died), shortest 2 steps; I2 and I3 held on every seed; a planted bug was found in 1,814 of the 2,087 seeds it hit | `make sim-budget` |
 
 Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2
@@ -386,8 +386,9 @@ search was the easy half; classifying the failures was the hard one.
 A shrinker that only keeps "it still fails" slips from one failure to
 another, so every way of losing money through a kill collapsed to the
 same two steps, a reserve and a kill. Classifying from a fault log
-instead (where each killed process's money sat) and shrinking per class
-found a way the list did not name: a request admitted on grace and still
+instead (where each killed process's money sat, balanced exactly against
+`spent` so a lost reply's second charge cannot hide a loss) and shrinking
+per class found a way the list did not name: a request admitted on grace and still
 in flight when its replica dies (RESULTS.md, M11).
 
 Q2 measures it in compose: three replicas behind nginx, one key at three
