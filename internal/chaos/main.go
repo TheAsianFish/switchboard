@@ -19,16 +19,20 @@ import (
 )
 
 // Main implements `switchboard chaos`; args start with the subcommand:
-// report (Q6 and M8's runs) or orphan (M12's).
+// report (Q6 and M8's runs), orphan (M12's) or outage (M13's analysis
+// of a run's slow requests, written to outage.json).
 func Main(_ context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "report" && args[0] != "orphan" {
-		_, _ = fmt.Fprintln(stderr, "usage: switchboard chaos report|orphan [--dir eval/results/q6-chaos] [--out file]")
+	if len(args) == 0 || args[0] != "report" && args[0] != "orphan" && args[0] != "outage" {
+		_, _ = fmt.Fprintln(stderr, "usage: switchboard chaos report|orphan|outage [--dir eval/results/q6-chaos] [--out file]")
 		return 2
 	}
 	name := "chaos " + args[0]
 	defaultDir := "eval/results/q6-chaos"
-	if args[0] == "orphan" {
+	switch args[0] {
+	case "orphan":
 		defaultDir = "eval/results/m12-orphan/after"
+	case "outage":
+		defaultDir = "eval/results/m13-outage/after"
 	}
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -42,7 +46,21 @@ func Main(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	var summary any
 	var text string
-	if args[0] == "orphan" {
+	file := SummaryFile
+	switch args[0] {
+	case "outage":
+		in, err := Load(*dir)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
+			return 1
+		}
+		s, err := AnalyseOutage(*in)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
+			return 1
+		}
+		summary, text, file = s, DescribeOutage(s), OutageFile
+	case "orphan":
 		in, err := LoadOrphan(*dir)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
@@ -54,7 +72,7 @@ func Main(_ context.Context, args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		summary, text = s, DescribeOrphan(s)
-	} else {
+	default:
 		in, err := Load(*dir)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
@@ -75,7 +93,7 @@ func Main(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	b = append(b, '\n')
 	path := *out
 	if path == "" {
-		path = filepath.Join(*dir, SummaryFile)
+		path = filepath.Join(*dir, file)
 	}
 	if path == "-" {
 		_, err = stdout.Write(b)
