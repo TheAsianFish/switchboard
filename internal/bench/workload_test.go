@@ -334,3 +334,45 @@ func TestLogRecordsRetryAfter(t *testing.T) {
 		}
 	}
 }
+
+// A labelled run sends each request's id as <label>-<i>, the index its
+// log line carries; an unlabelled run sends none, and the gateway picks
+// its own.
+func TestRequestIDs(t *testing.T) {
+	t.Parallel()
+	for _, label := range []string{"main", ""} {
+		t.Run("label="+label, func(t *testing.T) {
+			t.Parallel()
+			var mu sync.Mutex
+			ids := map[string]bool{}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				ids[r.Header.Get(RequestIDHeader)] = true
+				mu.Unlock()
+				okJSON(w)
+			}))
+			defer srv.Close()
+			cfg := Config{URL: srv.URL, Model: "m", Rate: 200, Duration: 20 * time.Millisecond, Timeout: time.Second, Label: label}
+			res, err := Run(context.Background(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if label == "" {
+				if len(ids) != 1 || !ids[""] {
+					t.Fatalf("unlabelled run sent ids %v", ids)
+				}
+				return
+			}
+			if len(ids) != res.Requests+res.WarmupRequests {
+				t.Fatalf("%d distinct ids for %d requests: %v", len(ids), res.Requests+res.WarmupRequests, ids)
+			}
+			for i := range len(ids) {
+				if !ids[RequestID(label, i)] {
+					t.Fatalf("no request sent id %q: %v", RequestID(label, i), ids)
+				}
+			}
+		})
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/TheAsianFish/switchboard/internal/sse"
@@ -93,6 +94,15 @@ func requestBody(cfg *Config, i int) ([]byte, error) {
 	return json.Marshal(r)
 }
 
+// RequestIDHeader carries a labelled run's id for each request. The
+// gateway adopts it as the request's id and stamps it on every log line,
+// so a request in the run's log can be found in the replicas' logs.
+const RequestIDHeader = "X-Request-Id"
+
+// RequestID is the id a run labelled label sends with request i: the
+// label, a hyphen and the request's index in the log.
+func RequestID(label string, i int) string { return label + "-" + strconv.Itoa(i) }
+
 // newRequest builds the HTTP request for request i.
 func newRequest(ctx context.Context, cfg *Config, i int) (*http.Request, error) {
 	body, err := requestBody(cfg, i)
@@ -113,6 +123,9 @@ func newRequest(ctx context.Context, cfg *Config, i int) (*http.Request, error) 
 	}
 	if cfg.CacheDirective != "" {
 		req.Header.Set(CacheDirectiveHeader, cfg.CacheDirective)
+	}
+	if cfg.Label != "" {
+		req.Header.Set(RequestIDHeader, RequestID(cfg.Label, i))
 	}
 	if cfg.Format == FormatAnthropic {
 		req.Header.Set("anthropic-version", "2023-06-01")
