@@ -61,7 +61,7 @@ the method, the intervals, the hardware and the cost of every row.
 | [M8: budget grace under a flapping store](RESULTS.md#m8-budget-grace-under-a-flapping-store) | Eight Redis outages on a spent budget: overshoot $0.2166 when grace reset every outage, $0.0362 with a refilled allowance (bound $0.0410); a replica killed while degraded lost $0.004185 before, $0 after | `make chaos-flap` |
 | [M9: budgets across a Redis restart](RESULTS.md#m9-budgets-across-a-redis-restart) | Budget across a Redis restart: overshoot $0.198040 with no append-only file, $0.017620 with `everysec`, $0.017620 with `always`; `everysec` adds +0.07 ms at p99 (non-streaming total, against none; -1.06 ms in a second pass); `always` adds +6.18 ms at p99 (non-streaming total, against none; +5.83 ms in a second pass); compose default by the pre-stated rule: `everysec` | `make chaos-persist`, `make bench-persist` |
 | [M10: a stalled provider and the first-token timeout](RESULTS.md#m10-a-stalled-provider-and-the-first-token-timeout) | Provider stalled at 20 req/s: breaker opened 0 times in 60 s before; with a 2 s first-token timeout, open 2.249 s into the stall, refusals p99 1.57 ms, closed 0.477 s after it ended (11.476 s when the stall ended just after a probe) | `make bench-stall` |
-| [M11: is the list of ways a budget loses spend complete?](RESULTS.md#m11-is-the-list-of-ways-a-budget-loses-spend-complete) | Not measured yet | `make sim-budget` |
+| [M11: is the list of ways a budget loses spend complete?](RESULTS.md#m11-is-the-list-of-ways-a-budget-loses-spend-complete) | 100,000 seeded fault schedules on three replicas: 35,019 lost spend; by the fault log, 17,686 needed a third way (a request admitted on grace and in flight when its process died), shortest 2 steps; I2 and I3 held on every seed; a planted bug was found in 1,567 of the 2,329 seeds it hit | `make sim-budget` |
 
 Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2
@@ -373,6 +373,23 @@ written before the runs picked once `make chaos-persist` and
 nanodollars, so the gateway's ledger can be compared with the provider's to
 the cent.
 
+Is that list of ways to lose budget complete? Until M11 every case was
+argued from the code. A seeded simulator (`make sim-budget`) now runs
+three replicas' `Degrading` ledgers over the real Lua scripts on an
+in-process `miniredis` with a fake clock, through a store connection that
+can refuse every call or apply one and lose its reply. It draws schedules
+of up to 40 steps from reserves, settles and seven faults, and at
+quiescence checks three things against what the provider billed: Redis's
+`spent` is not below it, not invented, and not past the documented
+overshoot bound. Every failure is shrunk to a minimal schedule. The
+search was the easy half; classifying the failures was the hard one.
+A shrinker that only keeps "it still fails" slips from one failure to
+another, so every way of losing money through a kill collapsed to the
+same two steps, a reserve and a kill. Classifying from a fault log
+instead (where each killed process's money sat) and shrinking per class
+found a way the list did not name: a request admitted on grace and still
+in flight when its replica dies (RESULTS.md, M11).
+
 Q2 measures it in compose: three replicas behind nginx, one key at three
 times its limit, and the fake provider's ledger as the ground truth of what
 got through. It turned out that the obvious measure, admissions per 60 s
@@ -517,6 +534,7 @@ How the streaming path is tested:
 | Every limit and budget decision is one Lua script that reads Redis's clock | Atomic across replicas in one round trip; skewed replica clocks do not matter. | Read-modify-write from Go: races between replicas. Replica clocks: skew moves windows. |
 | Reserve the worst case, settle the real cost | Concurrent requests on any replica cannot together overspend; unsettled holds expire after a crash. | Charge after the reply: N replicas overspend by N requests' worth at the edge. |
 | Budget grace as a per-replica allowance that refills over `grace_refill` (1 h) | A flapping store's overshoot is bounded by replica processes × grace × (1 + T / refill), not by the number of outages; measured before and after in M8. | Fresh grace per outage (what shipped until M8): eight outages overshot a $0.20 budget by more than the budget itself. Grace shared in Redis: unreachable exactly when it is needed. |
+| Search the budget's failure cases with a seeded simulator, checked against two sums and classified from a fault log (M11) | Invariants over what the provider billed and what Redis spent cannot share a bug with the ledger; the fault log records where each killed process's money sat, so a shrunk schedule's class does not depend on which steps the shrinker happened to keep. | A second reference ledger: it encodes the same assumptions as the code it checks. Classifying by the shrunk schedule's shape (PLAN.md's first rule): shrinking slips, and every kill collapsed to "reserve, kill". |
 | Redis with an append-only file, fsynced every second (`deploy/compose.yaml`) | A restart replays budgets, counters and cache; picked by a rule fixed before M9's runs, from the overshoot and the p99 cost of each mode. | No persistence: a restart gives every spent key its budget again. `appendfsync always`: milliseconds at p99 per request on a container filesystem, to save at most a second of writes, and only from a machine crash. |
 | Degrade to per-replica limits at rate ÷ replicas when Redis is down | The fleet stays near its limit during an outage instead of failing every request or admitting all of them. | Fail closed: a Redis blip becomes an outage. Fail open: unlimited spend. |
 | Exact key over the whole request, semantic match on the last user turn only within the same context hash | A cached reply can never cross a tenant, a system prompt, earlier turns or sampling parameters, and similarity is only asked of short texts, where embeddings work. | Embedding the whole conversation: multi-turn similarity is unreliable and a false hit serves another conversation's answer. |
@@ -566,18 +584,20 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   tests and Lua slot are in; the implementation is not).
 - A reranking stage for semantic hits: Q3 shows embeddings alone cannot
   keep false hits under 1% at a useful hit rate on adversarial pairs.
-- Pending budget spend lives in each replica's memory: a replica killed
-  while Redis is down loses the cost it settled during the outage and had
-  not yet charged: at most one allowance, plus requests it had reserved on
-  Redis before the outage (RESULTS.md M8). A settle that times out
-  after Redis applied it is charged twice, and a hold whose replica died
-  while Redis was up expires without its cost reaching `spent`; neither
-  showed up in M8's runs.
-- Next (PLAN.md, evolution round 2): a seeded fault-schedule search for
-  ways a budget loses spend that the list above does not name (M11);
-  an expired hold charged as spend without double-charging a late settle
-  (M12); and where an outage's slow requests come from, with the cache
-  probing the store one lookup at a time (M13).
+- Budget spend lost to a killed replica, searched (M11): over seeded
+  fault schedules a killed process loses money in three ways, not the two
+  this list used to name. They are spend it settled during an outage and
+  had not yet charged, a Redis hold that expires unsettled, and a request
+  admitted on grace and still in flight, which holds nothing on Redis at
+  all. Each shrinks to a few steps; RESULTS.md M11 prints them. A settle
+  charged twice after a lost reply over-counts and never loses money. No
+  schedule invented spend without a lost reply, and none passed the
+  documented overshoot bound.
+- Next (PLAN.md, evolution round 2): an expired hold charged as spend
+  without double-charging a late settle (M12), which leaves the
+  grace-in-flight case to its allowance bound; and where an outage's
+  slow requests come from, with the cache probing the store one lookup
+  at a time (M13).
 - Budgets across a Redis restart (M9): with the append-only file the
   compose file now ships, a restarted Redis forgot no spend and the
   overshoot was the outage's grace alone, at a p99 cost the bench could

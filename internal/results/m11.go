@@ -33,6 +33,9 @@ type M11 struct {
 	// RuleSlipped is true when PLAN.md's rule filed every lost-spend seed
 	// of the main arm as "expired hold", the slippage the section explains.
 	RuleSlipped bool
+	// LongShrinks is true when a listed class's minimal schedule is over
+	// four steps, which the section explains.
+	LongShrinks bool
 }
 
 // M11Arm is one arm, formatted.
@@ -149,6 +152,7 @@ func buildM11(s budgetsim.Summary) (*M11, error) {
 	}
 	m.Checks = m11Checks(m.Main, m.Planted)
 	i1 := m.Main.Violations[0]
+	m.LongShrinks = over4(m.Main.class(budget.ClassKilledPending))+over4(m.Main.class(budget.ClassExpiredHold)) > 0
 	m.RuleSlipped = i1.Seeds > 0 && m.Main.rule("I1", budget.ClassExpiredHold).Seeds == i1.Seeds
 	mc := m.Main.class(budget.ClassOther)
 	m.Headline = fmt.Sprintf("%s seeded fault schedules on three replicas: %s lost spend; by the fault log, %s needed a third way (a request admitted on grace and in flight when its process died), shortest %s; I2 and I3 held on every seed; a planted bug was found in %s of the %s seeds it hit",

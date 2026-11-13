@@ -1,0 +1,690 @@
+{
+  "meta": {
+    "commit": "eacba2c",
+    "date": "2026-11-13T06:11:13Z",
+    "command": "switchboard eval budget-sim -seeds 100000 -first 0",
+    "workers": 4,
+    "hardware": {
+      "num_cpu": 4,
+      "gomaxprocs": 4,
+      "goos": "linux",
+      "goarch": "amd64",
+      "go_version": "go1.27.0",
+      "cpu_model": "AMD EPYC 7763 64-Core Processor",
+      "kernel": "7.0.0-1019-azure"
+    }
+  },
+  "config": {
+    "replicas": 3,
+    "limit": 100,
+    "grace": 50,
+    "grace_refill": "1h0m0s",
+    "retry_interval": "1s",
+    "hold_ttl": "15m0s",
+    "max_steps": 40,
+    "holds": [
+      10,
+      20,
+      40
+    ],
+    "weights": [
+      {
+        "op": "reserve",
+        "weight": 30
+      },
+      {
+        "op": "settle",
+        "weight": 25
+      },
+      {
+        "op": "store-down",
+        "weight": 6
+      },
+      {
+        "op": "store-up",
+        "weight": 6
+      },
+      {
+        "op": "kill",
+        "weight": 5
+      },
+      {
+        "op": "reserve-lost",
+        "weight": 5
+      },
+      {
+        "op": "settle-lost",
+        "weight": 5
+      },
+      {
+        "op": "clock-short",
+        "weight": 8
+      },
+      {
+        "op": "clock-ttl",
+        "weight": 5
+      },
+      {
+        "op": "clock-refill",
+        "weight": 5
+      }
+    ],
+    "faults": [
+      "store unreachable",
+      "replica killed",
+      "reply lost on reserve",
+      "reply lost on settle",
+      "clock step, short",
+      "clock step past hold TTL",
+      "clock step past grace refill"
+    ],
+    "invariants": [
+      "I1",
+      "I2",
+      "I3"
+    ],
+    "classes": [
+      "killed pending",
+      "expired hold",
+      "other",
+      "unaccounted"
+    ]
+  },
+  "arms": [
+    {
+      "name": "main",
+      "planted": false,
+      "first_seed": 0,
+      "seeds": 100000,
+      "steps": 2048186,
+      "runs": 1648286,
+      "wall_seconds": 1464.82,
+      "exercised": [
+        {
+          "name": "store unreachable",
+          "seeds": 54995
+        },
+        {
+          "name": "replica killed",
+          "seeds": 58497
+        },
+        {
+          "name": "reply lost on reserve",
+          "seeds": 42839
+        },
+        {
+          "name": "reply lost on settle",
+          "seeds": 19050
+        },
+        {
+          "name": "clock step, short",
+          "seeds": 72369
+        },
+        {
+          "name": "clock step past hold TTL",
+          "seeds": 45254
+        },
+        {
+          "name": "clock step past grace refill",
+          "seeds": 35823
+        }
+      ],
+      "violations": [
+        {
+          "invariant": "I1",
+          "seeds": 35019,
+          "by_class": [
+            {
+              "class": "killed pending",
+              "seeds": 0,
+              "lengths": null
+            },
+            {
+              "class": "expired hold",
+              "seeds": 35019,
+              "lengths": [
+                {
+                  "steps": 2,
+                  "seeds": 35019
+                }
+              ],
+              "example": {
+                "seed": 1,
+                "steps": [
+                  "r0 reserve q7 hold 20 cost 5, reply lost",
+                  "r0 killed, new process"
+                ],
+                "trace": [
+                  "r0 reserve q7 hold 20 cost 5, reply lost: admitted on grace, provider bills 5 (reply lost after the store applied it)",
+                  "r0 killed, new process: pending 0 lost; in flight: q7 (grace hold, cost 5)",
+                  "quiesce: store reachable",
+                  "quiesce: every replica flushed",
+                  "quiesce: clock past hold TTL"
+                ],
+                "billed": 5,
+                "spent": 0,
+                "bound": 200,
+                "lost_pending": 0,
+                "lost_redis_hold": 0,
+                "lost_grace_hold": 5,
+                "planted": 0
+              }
+            },
+            {
+              "class": "other",
+              "seeds": 0,
+              "lengths": null
+            }
+          ]
+        },
+        {
+          "invariant": "I2",
+          "seeds": 0,
+          "by_class": [
+            {
+              "class": "killed pending",
+              "seeds": 0,
+              "lengths": null
+            },
+            {
+              "class": "expired hold",
+              "seeds": 0,
+              "lengths": null
+            },
+            {
+              "class": "other",
+              "seeds": 0,
+              "lengths": null
+            }
+          ]
+        },
+        {
+          "invariant": "I3",
+          "seeds": 0,
+          "by_class": [
+            {
+              "class": "killed pending",
+              "seeds": 0,
+              "lengths": null
+            },
+            {
+              "class": "expired hold",
+              "seeds": 0,
+              "lengths": null
+            },
+            {
+              "class": "other",
+              "seeds": 0,
+              "lengths": null
+            }
+          ]
+        }
+      ],
+      "classes": [
+        {
+          "class": "killed pending",
+          "seeds": 11271,
+          "lengths": [
+            {
+              "steps": 3,
+              "seeds": 3226
+            },
+            {
+              "steps": 4,
+              "seeds": 7778
+            },
+            {
+              "steps": 5,
+              "seeds": 262
+            },
+            {
+              "steps": 6,
+              "seeds": 5
+            }
+          ],
+          "example": {
+            "seed": 41,
+            "steps": [
+              "r1 reserve q4 hold 20 cost 5, reply lost",
+              "r1 settle oldest",
+              "r1 killed, new process"
+            ],
+            "trace": [
+              "r1 reserve q4 hold 20 cost 5, reply lost: admitted on grace, provider bills 5 (reply lost after the store applied it)",
+              "r1 settle oldest: q4 5 kept as pending",
+              "r1 killed, new process: pending 5 lost; in flight: none",
+              "quiesce: store reachable",
+              "quiesce: every replica flushed",
+              "quiesce: clock past hold TTL"
+            ],
+            "billed": 5,
+            "spent": 0,
+            "bound": 200,
+            "lost_pending": 5,
+            "lost_redis_hold": 0,
+            "lost_grace_hold": 0,
+            "planted": 0
+          }
+        },
+        {
+          "class": "expired hold",
+          "seeds": 19686,
+          "lengths": [
+            {
+              "steps": 2,
+              "seeds": 19686
+            }
+          ],
+          "example": {
+            "seed": 1,
+            "steps": [
+              "r0 reserve q4 hold 10 cost 2",
+              "r0 killed, new process"
+            ],
+            "trace": [
+              "r0 reserve q4 hold 10 cost 2: admitted on Redis, provider bills 2",
+              "r0 killed, new process: pending 0 lost; in flight: q4 (Redis hold, cost 2)",
+              "quiesce: store reachable",
+              "quiesce: every replica flushed",
+              "quiesce: clock past hold TTL"
+            ],
+            "billed": 2,
+            "spent": 0,
+            "bound": 200,
+            "lost_pending": 0,
+            "lost_redis_hold": 2,
+            "lost_grace_hold": 0,
+            "planted": 0
+          }
+        },
+        {
+          "class": "other",
+          "seeds": 17686,
+          "lengths": [
+            {
+              "steps": 2,
+              "seeds": 8110
+            },
+            {
+              "steps": 3,
+              "seeds": 9389
+            },
+            {
+              "steps": 4,
+              "seeds": 177
+            },
+            {
+              "steps": 5,
+              "seeds": 9
+            },
+            {
+              "steps": 6,
+              "seeds": 1
+            }
+          ],
+          "example": {
+            "seed": 1,
+            "steps": [
+              "r0 reserve q7 hold 20 cost 5, reply lost",
+              "r0 killed, new process"
+            ],
+            "trace": [
+              "r0 reserve q7 hold 20 cost 5, reply lost: admitted on grace, provider bills 5 (reply lost after the store applied it)",
+              "r0 killed, new process: pending 0 lost; in flight: q7 (grace hold, cost 5)",
+              "quiesce: store reachable",
+              "quiesce: every replica flushed",
+              "quiesce: clock past hold TTL"
+            ],
+            "billed": 5,
+            "spent": 0,
+            "bound": 200,
+            "lost_pending": 0,
+            "lost_redis_hold": 0,
+            "lost_grace_hold": 5,
+            "planted": 0
+          }
+        },
+        {
+          "class": "unaccounted",
+          "seeds": 0,
+          "lengths": null
+        }
+      ],
+      "planted_fired": 0,
+      "planted_found": 0,
+      "unaccounted_planted": 0,
+      "over_limit": 39842,
+      "closest": {
+        "seed": 26072,
+        "overshoot": 163,
+        "bound": 200
+      },
+      "over_counted": 11520,
+      "over_counted_lost_reply": 11520
+    },
+    {
+      "name": "planted",
+      "planted": true,
+      "first_seed": 0,
+      "seeds": 100000,
+      "steps": 2048186,
+      "runs": 1681709,
+      "wall_seconds": 1221.78,
+      "exercised": [
+        {
+          "name": "store unreachable",
+          "seeds": 54994
+        },
+        {
+          "name": "replica killed",
+          "seeds": 58497
+        },
+        {
+          "name": "reply lost on reserve",
+          "seeds": 42839
+        },
+        {
+          "name": "reply lost on settle",
+          "seeds": 19051
+        },
+        {
+          "name": "clock step, short",
+          "seeds": 72369
+        },
+        {
+          "name": "clock step past hold TTL",
+          "seeds": 45259
+        },
+        {
+          "name": "clock step past grace refill",
+          "seeds": 35824
+        }
+      ],
+      "violations": [
+        {
+          "invariant": "I1",
+          "seeds": 36071,
+          "by_class": [
+            {
+              "class": "killed pending",
+              "seeds": 0,
+              "lengths": null
+            },
+            {
+              "class": "expired hold",
+              "seeds": 33781,
+              "lengths": [
+                {
+                  "steps": 2,
+                  "seeds": 33781
+                }
+              ],
+              "example": {
+                "seed": 1,
+                "steps": [
+                  "r0 reserve q7 hold 20 cost 5, reply lost",
+                  "r0 killed, new process"
+                ],
+                "trace": [
+                  "r0 reserve q7 hold 20 cost 5, reply lost: admitted on grace, provider bills 5 (reply lost after the store applied it)",
+                  "r0 killed, new process: pending 0 lost; in flight: q7 (grace hold, cost 5)",
+                  "quiesce: store reachable",
+                  "quiesce: every replica flushed",
+                  "quiesce: clock past hold TTL"
+                ],
+                "billed": 5,
+                "spent": 0,
+                "bound": 200,
+                "lost_pending": 0,
+                "lost_redis_hold": 0,
+                "lost_grace_hold": 5,
+                "planted": 0
+              }
+            },
+            {
+              "class": "other",
+              "seeds": 2290,
+              "lengths": [
+                {
+                  "steps": 1,
+                  "seeds": 2290
+                }
+              ],
+              "example": {
+                "seed": 176,
+                "steps": [
+                  "r0 reserve q13 hold 10 cost 7"
+                ],
+                "trace": [
+                  "r0 reserve q13 hold 10 cost 7: admitted on Redis, provider bills 7",
+                  "quiesce: store reachable",
+                  "quiesce: r0 settle q13 7 planted bug: the store charged nothing; settled on Redis",
+                  "quiesce: every replica flushed",
+                  "quiesce: clock past hold TTL"
+                ],
+                "billed": 7,
+                "spent": 0,
+                "bound": 150,
+                "lost_pending": 0,
+                "lost_redis_hold": 0,
+                "lost_grace_hold": 0,
+                "planted": 1
+              }
+            }
+          ]
+        },
+        {
+          "invariant": "I2",
+          "seeds": 0,
+          "by_class": [
+            {
+              "class": "killed pending",
+              "seeds": 0,
+              "lengths": null
+            },
+            {
+              "class": "expired hold",
+              "seeds": 0,
+              "lengths": null
+            },
+            {
+              "class": "other",
+              "seeds": 0,
+              "lengths": null
+            }
+          ]
+        },
+        {
+          "invariant": "I3",
+          "seeds": 0,
+          "by_class": [
+            {
+              "class": "killed pending",
+              "seeds": 0,
+              "lengths": null
+            },
+            {
+              "class": "expired hold",
+              "seeds": 0,
+              "lengths": null
+            },
+            {
+              "class": "other",
+              "seeds": 0,
+              "lengths": null
+            }
+          ]
+        }
+      ],
+      "classes": [
+        {
+          "class": "killed pending",
+          "seeds": 11336,
+          "lengths": [
+            {
+              "steps": 3,
+              "seeds": 3270
+            },
+            {
+              "steps": 4,
+              "seeds": 7804
+            },
+            {
+              "steps": 5,
+              "seeds": 257
+            },
+            {
+              "steps": 6,
+              "seeds": 5
+            }
+          ],
+          "example": {
+            "seed": 41,
+            "steps": [
+              "r1 reserve q4 hold 20 cost 5, reply lost",
+              "r1 settle oldest",
+              "r1 killed, new process"
+            ],
+            "trace": [
+              "r1 reserve q4 hold 20 cost 5, reply lost: admitted on grace, provider bills 5 (reply lost after the store applied it)",
+              "r1 settle oldest: q4 5 kept as pending",
+              "r1 killed, new process: pending 5 lost; in flight: none",
+              "quiesce: store reachable",
+              "quiesce: every replica flushed",
+              "quiesce: clock past hold TTL"
+            ],
+            "billed": 5,
+            "spent": 0,
+            "bound": 200,
+            "lost_pending": 5,
+            "lost_redis_hold": 0,
+            "lost_grace_hold": 0,
+            "planted": 0
+          }
+        },
+        {
+          "class": "expired hold",
+          "seeds": 19746,
+          "lengths": [
+            {
+              "steps": 2,
+              "seeds": 19746
+            }
+          ],
+          "example": {
+            "seed": 1,
+            "steps": [
+              "r0 reserve q4 hold 10 cost 2",
+              "r0 killed, new process"
+            ],
+            "trace": [
+              "r0 reserve q4 hold 10 cost 2: admitted on Redis, provider bills 2",
+              "r0 killed, new process: pending 0 lost; in flight: q4 (Redis hold, cost 2)",
+              "quiesce: store reachable",
+              "quiesce: every replica flushed",
+              "quiesce: clock past hold TTL"
+            ],
+            "billed": 2,
+            "spent": 0,
+            "bound": 200,
+            "lost_pending": 0,
+            "lost_redis_hold": 2,
+            "lost_grace_hold": 0,
+            "planted": 0
+          }
+        },
+        {
+          "class": "other",
+          "seeds": 19025,
+          "lengths": [
+            {
+              "steps": 1,
+              "seeds": 1910
+            },
+            {
+              "steps": 2,
+              "seeds": 7843
+            },
+            {
+              "steps": 3,
+              "seeds": 9091
+            },
+            {
+              "steps": 4,
+              "seeds": 172
+            },
+            {
+              "steps": 5,
+              "seeds": 8
+            },
+            {
+              "steps": 6,
+              "seeds": 1
+            }
+          ],
+          "example": {
+            "seed": 177,
+            "steps": [
+              "r0 reserve q3 hold 20 cost 5"
+            ],
+            "trace": [
+              "r0 reserve q3 hold 20 cost 5: admitted on Redis, provider bills 5",
+              "quiesce: store reachable",
+              "quiesce: r0 settle q3 5 planted bug: the store charged nothing; settled on Redis",
+              "quiesce: every replica flushed",
+              "quiesce: clock past hold TTL"
+            ],
+            "billed": 5,
+            "spent": 0,
+            "bound": 150,
+            "lost_pending": 0,
+            "lost_redis_hold": 0,
+            "lost_grace_hold": 0,
+            "planted": 1
+          }
+        },
+        {
+          "class": "unaccounted",
+          "seeds": 1567,
+          "lengths": [
+            {
+              "steps": 1,
+              "seeds": 1567
+            }
+          ],
+          "example": {
+            "seed": 177,
+            "steps": [
+              "r0 reserve q3 hold 20 cost 5"
+            ],
+            "trace": [
+              "r0 reserve q3 hold 20 cost 5: admitted on Redis, provider bills 5",
+              "quiesce: store reachable",
+              "quiesce: r0 settle q3 5 planted bug: the store charged nothing; settled on Redis",
+              "quiesce: every replica flushed",
+              "quiesce: clock past hold TTL"
+            ],
+            "billed": 5,
+            "spent": 0,
+            "bound": 150,
+            "lost_pending": 0,
+            "lost_redis_hold": 0,
+            "lost_grace_hold": 0,
+            "planted": 1
+          }
+        }
+      ],
+      "planted_fired": 2329,
+      "planted_found": 1567,
+      "unaccounted_planted": 1567,
+      "over_limit": 39882,
+      "closest": {
+        "seed": 26072,
+        "overshoot": 163,
+        "bound": 200
+      },
+      "over_counted": 11281,
+      "over_counted_lost_reply": 11281
+    }
+  ]
+}

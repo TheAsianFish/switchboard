@@ -1385,7 +1385,16 @@ made while building; PLAN.md records it.
 lost-spend seeds in more than one class; the fault-log table is the
 reading that does not depend on which steps the shrinker kept.
 {{end}}
-**The minimal schedules.** Each is the shortest seen for its class
+{{if .LongShrinks}}**Why some schedules stay longer than four steps.** A settle step settles
+its slot's oldest request, so reaching the request whose cost is lost
+can take settling older ones first. And the replica can enter degraded
+mode through a lost reply instead of an outage, which needs a request of
+its own. Greedy shrinking keeps each such step because removing it
+changes which request the kill finds in flight or pending. The way of
+losing money is the same three or four steps in the two I traced (seeds 12561 and 22854); the
+hypothesis's "four steps or fewer" is still answered as written, no.
+
+{{end}}**The minimal schedules.** Each is the shortest seen for its class
 (lowest seed on a tie), with the run's trace; quiescence lines are the
 simulator's, not steps.
 {{range .Main.Examples}}

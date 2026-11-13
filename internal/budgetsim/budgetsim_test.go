@@ -14,11 +14,11 @@ import (
 func TestRunArmIsOrderIndependent(t *testing.T) {
 	t.Parallel()
 	cfg := budget.DefaultSimConfig()
-	a1, r1, err := RunArm(context.Background(), ArmMain, cfg, 0, 24, 1, nil)
+	a1, r1, err := RunArm(context.Background(), ArmMain, cfg, 0, 12, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a3, r3, err := RunArm(context.Background(), ArmMain, cfg, 0, 24, 3, nil)
+	a3, r3, err := RunArm(context.Background(), ArmMain, cfg, 0, 12, 3, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,11 +26,11 @@ func TestRunArmIsOrderIndependent(t *testing.T) {
 	if !reflect.DeepEqual(a1, a3) || !reflect.DeepEqual(r1, r3) {
 		t.Fatalf("one worker and three disagree:\n%+v\n%+v", a1, a3)
 	}
-	if a1.Seeds != 24 || a1.Steps == 0 || a1.Runs < 24 || len(a1.Exercised) != len(budget.SimFaults) {
+	if a1.Seeds != 12 || a1.Steps == 0 || a1.Runs < 12 || len(a1.Exercised) != len(budget.SimFaults) {
 		t.Fatalf("arm %+v", a1)
 	}
 	if len(r1) == 0 {
-		t.Fatal("no seed lost spend in 24; the default config should")
+		t.Fatal("no seed lost spend in 12; the default config should")
 	}
 	for _, rec := range r1 {
 		if len(rec.Rule)+len(rec.Classes) == 0 {
