@@ -731,6 +731,237 @@ What the numbers and the code say:
   hedging-off check is kept as a sanity check, with the margin stated, and
   a stall after the first event goes under known problems.
 
+## Evolution round 2
+
+Round 1 took the Goal's claim, shared state that stays correct when
+replicas and the store die, and tested it against a flapping store, a
+restarted store and a stalled provider. What it left is written in
+RESULTS.md under known problems: three ways a budget's ledger can disagree
+with what the provider billed, each one argued from the code and none
+produced by a run, and an outage cost in latency that the tables show and
+nobody has explained.
+
+### Evidence (re-run on 2026-11-12, 4 vCPU, $0)
+
+| Command | Result |
+|---------|--------|
+| `make check` | green, lint 0 issues, 2 min 27 s on a cold module and build cache (`internal/results` alone is 35 s); no flaky test in this run |
+| `make test-integration` | green against `redis:8`, 58 s |
+| `make eval-router` | `summary.json` and `frontier.svg` byte-identical; only the commit stamps move. The served router is unchanged at -0.8 points against the line and -1.4 against the hull |
+| `make bench-hedge` | TTFT p99 637.4 → 216.6 ms (committed 638.3 → 224.4), 12,000 of 12,000 ok in both arms |
+| `make chaos` | reproduces Q6 (no append-only file, as Q6 is defined): 0.13% errors after the replica kill, p99 430.9 ms with Redis down against 186.8 ms steady, overshoot $0.0176 in the outage and $0.1980 on the $0.20 budget after the restart, replicas degraded 2.166 s after Redis was ready |
+
+Not re-run: `make bench` (26 minutes), `make test-limits` (12 minutes),
+`make chaos-flap`, `make chaos-persist`, `make bench-stall` (no code has
+changed since their committed runs, and each was reproduced at its
+milestone's review), and the evals that need Ollama.
+
+What the numbers and the code say:
+
+- **The budget's failure cases are a list somebody thought of.** Known
+  problems names three: pending spend that dies with its replica, a settle
+  that timed out after Redis applied it, and a hold that expires unsettled.
+  M8's run reached the first, by design; "not observed" is all the tables
+  say about the other two, and `internal/budget`'s tests are hand-picked
+  scenarios (the one randomised test, `TestRedisConcurrentReplicas`,
+  injects no fault). Nothing has searched for a fourth.
+- **An expired hold is the one place the ledger rounds in the spender's
+  favour.** In `redis.go` the Lua `release()` takes an expired hold off
+  `reserved` and never touches `spent`; everywhere else the code prefers an
+  over-count to a miss. A replica killed with Redis up (Q6's own kill)
+  loses the cost of whatever it had in flight. Q6's load cannot show it:
+  in this re-run `reserved` was 0 at the snapshot taken at the kill (10
+  requests per second of 0.02 s replies leave almost nothing in flight),
+  so the size of that loss has never been read.
+- **An outage is slow in bursts, and the bursts have a shape.** In M8's
+  committed run after the fix (`eval/results/m8-flap/after/main.jsonl.gz`),
+  865 of 30,000 main-stream requests are slower than Q6's 363.52 ms line.
+  All of them fall in outage seconds, about 108 per 8 s outage, in three
+  bursts 1.5 s apart: about 19 at the cut, 45 to 53 at +1.5 s, 28 to 37 at
+  +3 s (outage 1: 19, 52, 28), then none for the remaining 5 s.
+  `cache.bypassed()` is a bare time comparison, so once the bypass lapses
+  every lookup goes to the store and waits out its timeout, where
+  `budget.Degrading.tryPrimary()` lets one caller probe. That would
+  explain a burst per lapse; it does not explain why there are three and
+  not eight.
+- **The two seconds degraded after Redis returns (M9) have an explanation
+  and no experiment.** RESULTS.md blames go-redis's dial backoff and the
+  gateway's one-second probe waiting one after the other. One knob
+  (`ratelimit.retry_interval`) feeds the limiter, the budget and the
+  cache, and no run has moved it.
+
+### New milestones
+
+**M11. Is the list of ways a budget loses spend complete?**
+
+- *Question.* Over seeded fault schedules on three replicas' ledgers
+  sharing one store, is there a way for Redis's `spent` to end below what
+  the provider billed that RESULTS.md does not list?
+- *Method.* A simulator in `internal/budget` (a test helper and
+  `switchboard eval budget-sim`): three `budget.Degrading` over the Redis
+  ledger on one `miniredis` (the ledger tests already drive the Lua there
+  with `SetTime`), a fake clock, and a wrapper on the store connection
+  that injects faults. A seeded generator draws schedules of at most 40
+  steps from a fixed vocabulary: reserve, settle, store unreachable, store
+  back, kill a replica process and start a new one, a reply lost after the
+  store applied it (on reserve and on settle), and a clock step (short,
+  past the hold TTL, past the grace refill). The reference is deliberately
+  not a second ledger: two sums (what the provider billed, what the store
+  holds as `spent`) and the fault log. Invariants are checked at
+  quiescence only (store reachable, every live replica flushed, every hold
+  settled or expired):
+  - I1, no lost spend: `spent` ≥ billed.
+  - I2, bounded overshoot: billed ≤ limit + the bound `degrade.go`
+    documents (processes started × grace × (1 + T / refill), one more
+    grace per process with grace holds open at the start of T, plus the
+    admitted under-estimates).
+  - I3, no invented spend: `spent` > billed only on schedules with a
+    lost reply.
+  A failing schedule is shrunk greedily (drop a step, keep it if the
+  invariant still fails) and classified by a rule fixed here: "killed
+  pending" if the minimal schedule kills a process that holds pending
+  spend, "expired hold" if a hold expires unsettled, otherwise "other".
+  `make sim-budget SEEDS=100000` writes
+  `eval/results/m11-budget-sim/`; a 200-seed slice runs in `make check`
+  and must add under 5 s.
+- *Hypothesis.* I1 fails on some schedules, and every failure falls in
+  the two classes above, each shrinking to four steps or fewer. I2 and I3
+  hold on every seed. One schedule classified "other", or one I2 or I3
+  failure, falsifies it, and is the finding.
+- *What would make a null result worthless, and the checks against it.*
+  The run reports how many schedules exercised each fault (each at least
+  10% of seeds); the two known classes must be rediscovered; and with a
+  planted bug (a test-only switch under which one settle in a hundred
+  releases its hold but adds nothing to `spent`) I1 must fail outside
+  both classes. A planted bug that drops the whole settle would leave the
+  hold to expire, which the rule above files under "expired hold", so it
+  could not show the search finding a third class. The claim is limited to what was
+  searched: sequential schedules, these seven faults, `miniredis` and not
+  Redis. Interleavings inside one call (a flush racing a settle) are not
+  reached and RESULTS.md says so.
+
+**M12. Can an unsettled hold become spend without charging anything twice?**
+
+- *Question.* What does a replica killed with requests in flight cost the
+  ledger while Redis is up, and does charging an expired hold close it
+  without double-charging the holds the degraded path already leaves to
+  expire?
+- *Why it is not five lines of Lua.* `Degrading.Settle`, when it settles
+  on grace, deliberately leaves the request's hold on Redis to expire and
+  carries the cost in `pending`, summed per key and window with no
+  reservation id. Charge expired holds naively and every request admitted
+  before an outage and settled during it is charged twice; a settle that
+  arrives after its hold expired adds its cost again as well.
+- *Fix.* An expired hold is charged at its held amount and its id is kept
+  as a tombstone for as long as the window's keys live (not one more
+  hold TTL: a settle parked in `pending` through an outage longer than
+  two hold TTLs would find no tombstone and be charged twice); a settle
+  that finds a tombstone corrects `spent` by actual minus held instead of
+  adding. Pending spend
+  that belongs to a hold on Redis keeps its reservation id, so the flush
+  settles that hold instead of adding beside it. The same change in
+  `memory.go`, under the ledger contract tests.
+- *Method.* `make chaos-orphan RUN=before|after` (about 3 minutes): the
+  Q6 fleet with a `reservation_ttl` of 30 s (provider timeout 20 s, as
+  config requires), the budgeted key sending streamed requests whose
+  replies take about 2 s so several are in flight on each replica,
+  replica 2 killed at 40 s with Redis up, load stopped at 60 s, and
+  snapshots of the provider's ledger against `spent` as in M8 until 100 s,
+  past the TTL. The requests in flight on the killed replica are counted
+  from the provider's ledger, not predicted.
+- *Hypothesis.* Before: after the TTL the gap (provider ledger minus
+  `spent`) is positive and equals what the provider billed for the
+  requests in flight on the killed replica, within one request. After:
+  the gap is at most 0, and the over-count is at most the sum of held
+  minus billed over those requests alone, reported as a multiple of what
+  was billed (the hold is the input estimate plus `max_tokens`, so the
+  client sets it; the run uses the chaos key's existing `max_tokens`, not
+  one chosen to flatter the ratio). Two checks that the fix broke nothing:
+  the flap schedule re-run into a scratch directory shows no
+  reconciliation gap more negative than M8's committed one, and M11's simulator loses the "expired hold"
+  class, keeps "killed pending", and holds a new invariant (`spent` minus
+  billed at most the held-minus-actual of expired holds, on schedules
+  without a lost reply). The before-gap is arithmetic of in-flight
+  requests times price and is stated as such; the result is the after
+  column and the two checks.
+- *Not in scope.* The settle that timed out after it was applied stays
+  under known problems unless M11 shows it is reachable more cheaply
+  than thought.
+
+**M13. What makes an outage slow, and what keeps the fleet degraded after it?**
+
+- *Question.* Are the 865 slow requests of M8's run the cache's ungated
+  probe, why are there three bursts per outage and not eight, and is the
+  two seconds degraded after Redis returns the two retry timers M9 named?
+- *Method.* First attribute, then fix. Each store call that waits longer
+  than 50 ms is logged with its component (limiter, budget, cache lookup,
+  cache fill) and joined to the slow requests of a
+  `make chaos-probe RUN=before` run (the flap schedule, written to
+  `eval/results/m13-outage/`), so each burst has a named
+  cause before any code changes. Then the cache gets the single probe
+  the budget has (one lookup per retry interval goes to the store, the
+  rest bypass), with a unit test on a fake clock that only one lookup
+  probes, and `make chaos-probe RUN=after` runs the same schedule.
+  Separately, `RETRY_INTERVAL=1s|250ms REDIS_PERSIST=everysec make chaos`
+  (a new switch on the chaos script; it sets `ratelimit.retry_interval`
+  on every replica),
+  three runs per arm, reads degraded seconds after Redis is ready from
+  the replicas' logs as M9 did.
+- *Hypothesis.* The bursts at +1.5 s and +3 s are cache lookups and the
+  burst at the cut is calls already in flight, which no probe gate can
+  help. With the single probe, slow requests per outage fall from about
+  108 to at most 25 and from 865 to at most 200 in the run; the phase
+  p99 may not move (19 slow requests in 1,600 is still over 1%), so the
+  count is the measure and both are reported. There are three bursts
+  because after its third failed dial go-redis answers from its last
+  dial error without waiting; if the attribution shows otherwise the
+  explanation in RESULTS.md is replaced by what the logs show. With a
+  250 ms retry interval, degraded time after ready falls from about
+  2.0 s to about 1.25 s (the redial second stays, the probe's shrinks);
+  no change across three runs per arm withdraws M9's stacked-timers
+  explanation. The hit rate of repeats is reported with no target.
+- *Decision rule.* `retry_interval`'s default moves to 250 ms only if
+  the three-run ranges do not overlap and the outage phases show no more
+  store calls timing out than before.
+
+### Considered and not chosen
+
+- **A client that stops reading.** Real (the server sets no write
+  deadline, and a handler blocked in a write settles nothing), but the
+  number it would produce is the deadline I configure, the loss ends when
+  the client leaves, and the budget hole it opens is the expired hold
+  M12 closes. Connection hardening, not shared state.
+- **An idle-gap timeout for a stall after the first token.** "Held for
+  the timeout" is true by construction, the objection M10 already
+  carried, and the knob would cut streams that pause legitimately. Stays
+  under known problems.
+- **A populated semantic cache on `gsm8k-perturb`.** Only similarities
+  are committed, not embeddings, so it needs a local model, and it leaves
+  the measured weakness (5.6% of adversarial paraphrases served) where it
+  is.
+- **More passes for Q1 and M9's `everysec` cost.** Hours of machine time
+  to most likely write "unresolved at 0.1 ms" again.
+- **The router against the hull.** Any redesign on the same 600 questions
+  is fitted after the fact; fresh labels cost about 3 h for one chance in
+  three of resolving +1.4 points. Waits for the Claude candidates.
+- **Coalescing identical concurrent misses, GCRA rows, the Q4
+  correlated-slowdown arm.** Round 1's reasons stand; nothing measured
+  since changes them.
+- **Clock skew, breaker state per replica, tenant fairness.** Checked in
+  the code: limits and hold expiry read Redis `TIME`; per-replica
+  breakers are a documented choice; the gateway has no queue, so a
+  fairness result would measure the fake provider.
+
+### Changed at review
+
+M11's planted bug first dropped the whole settle, which the
+classification rule files as "expired hold", so it could not have been
+found outside the known classes; it now releases the hold and charges
+nothing. M12's tombstone first lived one hold TTL, which a grace settle
+flushed after a longer outage outlives; it now lives as long as the
+window's keys, with a test for that case. M13 names the
+`RETRY_INTERVAL` switch it adds to the chaos script.
+
 ## Milestones
 
 Changes made while building:
@@ -1225,3 +1456,6 @@ Changes made while building:
 - [x] M8: Budget grace under a flapping store — `make chaos-flap` on the Q6 fleet: Redis cut off and reconnected eight times with its state kept (`docker network disconnect`), one replica killed while degraded, phases fixed in PLAN.md before the full run, the flaky `TestAbandonedHedgedRequestIsChargedForEveryAttempt` fixed at its cause first (five consecutive `make check` runs green), and a per-phase reconciliation of the fake provider's ledger against Redis's `spent`; run once at the commit before the fix; then grace as a time-refilled allowance per replica and key (`grace_refill`, fake-clock unit tests, the doc comments in `budget/degrade.go` corrected) and the same run again. Done when RESULTS.md holds both runs side by side with each hypothesis answered (overshoot about $0.24 and linear in outages before; at most replica processes × grace × (1 + T / refill) after, whatever the outage count, a restarted replica counted as a new process; the killed replica's lost pending spend measured against its bound), both raw results are committed, the double-charge and expired-hold cases are listed under known problems with what was observed, and `make chaos` still reproduces Q6.
 - [x] M9: Budgets that survive a Redis restart, and what the fsync costs — `REDIS_PERSIST=none|everysec|always` arms of `make chaos` with M8's reconciliation column and the replicas' logs kept; `make bench-persist` (Q1's limits-and-budget configuration at 200 requests per second against each mode, bootstrap intervals as in Q1); an integration test that a `LOADING` reply degrades like an unreachable store and recovers. Done when RESULTS.md holds overshoot, error rate, degraded seconds after the restart and hit rate of repeats per mode beside the added p50 and p99 per mode, each hypothesis is answered (`everysec` at most the live replicas' grace plus one second of spend, about $0.025, and under 0.1 ms, a difference inside Q1's run-to-run drift reported as unresolved rather than as held; `always` at most grace and under 0.2 ms p99, or by how much not), the cause of Q6's slow stretch after the Redis kill is read from the kept logs, the compose default is the mode the pre-stated rule picks, and the README's roadmap line on budgets is replaced by the finding.
 - [x] M10: First-token timeout and a stalled provider — a stall switch on `switchboard fake-provider`; `resilience.first_token_timeout` per provider (off by default), per attempt, cancelled by the first event, counted by the breaker and retried like a timeout; `make bench-stall` with steady, stalled and recovered phases, run before and after. Done when RESULTS.md holds both runs with per-phase latency, error kinds, time until the breaker is open on the replica and until it closes, each hypothesis answered (0 opens and no completed request today; open within 3 s plus five failures, refusals p99 under 5 ms with `Retry-After`, closed within a cooldown plus 1 s, and 0 timeouts fired on Q4's hedging-off arm, reported with its largest TTFT beside the timeout), a stall after the first event listed under known problems as not covered, a trace of a timed-out attempt is committed beside M4's, and the README documents the setting and when not to use it.
+- [ ] M11: Is the list of ways a budget loses spend complete — a seeded fault-schedule simulator for the budget ledger (`switchboard eval budget-sim`, `make sim-budget SEEDS=100000`): three `budget.Degrading` over the Redis ledger on one `miniredis` with a fake clock and a fault-injecting store connection (reserve, settle, store unreachable and back, replica process killed and restarted, a reply lost after the store applied it, clock steps past the hold TTL and the grace refill), schedules of at most 40 steps, a reference of two sums (provider billed, store `spent`) and the fault log, invariants checked at quiescence (I1 `spent` ≥ billed; I2 billed within the bound `degrade.go` documents; I3 `spent` > billed only after a lost reply), greedy shrinking, and classification by the rule fixed in PLAN.md; a 200-seed slice in `make check` adding under 5 s. Done when RESULTS.md holds, from the committed `eval/results/m11-budget-sim/`, the schedules run, the share of seeds that exercised each fault (each at least 10%), violations per invariant and class with the minimal schedule of each class printed, and the hypothesis answered (every I1 failure is "killed pending" or "expired hold", each shrinking to four steps or fewer; I2 and I3 hold on every seed; any "other" shown with its schedule and added to known problems); the planted bug (behind a test-only switch, one settle in a hundred releases its hold but adds nothing to `spent`) is found outside both classes; the limits of the claim (sequential schedules, seven faults, `miniredis`) are stated beside the result; and known problems cites the minimal schedules instead of the argument from the code.
+- [ ] M12: An unsettled hold becomes spend, without charging anything twice — an expired hold charged at its held amount with a tombstone kept as long as the window's keys so a late settle corrects `spent` by actual minus held; pending spend that belongs to a hold on Redis keeps its reservation id so the flush settles that hold; the same in `memory.go` under the ledger contract tests, an integration test for expiry followed by a late settle, and a unit test where a hold settled on grace is flushed after an outage longer than two hold TTLs and charged once; `make chaos-orphan RUN=before|after` (the Q6 fleet, `reservation_ttl` 30 s, streamed budget requests of about 2 s, replica 2 killed at 40 s with Redis up, load stopped at 60 s, the provider's ledger reconciled against `spent` until 100 s), the before arm built from the commit before the fix. Done when RESULTS.md holds both arms with the requests in flight on the killed replica counted from the provider's ledger and each hypothesis answered (before: the gap after the TTL is positive and equals what the provider billed for those requests within one request; after: the gap is at most 0 and the over-count at most the held-minus-billed of those requests, reported as a multiple of what was billed at the chaos key's existing `max_tokens`), the flap schedule re-run into a scratch directory shows no reconciliation gap more negative than M8's committed one, `make sim-budget` shows the "expired hold" class gone, "killed pending" still found and the new over-count invariant holding on every seed, both raw results are committed, and the known-problems and roadmap entries on expired holds are replaced by the finding.
+- [ ] M13: What makes an outage slow, and what keeps the fleet degraded after it — every store call that waits over 50 ms logged with its component (limiter, budget, cache lookup, cache fill); `make chaos-probe RUN=before|after` (M8's flap schedule into `eval/results/m13-outage/`), the before arm attributing every request over Q6's 363.52 ms line to a component and a burst; then one cache lookup per retry interval probing the store while the rest bypass, with a fake-clock unit test that only one lookup probes; `RETRY_INTERVAL=1s|250ms REDIS_PERSIST=everysec make chaos` (a new switch on the chaos script), three runs per arm. Done when RESULTS.md holds the slow requests per outage and per burst by component before and after, each hypothesis answered (the bursts at +1.5 s and +3 s are cache lookups and the burst at the cut is calls in flight; slow requests fall from about 108 to at most 25 per outage and from 865 to at most 200 in the run, with the phase p99 reported whether or not it moves; why an 8 s outage has three bursts and not eight, from the logs; degraded time after Redis is ready about 2.0 s → about 1.25 s at 250 ms, or M9's stacked-timers explanation withdrawn), the hit rate of repeats per arm, `retry_interval`'s default changed only under the rule in PLAN.md, raw results committed, and M9's known-problems entry rewritten from the measurement.
