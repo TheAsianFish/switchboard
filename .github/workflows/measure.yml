@@ -18,8 +18,8 @@ permissions:
 jobs:
   measure:
     runs-on: ubuntu-latest
-    # sim-budget's 100,000 seeds per arm take about 70 minutes on four
-    # cores; everything else fits in 30.
+    # sim-budget's 100,000 seeds per arm take about 40 minutes on four
+    # cores (both arms); everything else fits in 30.
     timeout-minutes: ${{ inputs.target == 'sim-budget' && 100 || 30 }}
     steps:
       - uses: actions/checkout@v7

@@ -110,7 +110,7 @@ chaos-flap: ## M8: Redis cut off and reconnected eight times, a replica killed w
 	@test -n "$(RUN)" || { echo "set RUN, e.g. make chaos-flap RUN=after"; exit 1; }
 	SCHEDULE=flap OUT=eval/results/m8-flap/$(RUN) chaos/run.sh
 
-sim-budget: ## M11: seeded fault schedules against the budget ledger, as written and with a planted bug (SEEDS=100000, about 30 minutes on 4 cores)
+sim-budget: ## M11: seeded fault schedules against the budget ledger, as written and with a planted bug (SEEDS=100000, about 40 minutes on 4 cores)
 	go run ./cmd/switchboard eval budget-sim -seeds $(or $(SEEDS),100000)
 
 results: ## render RESULTS.md and the README results table from eval/results/
