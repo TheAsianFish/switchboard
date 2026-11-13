@@ -1407,6 +1407,17 @@ first-token timeout was 300 ms and the request's TTFT 323.5 ms. Commit
 - Sanity check: commit `9efa1df`, 2026-11-12T09:59:47Z, `ARMS='off-ftt' OUT=eval/results/m10-stall/q4-off-ftt RATE=200 DURATION=60s WARMUP=5s SEED=1 eval/hedge/run.sh`; AMD EPYC 7763 64-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
 - Cost: $0 (fake provider).
 
+## M11: is the list of ways a budget loses spend complete?
+
+Over seeded fault schedules on three replicas' ledgers sharing one store,
+can Redis's `spent` end below what the provider billed in a way this
+file's known problems do not list? Command: `make sim-budget SEEDS=100000`
+(`switchboard eval budget-sim`); raw files in
+`eval/results/m11-budget-sim/` (`summary.json`, and one gzipped line per
+seed that lost spend or broke an invariant, per arm).
+
+Not measured yet. Run `make sim-budget SEEDS=100000`, then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -1480,6 +1491,7 @@ observed.
 - Q2 with GCRA: `ALGORITHMS=gcra make test-limits` once the GCRA limiter
   is implemented (`internal/ratelimit/gcra.go`; its contract tests skip
   until then).
+- M11 budget fault schedules: `make sim-budget SEEDS=100000`, then `make results`.
 - Q4 against Claude:
   `ANTHROPIC_API_KEY=... RATE=1 DURATION=180s WARMUP=30s MAX_TOKENS=16 eval/hedge/claude.sh`,
   then `make results`. Estimated $0.003706 at `claude-haiku-5-5` list prices:
