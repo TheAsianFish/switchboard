@@ -123,7 +123,8 @@ chaos-probe: ## M13: M8's flap schedule with every store call over 50 ms logged,
 chaos-retry: ## M13: the Q6 schedule with REDIS_PERSIST=everysec at RETRY_INTERVAL=1s and 250ms, three runs each, interleaved, into eval/results/m13-outage/retry-<interval>/run-<n>/ (about 25 minutes; RUNS=, INTERVALS=)
 	for n in $(or $(RUNS),1 2 3); do for iv in $(or $(INTERVALS),1s 250ms); do \
 		RETRY_INTERVAL=$$iv REDIS_PERSIST=everysec OUT=eval/results/m13-outage/retry-$$iv/run-$$n \
-		CHAOS_COMMAND="RETRY_INTERVAL=$$iv REDIS_PERSIST=everysec make chaos" chaos/run.sh || exit 1; done; done
+		CHAOS_COMMAND="RETRY_INTERVAL=$$iv REDIS_PERSIST=everysec make chaos" chaos/run.sh || exit 1; \
+		go run ./cmd/switchboard chaos outage --dir eval/results/m13-outage/retry-$$iv/run-$$n || exit 1; done; done
 
 sim-budget: ## M11, re-run in M12: seeded fault schedules against the budget ledger, as written and with a planted bug, into eval/results/m12-budget-sim/ (SEEDS=100000, about 30 minutes on 4 cores)
 	go run ./cmd/switchboard eval budget-sim -seeds $(or $(SEEDS),100000)

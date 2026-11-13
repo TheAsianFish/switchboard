@@ -60,6 +60,12 @@ type StoreCall struct {
 	RequestID string `json:"request_id,omitempty"`
 }
 
+// poolLine is one go-redis "failed to dial" line.
+type poolLine struct {
+	replica string
+	at      float64
+}
+
 // CacheFailure is one cache store failure from a replica's log: the line
 // the cache writes each time a lookup or fill fails and turns it off for
 // the retry interval. Fast failures count here, where the slow-call lines
@@ -77,7 +83,7 @@ type CacheFailure struct {
 // OutageSummary is `switchboard chaos outage`'s output.
 type OutageSummary struct {
 	Meta     Meta           `json:"meta"`
-	Hardware any            `json:"hardware"`
+	Hardware bench.Hardware `json:"hardware"`
 	LineMS   float64        `json:"line_ms"`
 	GapS     float64        `json:"burst_gap_seconds"`
 	Run      RunSlow        `json:"run"`
@@ -132,6 +138,30 @@ type RedisOutage struct {
 	CacheRounds []CacheRound `json:"cache_rounds"`
 	// PoolLines counts go-redis's "failed to dial" lines in the stretch.
 	PoolLines int `json:"pool_lines"`
+	// TimedOut counts slow store calls (every component) that failed on a
+	// timeout from the event until Redis was back.
+	TimedOut int `json:"timed_out"`
+	// Replicas are, per replica that logged a store failure in the
+	// stretch, when its cache first failed without waiting and how many
+	// failed dials go-redis had logged on it by then.
+	Replicas []ReplicaDials `json:"replicas"`
+}
+
+// ReplicaDials is one replica's way into fast failures in an outage.
+// go-redis stops dialling once PoolSize dials in a row have failed and
+// answers every call with the last dial error at once; until then a call
+// that needs a connection waits on a dial (and its retries).
+type ReplicaDials struct {
+	Replica string `json:"replica"`
+	// FirstFastSeconds is the first cache failure that waited under 1 ms,
+	// from the event; nil if every cache failure in the stretch waited.
+	FirstFastSeconds *float64 `json:"first_fast_seconds,omitempty"`
+	// DialsBefore counts the replica's "failed to dial" lines from the
+	// event to FirstFastSeconds (to the stretch's end without one).
+	DialsBefore int `json:"dials_before"`
+	// SlowCacheFailures counts the replica's cache failures that waited
+	// 50 ms or more.
+	SlowCacheFailures int `json:"slow_cache_failures"`
 }
 
 // Burst is a run of slow requests no more than BurstGapSeconds apart by
@@ -323,13 +353,66 @@ func AnalyseOutage(in Input) (*OutageSummary, error) {
 		flush()
 		o.CacheRounds = cacheRounds(fails, e.at, o.ToSeconds)
 		for _, p := range pool {
-			if p >= e.at && p < o.ToSeconds {
+			if p.at >= e.at && p.at < o.ToSeconds {
 				o.PoolLines++
 			}
 		}
+		back := o.ToSeconds
+		if o.BackSeconds != nil {
+			back = e.at + *o.BackSeconds
+		}
+		for _, c := range calls {
+			if c.AtSeconds >= e.at && c.AtSeconds < back && (c.Class == ErrClassTimeout || c.Class == ErrClassDialTimeout) {
+				o.TimedOut++
+			}
+		}
+		o.Replicas = replicaDials(fails, pool, e.at, o.ToSeconds)
 		out.Outages = append(out.Outages, o)
 	}
 	return out, nil
+}
+
+// replicaDials builds each replica's ReplicaDials for [from, to).
+func replicaDials(fails []CacheFailure, pool []poolLine, from, to float64) []ReplicaDials {
+	byReplica := map[string]*ReplicaDials{}
+	var order []string
+	for _, f := range fails {
+		if f.AtSeconds < from || f.AtSeconds >= to {
+			continue
+		}
+		r := byReplica[f.Replica]
+		if r == nil {
+			r = &ReplicaDials{Replica: f.Replica}
+			byReplica[f.Replica] = r
+			order = append(order, f.Replica)
+		}
+		if f.WaitMS == nil {
+			continue
+		}
+		if *f.WaitMS >= 50 {
+			r.SlowCacheFailures++
+		}
+		if *f.WaitMS < 1 && r.FirstFastSeconds == nil {
+			v := round3(f.AtSeconds - from)
+			r.FirstFastSeconds = &v
+		}
+	}
+	slices.Sort(order)
+	out := make([]ReplicaDials, 0, len(order))
+	for _, name := range order {
+		r := byReplica[name]
+		until := to
+		if r.FirstFastSeconds != nil {
+			until = from + *r.FirstFastSeconds
+		}
+		for _, p := range pool {
+			if p.replica == name && p.at >= from && p.at < until {
+				r.DialsBefore++
+			}
+		}
+		out = append(out, *r)
+	}
+	return out
 }
 
 // componentOf names the component of a slow request's longest store call.
@@ -398,11 +481,11 @@ type storeLine struct {
 
 // parseStoreLines reads every replica's slow store calls, cache failures
 // and go-redis pool lines (their times), each sorted by time.
-func parseStoreLines(logs map[string][]LogLine, start interface{ UnixNano() int64 }) ([]StoreCall, []CacheFailure, []float64) {
+func parseStoreLines(logs map[string][]LogLine, start interface{ UnixNano() int64 }) ([]StoreCall, []CacheFailure, []poolLine) {
 	t0 := float64(start.UnixNano()) / 1e9
 	var calls []StoreCall
 	var fails []CacheFailure
-	var pool []float64
+	var pool []poolLine
 	for replica, lines := range logs {
 		if replica == RedisTarget || !strings.HasPrefix(replica, "switchboard") {
 			continue
@@ -410,7 +493,7 @@ func parseStoreLines(logs map[string][]LogLine, start interface{ UnixNano() int6
 		for _, l := range lines {
 			at := l.Unix - t0
 			if strings.HasPrefix(l.Text, goRedisPrefix) {
-				pool = append(pool, at)
+				pool = append(pool, poolLine{replica: replica, at: at})
 				continue
 			}
 			if !strings.HasPrefix(l.Text, "{") {
@@ -441,7 +524,7 @@ func parseStoreLines(logs map[string][]LogLine, start interface{ UnixNano() int6
 	}
 	slices.SortStableFunc(calls, func(a, b StoreCall) int { return cmpFloat(a.AtSeconds, b.AtSeconds) })
 	slices.SortStableFunc(fails, func(a, b CacheFailure) int { return cmpFloat(a.AtSeconds, b.AtSeconds) })
-	slices.Sort(pool)
+	slices.SortStableFunc(pool, func(a, b poolLine) int { return cmpFloat(a.at, b.at) })
 	return calls, fails, pool
 }
 

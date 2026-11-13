@@ -116,6 +116,15 @@ func TestAnalyseOutage(t *testing.T) {
 	if x.PoolLines != 1 {
 		t.Errorf("pool lines = %d", x.PoolLines)
 	}
+	// Timed out before Redis came back at 30 s: the five timeouts and dial
+	// timeouts; the slow fill at 35.2 s succeeded.
+	if x.TimedOut != 5 {
+		t.Errorf("timed out = %d", x.TimedOut)
+	}
+	if len(x.Replicas) != 1 || x.Replicas[0].Replica != "switchboard-1" || x.Replicas[0].FirstFastSeconds == nil ||
+		*x.Replicas[0].FirstFastSeconds != 4 || x.Replicas[0].DialsBefore != 1 || x.Replicas[0].SlowCacheFailures != 3 {
+		t.Errorf("replicas = %+v", x.Replicas)
+	}
 	if len(o.Restarts) != 1 || o.Restarts[0].ReadySeconds == nil || *o.Restarts[0].ReadySeconds != 0.4 {
 		t.Errorf("restarts = %+v", o.Restarts)
 	}
