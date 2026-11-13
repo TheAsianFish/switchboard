@@ -4,7 +4,7 @@ BIN := $(CURDIR)/bin
 GOLANGCI := $(BIN)/golangci-lint
 export GOTOOLCHAIN ?= auto
 
-.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge bench-stall chaos chaos-flap chaos-persist bench-persist eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results ui ui-check docker dist check-install clean
+.PHONY: help tools check fmt vet lint test build test-integration dev fleet bench test-limits bench-hedge bench-stall chaos chaos-flap chaos-persist bench-persist sim-budget eval-cache eval-cache-data eval-router eval-router-data eval-router-embed eval-router-label sdk-smoke record-fixtures results ui ui-check docker dist check-install clean
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -109,6 +109,9 @@ bench-persist: ## M9: Q1's limits-and-budget config at 200 req/s against Redis w
 chaos-flap: ## M8: Redis cut off and reconnected eight times, a replica killed while degraded (about 4 minutes; RUN=before|after)
 	@test -n "$(RUN)" || { echo "set RUN, e.g. make chaos-flap RUN=after"; exit 1; }
 	SCHEDULE=flap OUT=eval/results/m8-flap/$(RUN) chaos/run.sh
+
+sim-budget: ## M11: seeded fault schedules against the budget ledger, as written and with a planted bug (SEEDS=100000, about 30 minutes on 4 cores)
+	go run ./cmd/switchboard eval budget-sim -seeds $(or $(SEEDS),100000)
 
 results: ## render RESULTS.md and the README results table from eval/results/
 	go run ./cmd/switchboard eval results

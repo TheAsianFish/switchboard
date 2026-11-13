@@ -12,6 +12,7 @@
 //	switchboard eval router      Q5: build, label and cross-validate the router
 //	switchboard eval hedge-ledger Q4: summarise the fake provider's ledger (stdin)
 //	switchboard eval stall        M10: summarise a `make bench-stall` run
+//	switchboard eval budget-sim   M11: seeded fault schedules against the budget ledger
 //	switchboard chaos report      Q6: per-phase report of a chaos run
 //	switchboard version           print the build version
 package main
@@ -33,6 +34,7 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/admin"
 	"github.com/TheAsianFish/switchboard/internal/auth"
 	"github.com/TheAsianFish/switchboard/internal/bench"
+	"github.com/TheAsianFish/switchboard/internal/budgetsim"
 	"github.com/TheAsianFish/switchboard/internal/cacheeval"
 	"github.com/TheAsianFish/switchboard/internal/chaos"
 	"github.com/TheAsianFish/switchboard/internal/config"
@@ -64,6 +66,7 @@ commands:
   eval router       Q5: data | label | embed | run (the router eval)
   eval hedge-ledger Q4: summarise the fake provider's ledger read on stdin
   eval stall        M10: summarise a make bench-stall run as JSON
+  eval budget-sim   M11: seeded fault schedules against the budget ledger
   chaos report      Q6: per-phase report of a chaos run (chaos/run.sh)
   version           print the build version
 `
@@ -99,6 +102,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && args[1] == "stall" {
 			return stalleval.Main(args[2:], stdout, stderr)
 		}
+		if len(args) > 1 && args[1] == "budget-sim" {
+			return budgetsim.Main(ctx, args[2:], stdout, stderr)
+		}
 		if len(args) > 1 && (args[1] == "limits" || args[1] == "budget") {
 			return limitseval.Main(ctx, args[1:], stdout, stderr)
 		}
@@ -108,7 +114,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(args) > 1 && (args[1] == "cache-data" || args[1] == "cache" || args[1] == "cache-index") {
 			return cacheeval.Main(ctx, args[1:], stdout, stderr)
 		}
-		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache|cache-index|router|hedge-ledger|stall [flags]")
+		_, _ = fmt.Fprintln(stderr, "usage: switchboard eval results|limits|budget|cache-data|cache|cache-index|router|hedge-ledger|stall|budget-sim [flags]")
 		return 2
 	case "version":
 		_, _ = fmt.Fprintln(stdout, version())
