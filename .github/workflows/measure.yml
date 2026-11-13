@@ -9,7 +9,7 @@ on:
       target:
         description: make target to run
         type: choice
-        options: [test-limits, bench, eval-cache, chaos, chaos-flap, bench-stall]
+        options: [test-limits, bench, eval-cache, chaos, chaos-flap, bench-stall, sim-budget]
         default: test-limits
 
 permissions:
@@ -18,7 +18,9 @@ permissions:
 jobs:
   measure:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # sim-budget's 100,000 seeds per arm take about 70 minutes on four
+    # cores; everything else fits in 30.
+    timeout-minutes: ${{ inputs.target == 'sim-budget' && 100 || 30 }}
     steps:
       - uses: actions/checkout@v7
         with:
