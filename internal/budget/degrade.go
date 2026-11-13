@@ -394,6 +394,8 @@ func (d *Degrading) Reserve(ctx context.Context, key string, b Budget, id string
 		if !d.failed(ctx, err) {
 			if err == nil || errors.Is(err, ErrExhausted) {
 				d.succeeded(ctx, seen)
+			} else if ctx.Err() != nil {
+				d.releaseAbandoned(ctx, key, b, id)
 			}
 			return r, err
 		}
@@ -411,6 +413,18 @@ func (d *Degrading) Reserve(ctx context.Context, key string, b Budget, id string
 	g.tokens -= amount
 	d.tidy(key, g)
 	return Reservation{ID: id, Window: window, Amount: amount, grace: true}, nil
+}
+
+// releaseAbandoned settles id at zero on the primary after its caller
+// gave up during the reserve. The primary may have applied the reserve
+// before the cancellation arrived; the request is refused and never sent,
+// and the hold, left to expire, would be charged in full. On an id the
+// primary never held, the settle charges nothing. It is best effort: if
+// it fails too, the hold expires and is charged, an over-count.
+func (d *Degrading) releaseAbandoned(ctx context.Context, key string, b Budget, id string) {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.timeout)
+	defer cancel()
+	_ = d.primary.Settle(cctx, key, b, Reservation{ID: id, Window: b.Window(d.now())}, 0)
 }
 
 // Settle implements Ledger. A grace hold adjusts key's grace allowance by

@@ -585,6 +585,36 @@ func TestDegradingSettleIgnoresCallerCancellation(t *testing.T) {
 	wantPosition(t, mustBalance(t, d, "k", monthly), 40, 0)
 }
 
+// appliedThenCancelled applies a reserve on its primary and then reports
+// the caller's cancellation, as a client that disconnects while the reply
+// is on its way would see it.
+type appliedThenCancelled struct{ *flaky }
+
+func (a appliedThenCancelled) Reserve(ctx context.Context, key string, b Budget, id string, amount cost.Nanos) (Reservation, error) {
+	if _, err := a.inner.Reserve(context.WithoutCancel(ctx), key, b, id, amount); err != nil {
+		return Reservation{}, err
+	}
+	return Reservation{}, context.Canceled
+}
+
+// A reserve the primary applied after its caller gave up must not leave a
+// hold that expires and is charged for a request that was never sent.
+func TestDegradingCancelledReserveReleasesItsHold(t *testing.T) {
+	t.Parallel()
+	c := &clock{t: t0}
+	f := newFlaky(c)
+	d := NewDegrading(appliedThenCancelled{f}, DegradeOptions{Grace: grace, Timeout: 50 * time.Millisecond, Now: c.Now})
+	if _, err := d.Reserve(cancelled(), "k", monthly, "gone", 300); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Reserve: err = %v, want context.Canceled", err)
+	}
+	wantPosition(t, mustBalance(t, f.inner, "k", monthly), 0, 0)
+	c.Set(t0.Add(2 * time.Minute))
+	wantPosition(t, mustBalance(t, f.inner, "k", monthly), 0, 0)
+	if d.Degraded() {
+		t.Fatal("a cancelled caller put the ledger in degraded mode")
+	}
+}
+
 func TestDegradingTimeout(t *testing.T) {
 	t.Parallel()
 	d, f, _, s := newTestDegrading(t)
