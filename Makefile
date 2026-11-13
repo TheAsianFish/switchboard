@@ -114,7 +114,7 @@ chaos-orphan: ## M12: a replica killed with budgeted streams in flight, spent re
 	@test -n "$(RUN)" || { echo "set RUN, e.g. make chaos-orphan RUN=after"; exit 1; }
 	SCHEDULE=orphan RUN=$(RUN) chaos/run.sh
 
-sim-budget: ## M11: seeded fault schedules against the budget ledger, as written and with a planted bug (SEEDS=100000, about 40 minutes on 4 cores)
+sim-budget: ## M11, re-run in M12: seeded fault schedules against the budget ledger, as written and with a planted bug, into eval/results/m12-budget-sim/ (SEEDS=100000, about 30 minutes on 4 cores)
 	go run ./cmd/switchboard eval budget-sim -seeds $(or $(SEEDS),100000)
 
 results: ## render RESULTS.md and the README results table from eval/results/
