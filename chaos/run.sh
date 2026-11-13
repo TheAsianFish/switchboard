@@ -29,6 +29,31 @@
 # while it is off the network) into snapshots.json, so the report can set
 # Redis's spent against the fake provider's ledger phase by phase.
 #
+# SCHEDULE=orphan is M12's run (`make chaos-orphan RUN=before|after`,
+# PLAN.md M12): the same fleet with chaos/orphan.compose.yaml on top
+# (chaos/orphan.yaml: hold TTL 30 s, provider timeout 20 s, a $5 budget;
+# the fake provider streams the budget model at 68 ms a token, about 2 s
+# a reply). Only the budgeted key sends, streamed, 10 requests per second
+# with max_tokens 64, for 60 s, so about seven of its requests are in
+# flight on each replica at any time:
+#
+#   40 s  kill replica 2 (SIGKILL, Redis up; not started again)
+#   60 s  load stops                   100 s  last snapshot, ledger read
+#
+# Every 5 s from 5 s to 100 s, and just before the kill, it reads the
+# budgeted key's balance twice: a raw HMGET (what Redis holds) and then
+# replica 1's GET /api/overview, which reads it through the ledger's
+# balance script, so holds that have expired are purged (and, after the
+# fix, charged) before spent is read; once the load stops nothing else
+# touches the key. RUN=after runs the working tree; RUN=before builds the
+# replicas' image from BEFORE_REF (default c22dd75, the commit before the
+# fix) in a git worktree and tags it switchboard:m12-before. The fake
+# provider is the working tree's build in both arms; its ledger records
+# each request's caller IP, which meta.json maps to a replica, and the
+# gateway's hold for it. `switchboard chaos orphan` writes summary.json.
+# The results go to eval/results/m12-orphan/<RUN>/; SCALE does not apply
+# (the hold TTL is fixed).
+#
 # REDIS_PERSIST=none|everysec|always is M9's arm of the Q6 schedule
 # (`make chaos-persist`, PLAN.md M9): Redis runs with the append-only file
 # off, or on with that fsync policy, in a fresh /data volume, so the
@@ -46,6 +71,7 @@
 #   SCALE=0.25 OUT=/tmp/q6 chaos/run.sh           # a 30 s smoke: schedule and duration × 0.25
 #   KEEP=1 chaos/run.sh                           # leave the fleet up afterwards
 #   SCHEDULE=flap OUT=eval/results/m8-flap/before chaos/run.sh   # make chaos-flap RUN=before
+#   SCHEDULE=orphan RUN=before chaos/run.sh       # make chaos-orphan RUN=before
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -54,8 +80,20 @@ scale=${SCALE:-1}
 sched=${SCHEDULE:-q6}
 case $sched in
 q6 | flap) ;;
+orphan)
+	orphan_run=${RUN:-}
+	if [[ $orphan_run != before && $orphan_run != after ]]; then
+		echo "q6: SCHEDULE=orphan needs RUN=before or RUN=after, got '$orphan_run'" >&2
+		exit 2
+	fi
+	if [[ -n ${SCALE:-}${REDIS_PERSIST:-}${MAIN_RATE:-}${LIMITED_RATE:-} ]]; then
+		echo "q6: SCHEDULE=orphan takes no SCALE, REDIS_PERSIST, MAIN_RATE or LIMITED_RATE" >&2
+		exit 2
+	fi
+	before_ref=${BEFORE_REF:-c22dd75}
+	;;
 *)
-	echo "q6: SCHEDULE must be q6 or flap, got $sched" >&2
+	echo "q6: SCHEDULE must be q6, flap or orphan, got $sched" >&2
 	exit 2
 	;;
 esac
@@ -83,26 +121,46 @@ out=${OUT:-$default_out}
 if [[ $sched == flap ]]; then
 	command="make chaos-flap RUN=$(basename "$out")"
 fi
-if [[ -n ${SCALE:-}${MAIN_RATE:-}${LIMITED_RATE:-}${BUDGET_RATE:-} ]]; then
+if [[ $sched == orphan ]]; then
+	out=${OUT:-eval/results/m12-orphan/$orphan_run}
+	command="make chaos-orphan RUN=$orphan_run"
+	if [[ -n ${BEFORE_REF:-} && $orphan_run == before ]]; then
+		command="BEFORE_REF=$before_ref $command"
+	fi
+fi
+if [[ $sched != orphan && -n ${SCALE:-}${MAIN_RATE:-}${LIMITED_RATE:-}${BUDGET_RATE:-} ]]; then
 	command="SCHEDULE=$sched SCALE=$scale MAIN_RATE=$main_rate LIMITED_RATE=$limited_rate BUDGET_RATE=$budget_rate${persist:+ REDIS_PERSIST=$persist} chaos/run.sh"
 fi
 scaled() { awk -v s="$scale" -v v="$1" 'BEGIN { printf "%.3f", s * v }'; }
 if [[ $sched == flap ]]; then
 	duration=$(scaled 150)
+elif [[ $sched == orphan ]]; then
+	# The budget stream's load; the run goes on to 100 s.
+	duration=60
+	if [[ -n ${BUDGET_RATE:-} ]]; then
+		command="BUDGET_RATE=$budget_rate $command"
+	fi
 else
 	duration=$(scaled 120)
 fi
 
 project=switchboard-chaos
 compose=(docker compose -f chaos/compose.yaml -p "$project")
+if [[ $sched == orphan ]]; then
+	compose=(docker compose -f chaos/compose.yaml -f chaos/orphan.compose.yaml -p "$project")
+fi
 lb=http://127.0.0.1:28080
 fake=http://127.0.0.1:29101
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/switchboard-q6.XXXXXX")
 bin=$tmp/switchboard
 pids=()
+worktree=
 
 cleanup() {
 	local status=$?
+	if [[ -n $worktree ]]; then
+		git worktree remove --force "$worktree" >/dev/null 2>&1 || true
+	fi
 	for pid in ${pids[@]+"${pids[@]}"}; do
 		kill "$pid" 2>/dev/null || true
 	done
@@ -160,8 +218,31 @@ snapshot() {
 	fi
 	spent=$(sed -n 1p <<<"$vals")
 	reserved=$(sed -n 2p <<<"$vals")
+	if [[ $sched == orphan ]]; then
+		orphan_balance "$1" "$t" "${spent:-0}" "${reserved:-0}"
+		return 0
+	fi
 	printf '{"label": "%s", "unix": %s, "spent_nanodollars": %s, "reserved_nanodollars": %s}\n' \
 		"$1" "$t" "${spent:-0}" "${reserved:-0}" >>"$tmp/snapshots.jsonl"
+}
+
+# orphan_balance <label> <unix> <raw spent> <raw reserved>: after the raw
+# HMGET, the same balance read through the ledger (replica 1's admin API
+# calls Ledger.Balance, which runs the balance script and so purges
+# expired holds first). The budget object of the overview is kept as it
+# came; null if the read failed.
+orphan_balance() {
+	local t2 body balance
+	t2=$(now)
+	balance=null
+	if body=$(curl -fsS --max-time 2 -H 'Host: localhost' http://127.0.0.1:29091/api/overview 2>/dev/null); then
+		balance=$(grep -o '"budget":{[^}]*}' <<<"$body" | head -n 1 | sed 's/^"budget"://')
+		balance=${balance:-null}
+	else
+		echo "q6: balance read at $1 failed" >&2
+	fi
+	printf '{"label": "%s", "unix": %s, "spent_nanodollars": %s, "reserved_nanodollars": %s, "ledger_unix": %s, "ledger_balance": %s}\n' \
+		"$1" "$2" "$3" "$4" "$t2" "$balance" >>"$tmp/snapshots.jsonl"
 }
 
 # act <planned offset> <action> <service> <phase it starts>: runs the
@@ -215,7 +296,27 @@ schedule_flap() {
 	done
 }
 
+# schedule_orphan: a snapshot every 5 s to 100 s, the kill at 40 s (act
+# takes its own snapshot 0.5 s before).
+schedule_orphan() {
+	local at
+	for at in $(seq 5 5 100); do
+		if [[ $at == 40 ]]; then
+			act 40 kill switchboard-2 "replica 2 down"
+			sleep_until "$(awk -v t="$t0" 'BEGIN { printf "%.6f", t + 41 }')"
+			snapshot "t=41"
+			continue
+		fi
+		sleep_until "$(awk -v t="$t0" -v o="$at" 'BEGIN { printf "%.6f", t + o }')"
+		snapshot "t=$at"
+	done
+}
+
 schedule() {
+	if [[ $sched == orphan ]]; then
+		schedule_orphan
+		return
+	fi
 	if [[ $sched == flap ]]; then
 		schedule_flap
 		return
@@ -228,8 +329,68 @@ schedule() {
 	act 90 start switchboard-2 "all back"
 }
 
+# orphan_finish writes the orphan run's files and its summary.
+orphan_finish() {
+	jsonl_to_array "$tmp/snapshots.jsonl" >"$tmp/snapshots.json"
+	jsonl_to_array "$tmp/events.jsonl" >"$tmp/events.json"
+	mkdir -p "$tmp/logs"
+	for svc in switchboard-1 switchboard-2 switchboard-3 redis fake-provider; do
+		"${compose[@]}" logs --no-color --no-log-prefix --timestamps "$svc" 2>/dev/null | gzip -9n >"$tmp/logs/$svc.log.gz"
+	done
+	cat >"$tmp/meta.json" <<JSON
+{
+  "commit": "$commit",
+  "gateway_commit": "$gateway_commit",
+  "fake_provider_commit": "$commit",
+  "run": "$orphan_run",
+  "date": "$(date -u -d "@${t0%.*}" +%Y-%m-%dT%H:%M:%SZ)",
+  "command": "$command",
+  "schedule": "orphan",
+  "replicas": 3,
+  "replica_ips": {$replica_ips},
+  "start_unix": $t0,
+  "load_seconds": $duration,
+  "observe_seconds": 100,
+  "kill": {"target": "switchboard-2", "planned_seconds": 40, "restarted": false},
+  "balance_read": "GET /api/overview on switchboard-1: Ledger.Balance, the balance script",
+  "budget": {"model": "fake-budget", "usd": "5", "input_price": "3", "output_price": "15", "rate": $budget_rate, "stream": true, "max_tokens": 64, "reservation_ttl": "30s", "provider_timeout": "20s"},
+  "fake_provider": {"latency": "20ms", "tokens": 30, "token_interval": "5ms", "budget_token_interval": "68ms"}
+}
+JSON
+	mkdir -p "$out"
+	rm -f "$out"/*.json "$out"/*.json.gz "$out"/*.jsonl.gz
+	rm -rf "$out/logs"
+	cp "$tmp"/meta.json "$tmp"/events.json "$tmp"/snapshots.json "$tmp"/ledger.json.gz "$tmp"/budget.json "$tmp"/budget.jsonl.gz "$out"/
+	cp -r "$tmp/logs" "$out/"
+	"$bin" chaos orphan --dir "$out"
+	echo "q6: results in $out." >&2
+}
+
+jsonl_to_array() {
+	echo "["
+	sed '$!s/$/,/' "$1"
+	echo "]"
+}
+
 go build -o "$bin" ./cmd/switchboard
-"${compose[@]}" build switchboard-1 >/dev/null
+if [[ $sched == orphan ]]; then
+	# The fake provider (and, for the after arm, the replicas) from the
+	# working tree; the before arm's replicas from BEFORE_REF.
+	"${compose[@]}" build fake-provider >/dev/null
+	gateway_commit=$commit
+	export ORPHAN_REPLICA_IMAGE=switchboard:dev
+	if [[ $orphan_run == before ]]; then
+		gateway_commit=$(git rev-parse --short "$before_ref")
+		worktree=$tmp/before-src
+		git worktree add --detach "$worktree" "$before_ref" >/dev/null 2>&1
+		docker build -q -t switchboard:m12-before "$worktree" >/dev/null
+		git worktree remove --force "$worktree"
+		worktree=
+		ORPHAN_REPLICA_IMAGE=switchboard:m12-before
+	fi
+else
+	"${compose[@]}" build switchboard-1 >/dev/null
+fi
 # A fresh anonymous /data volume for Redis, so an append-only file from an
 # earlier run is never replayed into this one.
 "${compose[@]}" up -d --force-recreate --renew-anon-volumes >/dev/null 2>&1
@@ -242,8 +403,29 @@ curl -fsS -X POST "$fake/ledger/reset" >/dev/null
 : >"$tmp/events.jsonl"
 : >"$tmp/snapshots.jsonl"
 
-echo "q6: ${duration} s of load, schedule × $scale" >&2
+# Each replica's address on the compose network, which the fake
+# provider's ledger records as the caller.
+replica_ips=
+for svc in switchboard-1 switchboard-2 switchboard-3; do
+	ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(container "$svc")")
+	replica_ips+="${replica_ips:+, }\"$svc\": \"$ip\""
+done
+
+echo "q6: ${duration} s of load, schedule $sched × $scale" >&2
 t0=$(now)
+if [[ $sched == orphan ]]; then
+	"$bin" bench --url "$lb" --key sk-chaos-budget --model fake-budget --stream --rate "$budget_rate" --max-tokens 64 \
+		--duration "${duration}s" --warmup 0s --label budget --log "$tmp/budget.jsonl.gz" --out "$tmp/budget.json" 2>"$tmp/budget.err" &
+	pids+=($!)
+	schedule
+	wait "${pids[@]}"
+	pids=()
+	cat "$tmp"/budget.err >&2
+	curl -fsS "$fake/ledger" | gzip -9n >"$tmp/ledger.json.gz"
+	snapshot end
+	orphan_finish
+	exit 0
+fi
 "$bin" bench --url "$lb" --key sk-chaos-main --model fake-chaos --stream --rate "$main_rate" \
 	--duration "${duration}s" --warmup 0s --repeat 0.3 --repeat-pool 50 --seed 1 --cache exact \
 	--label main --log "$tmp/main.jsonl.gz" --out "$tmp/main.json" 2>"$tmp/main.err" &

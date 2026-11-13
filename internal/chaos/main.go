@@ -18,15 +18,21 @@ import (
 	"github.com/TheAsianFish/switchboard/internal/provider/fake"
 )
 
-// Main implements `switchboard chaos`; args start with the subcommand.
+// Main implements `switchboard chaos`; args start with the subcommand:
+// report (Q6 and M8's runs) or orphan (M12's).
 func Main(_ context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "report" {
-		_, _ = fmt.Fprintln(stderr, "usage: switchboard chaos report [--dir eval/results/q6-chaos] [--out file]")
+	if len(args) == 0 || args[0] != "report" && args[0] != "orphan" {
+		_, _ = fmt.Fprintln(stderr, "usage: switchboard chaos report|orphan [--dir eval/results/q6-chaos] [--out file]")
 		return 2
 	}
-	fs := flag.NewFlagSet("chaos report", flag.ContinueOnError)
+	name := "chaos " + args[0]
+	defaultDir := "eval/results/q6-chaos"
+	if args[0] == "orphan" {
+		defaultDir = "eval/results/m12-orphan/after"
+	}
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	dir := fs.String("dir", "eval/results/q6-chaos", "the run's raw files")
+	dir := fs.String("dir", defaultDir, "the run's raw files")
 	out := fs.String("out", "", `write the summary here (default <dir>/summary.json, "-" for stdout)`)
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -34,19 +40,36 @@ func Main(_ context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		return 2
 	}
-	in, err := Load(*dir)
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "chaos report: %v\n", err)
-		return 1
+	var summary any
+	var text string
+	if args[0] == "orphan" {
+		in, err := LoadOrphan(*dir)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
+			return 1
+		}
+		s, err := AnalyseOrphan(*in)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
+			return 1
+		}
+		summary, text = s, DescribeOrphan(s)
+	} else {
+		in, err := Load(*dir)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
+			return 1
+		}
+		s, err := Analyse(*in, DefaultRule)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
+			return 1
+		}
+		summary, text = s, Describe(s)
 	}
-	s, err := Analyse(*in, DefaultRule)
+	b, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "chaos report: %v\n", err)
-		return 1
-	}
-	b, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "chaos report: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
 		return 1
 	}
 	b = append(b, '\n')
@@ -60,10 +83,10 @@ func Main(_ context.Context, args []string, stdout, stderr io.Writer) int {
 		err = os.WriteFile(path, b, 0o644)
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "chaos report: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
 		return 1
 	}
-	_, _ = fmt.Fprint(stderr, Describe(s))
+	_, _ = fmt.Fprint(stderr, text)
 	return 0
 }
 

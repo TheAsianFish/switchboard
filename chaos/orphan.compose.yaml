@@ -1,0 +1,29 @@
+# M12's orphan run (`make chaos-orphan`, PLAN.md M12), layered on
+# chaos/compose.yaml by chaos/run.sh when SCHEDULE=orphan:
+#
+# - the replicas run chaos/orphan.yaml (hold TTL 30 s, provider timeout
+#   20 s, a $5 budget) and the image in ORPHAN_REPLICA_IMAGE: the working
+#   tree's switchboard:dev for the after arm, one built from the commit
+#   before the fix for the before arm. They are never built here.
+# - the fake provider, always the working tree's build, streams the
+#   budget model at 68 ms a token (30 tokens, about 2 s a reply); the
+#   other models keep the Q6 pace.
+# Written out per service: a `!reset` behind a YAML alias is lost.
+services:
+  fake-provider:
+    command: ["fake-provider", "--listen", "0.0.0.0:9101", "--model-token-interval", "fake-budget=68ms"]
+  switchboard-1:
+    image: ${ORPHAN_REPLICA_IMAGE:-switchboard:dev}
+    build: !reset null
+    volumes:
+      - ./orphan.yaml:/etc/switchboard/chaos/switchboard.yaml:ro
+  switchboard-2:
+    image: ${ORPHAN_REPLICA_IMAGE:-switchboard:dev}
+    build: !reset null
+    volumes:
+      - ./orphan.yaml:/etc/switchboard/chaos/switchboard.yaml:ro
+  switchboard-3:
+    image: ${ORPHAN_REPLICA_IMAGE:-switchboard:dev}
+    build: !reset null
+    volumes:
+      - ./orphan.yaml:/etc/switchboard/chaos/switchboard.yaml:ro
