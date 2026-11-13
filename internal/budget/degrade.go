@@ -81,10 +81,13 @@ type DegradeOptions struct {
 // on grace and still in flight when the process dies: their cost was
 // never pending and never held on the primary, so only this process knew
 // it. The pending cost of a primary hold is not lost with the process:
-// the hold expires and the primary charges its held amount.
+// the hold expires and the primary charges its held amount when a script
+// next touches that key and window.
 //
 // A primary hold whose replica died before settling, or that outlived its
-// TTL for any other reason, is charged at its held amount when it expires;
+// TTL for any other reason, is charged at its held amount once it has
+// expired and a script next touches its key and window (a past window
+// nobody reads again is charged only when it is next read);
 // since the hold is the request's worst case, this over-counts by held −
 // actual unless a late settle corrects it, and errs on refusing. A
 // request whose input was under-estimated can cost more than its hold, and

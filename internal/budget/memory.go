@@ -105,7 +105,7 @@ func (a *account) expire(id string) {
 	a.release(id)
 	if h.amount != 0 {
 		a.spent += h.amount
-		a.tombs[id] = h.amount
+		a.tombs[id] += h.amount
 	}
 }
 

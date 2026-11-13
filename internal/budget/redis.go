@@ -75,7 +75,7 @@ for _, id in ipairs(expired) do
   local a = unhold(id)
   if a and a ~= '0' then
     redis.call('HINCRBY', KEYS[1], 'spent', a)
-    redis.call('HSET', KEYS[4], id, a)
+    redis.call('HINCRBY', KEYS[4], id, a)
   end
 end
 
@@ -182,7 +182,8 @@ func ttlArg(p Period) string {
 // remains and refused once the budget is fully used, so a request whose
 // estimate is free still stops at an exhausted budget. Reserving again
 // with an id that is already held replaces the earlier hold; an id that
-// expired keeps its charge and its tombstone.
+// expired keeps its charge and its tombstone, and if the new hold expires
+// too, the tombstone holds both amounts, so one late settle corrects both.
 func (l *Redis) Reserve(ctx context.Context, key string, b Budget, id string, amount cost.Nanos) (Reservation, error) {
 	if err := checkReserve(b, id, amount); err != nil {
 		return Reservation{}, err

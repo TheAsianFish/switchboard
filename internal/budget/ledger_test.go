@@ -232,6 +232,17 @@ func TestContract(t *testing.T) {
 			mustSettle(t, l, "k", daily, r, 30)
 			wantPosition(t, mustBalance(t, l, "k", daily), 30, 0)
 		}},
+		{"an id re-reserved and expired twice is corrected once for both", func(t *testing.T, h harness) {
+			l := h.ledger
+			mustReserve(t, l, "k", daily, "a", 40)
+			h.set(t0.Add(61 * time.Second))
+			wantPosition(t, mustBalance(t, l, "k", daily), 40, 0)
+			r := mustReserve(t, l, "k", daily, "a", 20)
+			h.set(t0.Add(122 * time.Second))
+			wantPosition(t, mustBalance(t, l, "k", daily), 60, 0)
+			mustSettle(t, l, "k", daily, r, 15)
+			wantPosition(t, mustBalance(t, l, "k", daily), 15, 0)
+		}},
 		{"a hold that expires in a window's last second is corrected there", func(t *testing.T, h harness) {
 			l := h.ledger
 			late := time.Date(2026, 10, 27, 23, 59, 30, 0, time.UTC)

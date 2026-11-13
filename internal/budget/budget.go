@@ -3,7 +3,8 @@
 // A request reserves its worst-case cost before it is sent and settles the
 // real cost when usage arrives. A reservation that is never settled (the
 // replica holding it died) expires after a TTL and is charged as spent at
-// its held amount, since the provider may well have billed the request; a
+// its held amount by the next call on its key and window, since the
+// provider may well have billed the request; a
 // settle that arrives after the expiry corrects the charge to the real
 // cost. Because reservations are worst case, concurrent requests
 // on any number of replicas cannot together spend past the limit unless an
