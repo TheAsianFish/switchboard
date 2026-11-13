@@ -238,7 +238,25 @@
           }
         }
       ],
-      "pool_lines": 108
+      "pool_lines": 108,
+      "timed_out": 102,
+      "replicas": [
+        {
+          "replica": "switchboard-1",
+          "dials_before": 32,
+          "slow_cache_failures": 17
+        },
+        {
+          "replica": "switchboard-2",
+          "dials_before": 35,
+          "slow_cache_failures": 18
+        },
+        {
+          "replica": "switchboard-3",
+          "dials_before": 41,
+          "slow_cache_failures": 26
+        }
+      ]
     },
     {
       "event": "disconnect redis",
@@ -359,7 +377,28 @@
           }
         }
       ],
-      "pool_lines": 56
+      "pool_lines": 56,
+      "timed_out": 55,
+      "replicas": [
+        {
+          "replica": "switchboard-1",
+          "first_fast_seconds": 1.56,
+          "dials_before": 18,
+          "slow_cache_failures": 18
+        },
+        {
+          "replica": "switchboard-2",
+          "first_fast_seconds": 1.545,
+          "dials_before": 16,
+          "slow_cache_failures": 14
+        },
+        {
+          "replica": "switchboard-3",
+          "first_fast_seconds": 1.6,
+          "dials_before": 13,
+          "slow_cache_failures": 14
+        }
+      ]
     },
     {
       "event": "disconnect redis",
@@ -544,7 +583,25 @@
           }
         }
       ],
-      "pool_lines": 111
+      "pool_lines": 111,
+      "timed_out": 103,
+      "replicas": [
+        {
+          "replica": "switchboard-1",
+          "dials_before": 37,
+          "slow_cache_failures": 22
+        },
+        {
+          "replica": "switchboard-2",
+          "dials_before": 36,
+          "slow_cache_failures": 20
+        },
+        {
+          "replica": "switchboard-3",
+          "dials_before": 38,
+          "slow_cache_failures": 22
+        }
+      ]
     },
     {
       "event": "disconnect redis",
@@ -665,7 +722,28 @@
           }
         }
       ],
-      "pool_lines": 49
+      "pool_lines": 49,
+      "timed_out": 55,
+      "replicas": [
+        {
+          "replica": "switchboard-1",
+          "first_fast_seconds": 1.585,
+          "dials_before": 18,
+          "slow_cache_failures": 16
+        },
+        {
+          "replica": "switchboard-2",
+          "first_fast_seconds": 1.55,
+          "dials_before": 13,
+          "slow_cache_failures": 14
+        },
+        {
+          "replica": "switchboard-3",
+          "first_fast_seconds": 1.57,
+          "dials_before": 15,
+          "slow_cache_failures": 15
+        }
+      ]
     },
     {
       "event": "disconnect redis",
@@ -852,7 +930,25 @@
           }
         }
       ],
-      "pool_lines": 92
+      "pool_lines": 92,
+      "timed_out": 95,
+      "replicas": [
+        {
+          "replica": "switchboard-1",
+          "dials_before": 37,
+          "slow_cache_failures": 21
+        },
+        {
+          "replica": "switchboard-2",
+          "dials_before": 19,
+          "slow_cache_failures": 19
+        },
+        {
+          "replica": "switchboard-3",
+          "dials_before": 36,
+          "slow_cache_failures": 21
+        }
+      ]
     },
     {
       "event": "disconnect redis",
@@ -1057,7 +1153,27 @@
           }
         }
       ],
-      "pool_lines": 79
+      "pool_lines": 79,
+      "timed_out": 75,
+      "replicas": [
+        {
+          "replica": "switchboard-1",
+          "first_fast_seconds": 1.535,
+          "dials_before": 11,
+          "slow_cache_failures": 10
+        },
+        {
+          "replica": "switchboard-2",
+          "dials_before": 39,
+          "slow_cache_failures": 21
+        },
+        {
+          "replica": "switchboard-3",
+          "first_fast_seconds": 1.595,
+          "dials_before": 23,
+          "slow_cache_failures": 22
+        }
+      ]
     },
     {
       "event": "disconnect redis",
@@ -1286,7 +1402,26 @@
           }
         }
       ],
-      "pool_lines": 93
+      "pool_lines": 93,
+      "timed_out": 86,
+      "replicas": [
+        {
+          "replica": "switchboard-1",
+          "dials_before": 36,
+          "slow_cache_failures": 20
+        },
+        {
+          "replica": "switchboard-2",
+          "first_fast_seconds": 1.561,
+          "dials_before": 17,
+          "slow_cache_failures": 17
+        },
+        {
+          "replica": "switchboard-3",
+          "dials_before": 37,
+          "slow_cache_failures": 21
+        }
+      ]
     },
     {
       "event": "disconnect redis",
@@ -1515,7 +1650,27 @@
           }
         }
       ],
-      "pool_lines": 71
+      "pool_lines": 71,
+      "timed_out": 70,
+      "replicas": [
+        {
+          "replica": "switchboard-1",
+          "first_fast_seconds": 1.565,
+          "dials_before": 17,
+          "slow_cache_failures": 14
+        },
+        {
+          "replica": "switchboard-2",
+          "dials_before": 35,
+          "slow_cache_failures": 20
+        },
+        {
+          "replica": "switchboard-3",
+          "first_fast_seconds": 1.57,
+          "dials_before": 17,
+          "slow_cache_failures": 16
+        }
+      ]
     }
   ],
   "restarts": [

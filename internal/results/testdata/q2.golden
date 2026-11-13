@@ -221,6 +221,20 @@ test charges 80 + 30 for a request that cost 30).
 Not measured yet. Run `make chaos-orphan RUN=before`, `make chaos-orphan
 RUN=after` and `make sim-budget SEEDS=100000`, then `make results`.
 
+## M13: what makes an outage slow, and what keeps the fleet degraded after it
+
+Are the slow requests of M8's flap run the cache's ungated probe, why
+are there three bursts per outage and not eight, and is the time a
+replica stays degraded after Redis returns the two retry timers M9
+named? Commands: `make chaos-probe RUN=before|after` (M8's flap schedule)
+and `make chaos-retry` (`RETRY_INTERVAL=1s|250ms REDIS_PERSIST=everysec
+make chaos`, three runs each), raw files in `eval/results/m13-outage/`;
+`switchboard chaos outage` writes each run's `outage.json`.
+
+
+Not measured yet. Run `make chaos-probe RUN=before`, `make chaos-probe
+RUN=after` and `make chaos-retry`, then `make results`.
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire

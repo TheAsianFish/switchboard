@@ -1627,6 +1627,176 @@ Its shortest schedule (seed {{.Seed}}; {{.Sums}}):
 Not measured yet. Run `make chaos-orphan RUN=before`, `make chaos-orphan
 RUN=after` and `make sim-budget SEEDS=100000`, then `make results`.
 {{end}}
+## M13: what makes an outage slow, and what keeps the fleet degraded after it
+
+Are the slow requests of M8's flap run the cache's ungated probe, why
+are there three bursts per outage and not eight, and is the time a
+replica stays degraded after Redis returns the two retry timers M9
+named? Commands: `make chaos-probe RUN=before|after` (M8's flap schedule)
+and `make chaos-retry` (`RETRY_INTERVAL=1s|250ms REDIS_PERSIST=everysec
+make chaos`, three runs each), raw files in `eval/results/m13-outage/`;
+`switchboard chaos outage` writes each run's `outage.json`.
+
+{{with .M13}}**Method.** Every replica logs each store call that waits 50 ms
+or longer (`store call slow`: the component, which is the limiter, the
+budget, a cache lookup or a cache fill, the operation, the wait, the
+error and the request's id), and the cache's failure line carries the
+failed call's wait. The load generator sends each request's id as
+`<stream>-<index>`, the index its own log records, so every slow request
+is joined to the store calls that held it, not matched by time. A
+request is slow above {{with .Before}}{{.S.LineMS}}{{end}} ms, Q6's committed line, in every
+run. Each slow request is attributed to the component of its longest
+slow store call ("none" if it logged none) and belongs to the outage in
+which its outcome was observed, from Redis's disconnect to the next one
+(the 8 s outage and the 4 s after it). An outage's bursts are its slow
+requests split wherever two consecutive ones were scheduled more than
+{{with .Before}}{{.S.GapS}}{{end}} s apart; a request whose longest store call started before
+the disconnect was in flight at the cut. The before arm runs replicas
+built from the commit before the cache's single probe, the after arm the
+commit with it; the load generator and the fake provider are the same.
+The phases and the rule for each hypothesis are PLAN.md's (M13), written
+before these runs.
+{{with .Before}}
+**Per outage, before** (outage p99 is the main stream's over the 8 s
+the store is cut off, back p99 over the 4 s after; the last columns are
+per replica: when its cache first failed without waiting, from the
+disconnect, and how many failed dials go-redis had logged on it by
+then):
+
+| Outage | At (s) | Slow requests | By component | Bursts | Outage p99 (ms) | Back p99 (ms) | Store calls timed out | Replicas failing fast | First fast failure (s) | Failed dials before it |
+|-------:|-------:|--------------:|--------------|-------:|----------------:|--------------:|----------------------:|----------------------|------------------------|------------------------|
+{{- range .Rows}}
+| {{.N}} | {{.At}} | {{.Slow}} | {{.ByComponent}} | {{.Bursts}} | {{.OutageP99}} | {{.BackP99}} | {{.TimedOut}} | {{.FastReplicas}} | {{.FirstFast}} | {{.DialsBefore}} |
+{{- end}}
+
+In the run: {{.S.Run.SlowRequests}} slow requests of {{.S.Run.Requests}} ({{.SlowByComponent}}), {{.MeanSlow}} per
+outage; hit rate of repeats {{.RepeatHitRate}}.
+{{end}}{{with .After}}
+**Per outage, after:**
+
+| Outage | At (s) | Slow requests | By component | Bursts | Outage p99 (ms) | Back p99 (ms) | Store calls timed out | Replicas failing fast | First fast failure (s) | Failed dials before it |
+|-------:|-------:|--------------:|--------------|-------:|----------------:|--------------:|----------------------:|----------------------|------------------------|------------------------|
+{{- range .Rows}}
+| {{.N}} | {{.At}} | {{.Slow}} | {{.ByComponent}} | {{.Bursts}} | {{.OutageP99}} | {{.BackP99}} | {{.TimedOut}} | {{.FastReplicas}} | {{.FirstFast}} | {{.DialsBefore}} |
+{{- end}}
+
+In the run: {{.S.Run.SlowRequests}} slow requests of {{.S.Run.Requests}} ({{.SlowByComponent}}), {{.MeanSlow}} per
+outage; hit rate of repeats {{.RepeatHitRate}}.
+{{end}}{{if .Bursts}}
+**Per burst, by its place in the outage** (all eight outages; the start
+is the burst's first request's scheduled time from the disconnect; the
+wait is the median over bursts of each burst's median longest wait):
+
+| Burst | Before: requests (per outage) | Before: starts | Before: by component; by error | Before: in flight at the cut | Before: wait | After: requests (per outage) | After: starts | After: by component; by error | After: wait |
+|-------|------------------------------:|----------------|-------------------------------|-----------------------------:|-------------:|-----------------------------:|---------------|------------------------------|------------:|
+{{- range .Bursts}}
+| {{.Burst}} | {{.Before.Requests}} ({{.Before.PerOutage}}) | {{.Before.Starts}} | {{.Before.ByComponent}}; {{.Before.ByClass}} | {{.Before.InFlight}} | {{.Before.MedianWait}} | {{.After.Requests}} ({{.After.PerOutage}}) | {{.After.Starts}} | {{.After.ByComponent}}; {{.After.ByClass}} | {{.After.MedianWait}} |
+{{- end}}
+{{end}}{{if .Retry}}
+**The retry interval** (the Q6 schedule with `REDIS_PERSIST=everysec`;
+Redis is killed at 60 s and started at 75 s; degraded is from `docker
+start` until every live replica's limiter, budget and cache logged their
+recovery, read from the kept logs as in M9; after ready subtracts Redis's
+own "Ready to accept connections"; the hit rate of repeats is the main
+stream's over the run and over the phase after the restart; timed out
+counts slow store calls that failed on a timeout while Redis was down):
+
+| Interval | Run | Ready (s) | Degraded (s) | After ready (s) | Recoveries (replica, component, s) | Repeats hit (run) | Repeats hit (after the restart) | Slow requests in the outage | Store calls timed out |
+|---------:|-----|----------:|-------------:|----------------:|------------------------------------|------------------:|--------------------------------:|----------------------------:|----------------------:|
+{{- range .Retry}}{{$iv := .Interval}}{{range .Runs}}
+| {{$iv}} | {{.Run}} | {{.Ready}} | {{.Degraded}} | {{.AfterReady}} | {{.Recoveries}} | {{.RepeatHitRate}} | {{.BackRepeatHitRate}} | {{.OutageSlow}} | {{.TimedOut}} |
+{{- end}}{{end}}
+
+{{range .Retry}}- {{.Interval}}: degraded after ready {{.AfterReady}} s, from the start {{.Degraded}} s; repeats hit {{.RepeatHitRate}}; store calls timed out {{.TimedOut}} per run.
+{{end}}
+**The default.** PLAN.md's rule: `retry_interval`'s default moves to
+250 ms only if the three-run ranges of degraded time after ready do not
+overlap and the outage phases show no more store calls timing out than
+before. {{.Rule}}
+{{if eq (len .Retry) 2}}{{$slow := index .Retry 0}}{{$fast := index .Retry 1}}
+**Reading the retry runs.** The fleet stayed degraded {{$slow.MeanAfterReady}} s after Redis
+was ready on average at 1 s and {{$fast.MeanAfterReady}} s at 250 ms, but the three runs at
+250 ms spread over most of a second and reach into the 1 s arm's range.
+Two waits follow a restart, as M9 said, though the first is not a dial
+backoff. A Redis kill trips go-redis's dial breaker (in {{$.M13.RetrySum.Tripped}} of the
+{{$.M13.RetrySum.Runs}} runs a replica's cache failed without waiting once {{$.M13.RetrySum.PoolSize}} or
+more dials had failed), and from then the pool answers every call with
+its last dial error, here a DNS failure, and redials in the background
+once a second. After Redis was ready the replicas still logged {{$.M13.RetrySum.StaleFailures}}
+cache failures ({{$.M13.RetrySum.StaleDNS}} of them that DNS error) in {{$.M13.RetrySum.Stale}} of the runs. Only after the background dial succeeds can a component's next
+probe, at most one retry interval later, find Redis. The first wait is
+up to a second whatever the interval, and where it falls is luck; a
+shorter interval only shortens the second, by half the difference
+between the intervals on average, three eighths of a second here. That
+is about the difference between the means, and three runs of a wait
+spread over a second cannot resolve it, so M9's explanation stands with
+its first timer renamed, and the default stays where the rule leaves it.
+The shorter interval also probes four times as often while Redis is
+down, and the outages timed out more store calls at 250 ms. The hit rate
+of repeats barely moves: the cache is off for a second or so out of
+two minutes.
+{{end}}{{end}}
+**Hypotheses (PLAN.md, M13) against the runs.**
+
+| Hypothesis | Measured | Held |
+|------------|----------|------|
+{{- range .Checks}}
+| {{.Hypothesis}} | {{.Measured}} | {{.Held}} |
+{{- end}}
+{{with .Before}}{{with .Breaker}}
+**Why three bursts.** go-redis stops dialling once {{.PoolSize}} dials in a row
+have failed (its pool size, 10 per CPU, is also its breaker's threshold)
+and from then answers every call with the last dial error at once, until a
+background dial, retried once a second, succeeds. A failed dial is only
+counted when it gives up, after five attempts 100 ms apart, while the
+caller gives up at its own timeout (250 ms for the cache), so each
+lookup that needs a connection in an outage both waits 250 ms and adds a
+failed dial. Before the single probe, each round of lookups added
+roughly a third of {{.PoolSize}} on each replica, and in {{.Tripped}} of {{.ReplicaOutages}}
+replica-outages the cache failed without waiting from {{.FirstFast}} after
+the cut, once the replica's count stood between {{.MinAtTrip}} and {{.MaxAtTrip}}. The rounds
+are 1.5 s apart, not 1 s, because every failing lookup of a round restarts
+the cache's one-second bypass when it fails, and the round's lookups fail
+over a quarter of a second or more.{{end}}{{end}}{{with .After}}{{with .Breaker}}
+With one probe per retry interval, each replica adds only a few failed
+dials an outage, and the count is never reset by a successful dial, only
+by the background dial that starts once the breaker trips. So the count
+carries over from one outage to the next: in {{.Carried}} of the {{.Tripped}}
+replica-outages that tripped, that outage's own dials were below {{.PoolSize}} and
+the count carried from earlier outages made up the rest (a count of {{.MinAtTrip}} to
+{{.MaxAtTrip}} at the first fast failure). An outage that does not trip
+the breaker costs a 250 ms probe per replica per 1.25 s for its whole
+length; one that trips it costs only the burst at the cut.{{if .Untripped}}
+By the logged counts {{len .Untripped}} replica-outage(s) reached the threshold without
+a fast failure ({{range $i, $u := .Untripped}}{{if $i}}; {{end}}{{$u}}{{end}}); the
+logs do not say why, so the carried-count reading fits the other
+replica-outages, not these.{{end}}{{end}}{{end}}
+
+{{with $b := .Bursts}}{{with index $b 0}}**Reading the flap runs.** Every slow request but a handful, before and
+after, is a cache lookup waiting out its 250 ms timeout. The limiter and
+the budget wait too, but only for the limited and budgeted keys, whose
+requests are not measured against the line, and a cache fill runs after
+its reply has been sent. The burst at the cut is not calls in flight when Redis
+went: those requests started up to a quarter of a second after the cut,
+and waited because no lookup had failed yet to turn the cache off. No
+gate can save them, since nothing is known to be down; they are
+{{.Before.PerOutage}} slow requests an outage before and {{.After.PerOutage}} after, most of the 25 the
+hypothesis allowed. The single probe removed the second and third
+bursts, {{(index $b 1).Before.PerOutage}} and {{(index $b 2).Before.PerOutage}} an outage before and {{(index $b 1).After.PerOutage}} and {{(index $b 2).After.PerOutage}} after; what is left
+beyond the cut is one 250 ms probe per replica per retry interval in the
+outages where go-redis's breaker did not trip ({{(index $b 3).After.PerOutage}} an outage from
+the fourth burst on). So the run missed both targets by the probes of
+the outages the breaker left open, and the p99 of an outage phase did
+not move: it is set by the cut's burst, which stays.{{end}}{{end}}
+
+{{with .Before}}- Before: harness at `{{.S.Meta.Commit}}`, replicas built from `{{.S.Meta.GatewayCommit}}`, {{.S.Meta.Date}}, `{{.S.Meta.Command}}`; {{.Hardware}}.
+{{end}}{{with .After}}- After: `{{.S.Meta.Commit}}`, {{.S.Meta.Date}}, `{{.S.Meta.Command}}`; {{.Hardware}}.
+{{end}}{{range .Retry}}{{range .Runs}}- Retry {{.Run}}: `{{.Commit}}`, {{.Date}}, `{{.Command}}`; {{.Hardware}}.
+{{end}}{{end}}- Cost: $0 (fake provider, no model).
+{{else}}
+Not measured yet. Run `make chaos-probe RUN=before`, `make chaos-probe
+RUN=after` and `make chaos-retry`, then `make results`.
+{{end}}
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -1719,12 +1889,32 @@ observed.
 {{else}}
 - Budget reconciliation under a flapping store: not measured yet
   (`make chaos-flap`).
-{{end}}{{end}}- **About two seconds degraded after Redis comes back.** go-redis's
+{{end}}{{end}}{{with .M13}}{{if eq (len .Retry) 2}}{{$slow := index .Retry 0}}{{$fast := index .Retry 1}}- **About a second degraded after Redis comes back, decided by luck.**
+  A killed Redis trips go-redis's dial breaker, which then redials once
+  a second in the background whatever the gateway's settings; only after
+  that dial succeeds does each component's next probe (one retry interval
+  later at most) find Redis. M13 measured {{$slow.AfterReady}} s after ready at the
+  1 s default (mean {{$slow.MeanAfterReady}} s) and {{$fast.AfterReady}} s at 250 ms (mean {{$fast.MeanAfterReady}} s),
+  three runs each: the shorter interval saves about what its shorter
+  probe wait predicts, but the redial's phase spreads the runs over most
+  of a second, and the default stays 1 s under PLAN.md's rule. M9's
+  "about two seconds" was from `docker start`, not from ready. The cost
+  is the cache's hits and the shared limits for that second: no wrong
+  answers. Shortening it would mean giving the pool a redial that the
+  gateway controls, which go-redis does not expose.
+{{end}}{{else}}- **About two seconds degraded after Redis comes back.** go-redis's
   dial backoff and the gateway's one-second probe run one after the
   other, so a replica keeps using its local limits, grace and no cache for
   about two seconds after Redis is ready (M9, every mode). The cache is
   the visible cost: hits lost, not wrong answers.
-- **`everysec` can lose the last second of charges to a machine crash.**
+{{end}}{{with .M13}}{{with .After}}- **Every Redis outage still costs a burst of slow requests at the cut.**
+  The lookups that start before the first one fails each wait out the
+  cache's 250 ms timeout ({{(index $.M13.Bursts 0).After.PerOutage}} slow requests an outage after M13's single
+  probe), since nothing knows the store is down yet; and when go-redis's
+  dial breaker has not tripped, each replica's probe waits 250 ms once a
+  retry interval for the whole outage. A shorter cache timeout would
+  shrink both; it was not measured.
+{{end}}{{end}}- **`everysec` can lose the last second of charges to a machine crash.**
   A killed Redis process loses nothing it acknowledged (the kernel holds
   the written bytes), which is the case M9's container kill tested; a
   crash of the machine or kernel in the middle of a key's spending
