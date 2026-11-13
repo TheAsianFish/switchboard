@@ -2,8 +2,10 @@
 //
 // A request reserves its worst-case cost before it is sent and settles the
 // real cost when usage arrives. A reservation that is never settled (the
-// replica holding it died) expires after a TTL, so a crash cannot leak
-// budget forever. Because reservations are worst case, concurrent requests
+// replica holding it died) expires after a TTL and is charged as spent at
+// its held amount, since the provider may well have billed the request; a
+// settle that arrives after the expiry corrects the charge to the real
+// cost. Because reservations are worst case, concurrent requests
 // on any number of replicas cannot together spend past the limit unless an
 // estimate was low.
 package budget
@@ -94,8 +96,10 @@ type Ledger interface {
 	// now, or fails with an error wrapping ErrExhausted (and holds nothing)
 	// if spent + reserved + amount would exceed the limit.
 	Reserve(ctx context.Context, key string, b Budget, id string, amount cost.Nanos) (Reservation, error)
-	// Settle releases r and records actual as spent. Settling an expired
-	// or unknown reservation still records actual: the money was spent.
+	// Settle releases r and records actual as spent. Settling a
+	// reservation that expired (and was charged at its held amount)
+	// corrects spent by actual − held, once; settling an unknown one
+	// records actual: the money was spent.
 	Settle(ctx context.Context, key string, b Budget, r Reservation, actual cost.Nanos) error
 	// Balance reports key's position in the window containing now.
 	Balance(ctx context.Context, key string, b Budget) (Balance, error)
@@ -106,7 +110,7 @@ type Ledger interface {
 var ErrExhausted = errors.New("budget exhausted")
 
 // DefaultReservationTTL is how long an unsettled reservation holds budget.
-// It must outlast the longest request: an expired hold that is then
-// settled is still counted, but while it is expired the budget could be
-// over-reserved by its amount.
+// It must outlast the longest request: a hold that expires is charged at
+// its held amount until its late settle corrects it, so a request slower
+// than the TTL makes the budget refuse early, never overspend.
 const DefaultReservationTTL = 15 * time.Minute

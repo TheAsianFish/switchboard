@@ -64,13 +64,37 @@ func TestSimSchedules(t *testing.T) {
 			billed: 30, spent: 30, i1: true, i3: true, rule: ClassOther,
 		},
 		{
+			// The hold expires and is charged at 20 for a request that
+			// cost 10: over-counted by the hold's margin, nothing lost.
 			name:   "killed with a Redis hold in flight",
 			steps:  []SimStep{reserve(0, 0, 20, 10), op(1, OpKill, 0)},
-			billed: 10, spent: 0, i3: true,
+			billed: 10, spent: 20, i1: true, i3: true,
+			rule:         ClassExpiredHold,
+			wantExpired:  []string{"q0"},
+			wantExercise: []SimFault{FaultKill},
+		},
+		{
+			// An under-estimate: the hold's charge falls short of the
+			// cost, and only the difference is lost.
+			name:   "killed with an under-estimated Redis hold in flight",
+			steps:  []SimStep{reserve(0, 0, 20, 30), op(1, OpKill, 0)},
+			billed: 30, spent: 20, i3: true,
 			rule:         ClassExpiredHold,
 			classes:      []string{ClassExpiredHold},
 			wantExpired:  []string{"q0"},
 			wantExercise: []SimFault{FaultKill},
+		},
+		{
+			// Settled during an outage, so the cost waits in pending under
+			// the hold's id; the process dies, the hold expires and is
+			// charged. Nothing lost.
+			name: "killed holding a Redis hold's pending spend",
+			steps: []SimStep{reserve(0, 0, 20, 10), op(1, OpStoreDown, 0),
+				op(2, OpSettle, 0), op(3, OpKill, 0)},
+			billed: 10, spent: 20, i1: true, i3: true,
+			rule:         ClassKilledPending,
+			wantExpired:  []string{"q0"},
+			wantExercise: []SimFault{FaultOutage, FaultKill},
 		},
 		{
 			name: "killed holding pending spend",
@@ -103,18 +127,19 @@ func TestSimSchedules(t *testing.T) {
 		},
 		{
 			// The store holds q0 but the replica admitted it on grace; the
-			// orphaned hold expires and the cost is charged once.
+			// orphaned hold expires and is charged beside the cost.
 			name:   "reserve reply lost",
 			steps:  []SimStep{{Op: OpReserveLost, Hold: 20, Cost: 10}, op(1, OpSettle, 0)},
-			billed: 10, spent: 10, i1: true, i3: true,
+			billed: 10, spent: 30, i1: true, i3: true,
 			rule:         ClassExpiredHold,
 			wantExpired:  []string{"q0"},
 			wantLost:     true,
 			wantExercise: []SimFault{FaultReserveLost},
 		},
 		{
-			// Settled while the store is down: the hold stays and expires,
-			// the cost waits in pending and is flushed. Nothing lost.
+			// Settled while the store is down: the hold stays and expires
+			// and is charged, the cost waits in pending under the hold's id
+			// and its flush corrects the charge. Charged once.
 			name: "settled during an outage past the TTL",
 			steps: []SimStep{reserve(0, 0, 20, 10), op(1, OpStoreDown, 0), op(2, OpSettle, 0),
 				{Op: OpClockTTL, Advance: ttl + time.Second, N: 3}, op(4, OpStoreUp, 0)},
@@ -133,8 +158,11 @@ func TestSimSchedules(t *testing.T) {
 		if int64(o.Billed) != tt.billed || int64(o.Spent) != tt.spent {
 			t.Errorf("%s: billed %d spent %d, want %d and %d\n%v", tt.name, o.Billed, o.Spent, tt.billed, tt.spent, o.Trace)
 		}
-		if o.I1 != tt.i1 || o.I3 != tt.i3 || !o.I2 {
-			t.Errorf("%s: I1 %v I2 %v I3 %v, want %v true %v", tt.name, o.I1, o.I2, o.I3, tt.i1, tt.i3)
+		if o.I1 != tt.i1 || o.I3 != tt.i3 || !o.I2 || !o.I4 {
+			t.Errorf("%s: I1 %v I2 %v I3 %v I4 %v, want %v true %v true", tt.name, o.I1, o.I2, o.I3, o.I4, tt.i1, tt.i3)
+		}
+		if !o.Balanced() {
+			t.Errorf("%s: not balanced (unaccounted %d)\n%v", tt.name, o.Unaccounted(), o.Trace)
 		}
 		if got := o.Classify(); got != tt.rule {
 			t.Errorf("%s: rule class %q, want %q", tt.name, got, tt.rule)
@@ -169,7 +197,7 @@ func TestSimPlanted(t *testing.T) {
 	// Find a request id the planted bug picks for seed 1.
 	r := &simRun{seed: 1}
 	n := 0
-	for !r.dropSettle("q" + strconv.Itoa(n)) {
+	for !r.picks("q" + strconv.Itoa(n)) {
 		n++
 	}
 	o, err := s.Run(1, []SimStep{reserve(n, 0, 20, 10), op(n+1, OpSettle, 0)}, true)
@@ -314,7 +342,7 @@ func TestSimConnLosesAppliedReply(t *testing.T) {
 func plantedVictim(seed uint64) int {
 	r := &simRun{seed: seed}
 	n := 0
-	for !r.dropSettle("q" + strconv.Itoa(n)) {
+	for !r.picks("q" + strconv.Itoa(n)) {
 		n++
 	}
 	return n
@@ -358,19 +386,34 @@ func TestSimAccounting(t *testing.T) {
 			billed: 20, spent: 20, doubled: 10, lostGrace: 10, i1: true,
 		},
 		{
+			// Refused by the down store, so not fired then; the flush
+			// settles the same id and the bug empties that.
 			name:    "planted settle refused by a down store",
 			planted: true,
 			steps:   []SimStep{reserve(n, 0, 20, 10), op(n+1, OpStoreDown, 0), op(n+2, OpSettle, 0)},
-			billed:  10, spent: 10, i1: true,
+			billed:  10, spent: 0, plantedN: 1, plantedLost: 10,
+			classes: []string{ClassOther, ClassUnaccounted},
 		},
 		{
 			// The store applied the emptied settle but the replica never
-			// heard, so it charges the cost from pending: fired, nothing
-			// lost.
+			// heard, so it keeps the cost as pending under the id; the
+			// flush is emptied too, and that one is heard.
 			name:    "planted settle with its reply lost",
 			planted: true,
 			steps:   []SimStep{reserve(n, 0, 20, 10), op(n+1, OpSettleLost, 0)},
-			billed:  10, spent: 10, plantedN: 1, i1: true,
+			billed:  10, spent: 0, plantedN: 2, plantedLost: 10,
+			classes: []string{ClassOther, ClassUnaccounted},
+		},
+		{
+			// The planted bug empties a late settle that finds a
+			// tombstone: the correction takes the expiry charge back and
+			// adds nothing.
+			name:    "planted late settle of an expired hold",
+			planted: true,
+			steps: []SimStep{reserve(n, 0, 20, 10),
+				{Op: OpClockTTL, Advance: DefaultSimConfig().HoldTTL + time.Second, N: n + 1}, op(n+2, OpSettle, 0)},
+			billed: 10, spent: 0, plantedN: 1, plantedLost: 10,
+			classes: []string{ClassOther, ClassUnaccounted},
 		},
 		{
 			name:    "planted settle applied",
@@ -393,8 +436,8 @@ func TestSimAccounting(t *testing.T) {
 		if !o.Balanced() {
 			t.Errorf("%s: not balanced (unaccounted %d)", tt.name, o.Unaccounted())
 		}
-		if o.I1 != tt.i1 || !o.I3 {
-			t.Errorf("%s: I1 %v I3 %v, want %v true", tt.name, o.I1, o.I3, tt.i1)
+		if o.I1 != tt.i1 || !o.I3 || !o.I4 {
+			t.Errorf("%s: I1 %v I3 %v I4 %v, want %v true true", tt.name, o.I1, o.I3, o.I4, tt.i1)
 		}
 		if c := o.Classes(); !slices.Equal(c, tt.classes) {
 			t.Errorf("%s: classes %q, want %q", tt.name, c, tt.classes)
@@ -402,13 +445,13 @@ func TestSimAccounting(t *testing.T) {
 	}
 }
 
-// TestSimBoundNeedsHoldsToOutliveNoRequest pins the case I2's bound does
-// not cover: holds that expire under requests still in flight on a live
-// process free budget with no outage at all. The gateway's config rules
-// it out (budget.reservation_ttl must be longer than every provider's
-// timeout), but the generator can draw it, so a clean I2 depends on the
-// search not reaching it.
-func TestSimBoundNeedsHoldsToOutliveNoRequest(t *testing.T) {
+// TestSimExpiryFreesNoBudget is the case I2's bound did not cover before
+// expired holds were charged (M11): holds that expire under requests still
+// in flight on a live process freed budget with no outage at all, and
+// twelve requests of a 100 budget were billed 400. Charged at their held
+// amount, the expired holds keep the budget spent until each late settle
+// corrects it, so the requests past the limit are refused.
+func TestSimExpiryFreesNoBudget(t *testing.T) {
 	t.Parallel()
 	ttl := DefaultSimConfig().HoldTTL
 	var steps []SimStep
@@ -424,8 +467,7 @@ func TestSimBoundNeedsHoldsToOutliveNoRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Three processes, three hold TTLs plus 3 s: 150 × (1 + 45m3s / 1h).
-	if o.Billed != 400 || o.Bound != 262 || o.I2 || !o.I1 || !o.Balanced() {
-		t.Fatalf("billed %d bound %d, I2 %v I1 %v balanced %v; want 400, 262, false, true, true", o.Billed, o.Bound, o.I2, o.I1, o.Balanced())
+	if o.Billed != 100 || !o.I2 || !o.I1 || !o.I4 || !o.Balanced() || o.Spent != o.Billed {
+		t.Fatalf("billed %d spent %d, I2 %v I1 %v I4 %v balanced %v; want 100, 100, all true", o.Billed, o.Spent, o.I2, o.I1, o.I4, o.Balanced())
 	}
 }

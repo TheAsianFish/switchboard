@@ -14,11 +14,11 @@ import (
 func TestRunArmIsOrderIndependent(t *testing.T) {
 	t.Parallel()
 	cfg := budget.DefaultSimConfig()
-	a1, r1, err := RunArm(context.Background(), ArmMain, cfg, 0, 12, 1, nil)
+	a1, r1, err := RunArm(context.Background(), ArmMain, cfg, 0, 40, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a3, r3, err := RunArm(context.Background(), ArmMain, cfg, 0, 12, 3, nil)
+	a3, r3, err := RunArm(context.Background(), ArmMain, cfg, 0, 40, 3, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,11 +26,11 @@ func TestRunArmIsOrderIndependent(t *testing.T) {
 	if !reflect.DeepEqual(a1, a3) || !reflect.DeepEqual(r1, r3) {
 		t.Fatalf("one worker and three disagree:\n%+v\n%+v", a1, a3)
 	}
-	if a1.Seeds != 12 || a1.Steps == 0 || a1.Runs < 12 || len(a1.Exercised) != len(budget.SimFaults) {
+	if a1.Seeds != 40 || a1.Steps == 0 || a1.Runs < 40 || len(a1.Exercised) != len(budget.SimFaults) {
 		t.Fatalf("arm %+v", a1)
 	}
 	if len(r1) == 0 {
-		t.Fatal("no seed lost spend in 12; the default config should")
+		t.Fatal("no seed lost spend in 40; the default config should")
 	}
 	for _, rec := range r1 {
 		if len(rec.Rule)+len(rec.Classes) == 0 {
@@ -62,10 +62,17 @@ func TestSummariseCounts(t *testing.T) {
 		{Seed: 2, Steps: 4, Outcome: lost,
 			Violations: []budget.SimViolation{{Invariant: "I1", Class: budget.ClassExpiredHold, Minimal: []budget.SimStep{step, step, kill}, Outcome: lost}}},
 		{Seed: 9, Steps: 1, Outcome: over},
+		// Over-counted without a lost reply, by expired holds: I4's ratio
+		// is 6/10 here and 3/10 on seed 4.
+		{Seed: 7, Steps: 2, Outcome: budget.SimOutcome{Billed: 10, Spent: 16, ExpiredBound: 10, Expired: []string{"q0"}, I1: true, I2: true, I3: true, I4: true}},
+		{Seed: 4, Steps: 2, Outcome: budget.SimOutcome{Billed: 10, Spent: 13, ExpiredBound: 10, Expired: []string{"q0"}, I1: true, I2: true, I3: true, I4: true}},
 	}
 	arm := Summarise(ArmMain, cfg, 0, results)
-	if arm.Steps != 8 || arm.Exercised[1].Seeds != 2 || arm.OverLimit != 1 || arm.OverCounted != 1 || arm.OverCountedLost != 1 {
+	if arm.Steps != 12 || arm.Exercised[1].Seeds != 2 || arm.OverLimit != 1 || arm.OverCounted != 3 || arm.OverCountedLost != 1 || arm.ExpiredCharged != 2 {
 		t.Fatalf("arm %+v", arm)
+	}
+	if c := arm.I4Closest; c == nil || c.Seed != 7 || c.Overshoot != 6 || c.Bound != 10 {
+		t.Fatalf("I4 closest %+v", arm.I4Closest)
 	}
 	if c := arm.Closest; c == nil || c.Seed != 9 || c.Overshoot != 50 || c.Bound != 300 {
 		t.Fatalf("closest %+v", arm.Closest)

@@ -66,25 +66,34 @@ type DegradeOptions struct {
 // replica processes, not replicas: a restarted replica starts with a full
 // allowance.
 //
-// Costs settled while degraded are kept as pending charges per key and
-// window and are charged to the primary on the first successful primary
-// call after recovery. Pending charges live only in this process's memory:
-// a replica killed while degraded takes its unreported spend with it,
-// which is at most what its allowance admitted plus the cost of primary
-// holds it settled during the outage. That includes requests admitted on
-// grace and still in flight when the process dies: their cost was never
-// pending and never held on the primary, so only this process knew it.
-// A lost reply on a reserve gets there without an outage, since the
-// failed call sends the request to grace while the primary keeps an
-// orphaned hold that expires on its own.
+// Costs settled while degraded are kept as pending charges and are
+// charged to the primary on the first successful primary call after
+// recovery. Costs of grace holds are summed per key and window; the cost
+// of a hold on the primary keeps its reservation id, so the flush settles
+// that hold: it releases the hold if it is still there, or corrects the
+// charge the primary made when it expired (Redis's tombstone) by actual −
+// held. Without the id, the hold's expiry charge and the flushed cost
+// would both land on the primary.
 //
-// A reservation held on the primary and settled while degraded cannot be
-// released there; its cost goes to pending and the hold expires by TTL, so
-// until then the key is over-reserved by it, which errs on refusing. A
-// primary hold whose replica died before settling is also released by
-// TTL, and its cost never reaches the primary's spent.
+// Pending charges live only in this process's memory. A replica killed
+// while degraded takes the pending cost of its grace holds with it, at
+// most what its allowance admitted, and that includes requests admitted
+// on grace and still in flight when the process dies: their cost was
+// never pending and never held on the primary, so only this process knew
+// it. The pending cost of a primary hold is not lost with the process:
+// the hold expires and the primary charges its held amount.
 //
-// A primary call that times out after the primary applied it is
+// A primary hold whose replica died before settling, or that outlived its
+// TTL for any other reason, is charged at its held amount when it expires;
+// since the hold is the request's worst case, this over-counts by held −
+// actual unless a late settle corrects it, and errs on refusing. A
+// request whose input was under-estimated can cost more than its hold, and
+// then a dead replica's hold under-counts by the difference.
+//
+// A lost reply on a reserve sends the request to grace while the primary
+// keeps an orphaned hold; the hold expires and is charged, and the grace
+// cost is charged as well, so a lost reply can over-count spend by the
+// hold. A primary call that times out after the primary applied it is
 // indistinguishable from one that never arrived; a settle in that state is
 // charged again from pending, so an outage can over-count spend.
 type Degrading struct {
@@ -105,7 +114,7 @@ type Degrading struct {
 	// without the primary over time, and a key whose daily window rolls
 	// over mid-outage must not get a second allowance.
 	buckets  map[string]*graceBucket
-	pending  map[accountKey]pendingCharge
+	pending  map[pendingKey]pendingCharge
 	flushing bool
 	// failures counts primary failures; a success ends degraded mode only
 	// if none was recorded after its call started.
@@ -123,6 +132,13 @@ type graceBucket struct {
 	// period, so frequent refills lose nothing to rounding.
 	rem uint64
 }
+
+// pendingKey names one pending charge: a key and window, and the
+// reservation id when the cost belongs to a hold on the primary. Costs of
+// grace holds and plain charges share one entry per key and window (id
+// empty); a primary hold's cost keeps its own entry, so the flush settles
+// that hold instead of charging beside it.
+type pendingKey struct{ key, window, id string }
 
 // pendingCharge is cost settled while degraded, not yet on the primary.
 type pendingCharge struct {
@@ -143,7 +159,7 @@ func NewDegrading(primary Ledger, opts DegradeOptions) *Degrading {
 		onState: opts.OnState,
 		now:     opts.Now,
 		buckets: make(map[string]*graceBucket),
-		pending: make(map[accountKey]pendingCharge),
+		pending: make(map[pendingKey]pendingCharge),
 	}
 	if d.refill <= 0 {
 		d.refill = DefaultGraceRefill
@@ -328,7 +344,7 @@ func (d *Degrading) flush(ctx context.Context) (cost.Nanos, error) {
 	for {
 		d.mu.Lock()
 		var (
-			k     accountKey
+			k     pendingKey
 			p     pendingCharge
 			found bool
 		)
@@ -341,7 +357,7 @@ func (d *Degrading) flush(ctx context.Context) (cost.Nanos, error) {
 			return total, nil
 		}
 		cctx, cancel := context.WithTimeout(ctx, d.timeout)
-		err := d.primary.Settle(cctx, k.key, p.budget, Reservation{Window: k.window}, p.amount)
+		err := d.primary.Settle(cctx, k.key, p.budget, Reservation{ID: k.id, Window: k.window}, p.amount)
 		cancel()
 		if err != nil {
 			return total, fmt.Errorf("budget flush %s window %s: %w", k.key, k.window, err)
@@ -437,8 +453,12 @@ func (d *Degrading) Settle(ctx context.Context, key string, b Budget, r Reservat
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if actual > 0 {
-		k := accountKey{key, r.Window}
+	// A primary hold's cost keeps its id even when it is zero: the flush
+	// must still settle the hold, or it would expire and be charged.
+	if k := (pendingKey{key: key, window: r.Window}); actual > 0 || (!r.grace && r.ID != "") {
+		if !r.grace {
+			k.id = r.ID
+		}
 		p := d.pending[k]
 		p.budget = b
 		p.amount += actual

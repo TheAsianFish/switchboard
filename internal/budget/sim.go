@@ -245,8 +245,8 @@ type SimOutcome struct {
 	// Bound is I2's allowance over the limit, in nanodollars, rounded
 	// down: Processes × Grace × (1 + Elapsed / GraceRefill) + Under.
 	Bound cost.Nanos
-	// I1, I2 and I3 report whether each invariant held.
-	I1, I2, I3 bool
+	// I1 to I4 report whether each invariant held.
+	I1, I2, I3, I4 bool
 	// Exercised lists the faults this run exercised, in SimFaults order.
 	Exercised []SimFault
 	// LostReply is true if any reply was lost after the store applied
@@ -259,10 +259,24 @@ type SimOutcome struct {
 	Planted int
 	// LostPending, LostRedisHold and LostGraceHold are the fault log of
 	// every kill: the pending spend the killed process held that the
-	// store had not already applied, and the cost of its requests in
-	// flight with a hold on the store and on its grace allowance. A Redis
-	// hold in flight is never settled, so it expires.
+	// store had not already applied and that no hold on the store stands
+	// for, what its requests with a hold on the store cost above that
+	// hold, and the cost of its requests in flight on its grace
+	// allowance. A Redis hold whose request died is never settled, so it
+	// expires and the store charges the held amount: the request is lost
+	// only where it cost more than its hold.
 	LostPending, LostRedisHold, LostGraceHold cost.Nanos
+	// OverExpired is the other side of a dead request's expired hold:
+	// what the held amount charged exceeds the request's cost.
+	OverExpired cost.Nanos
+	// Orphaned is what the store charged for holds left by a lost reply
+	// on a reserve: the replica admitted the request on grace and never
+	// settled the hold, which expired.
+	Orphaned cost.Nanos
+	// ExpiredBound is held − cost summed over every hold that expired,
+	// where the hold exceeds the cost, for requests admitted on the
+	// store: the most the expiry charges can over-count (I4).
+	ExpiredBound cost.Nanos
 	// Doubled is what the store charged twice: the spend a call applied
 	// before its reply was lost (read from the store around the call),
 	// which the replica kept as pending and later flushed again. Pending
@@ -287,6 +301,8 @@ func (o SimOutcome) Holds(inv string) bool {
 		return o.I2
 	case "I3":
 		return o.I3
+	case "I4":
+		return o.I4
 	}
 	return true
 }
@@ -307,15 +323,18 @@ func (o SimOutcome) Classify() string {
 // Shortfall is billed − spent: the spend the store never recorded.
 func (o SimOutcome) Shortfall() cost.Nanos { return o.Billed - o.Spent }
 
-// Lost is the spend that never reached the store before double charges
-// made up some of it: billed − spent + Doubled. Without adding the double
-// charges back, a lost reply's second charge would hide a loss of the
-// same size somewhere else.
-func (o SimOutcome) Lost() cost.Nanos { return o.Shortfall() + o.Doubled }
+// Lost is the spend that never reached the store before charges above the
+// cost made up some of it: billed − spent + Doubled + Orphaned +
+// OverExpired. Without adding those back, a lost reply's second charge or
+// a dead request's over-estimated hold would hide a loss of the same size
+// somewhere else.
+func (o SimOutcome) Lost() cost.Nanos {
+	return o.Shortfall() + o.Doubled + o.Orphaned + o.OverExpired
+}
 
 // Unexplained is the loss the two listed ways of losing spend do not
-// account for: what remains after the pending spend and the in-flight
-// Redis holds of every killed process.
+// account for: what remains after the pending spend of every killed
+// process and what its requests with a Redis hold cost above the hold.
 func (o SimOutcome) Unexplained() cost.Nanos {
 	return o.Lost() - o.LostPending - o.LostRedisHold
 }
@@ -329,7 +348,8 @@ func (o SimOutcome) Unaccounted() cost.Nanos {
 }
 
 // Balanced reports whether the run's money is fully accounted for:
-// spent = billed − every kill's losses − the planted bug's + Doubled.
+// spent = billed − every kill's losses − the planted bug's + Doubled +
+// Orphaned + OverExpired.
 // A run that is not balanced lost or invented spend in a way the fault
 // log does not record.
 func (o SimOutcome) Balanced() bool { return o.Unaccounted() == o.PlantedLost }
@@ -340,7 +360,8 @@ func (o SimOutcome) Balanced() bool { return o.Unaccounted() == o.PlantedLost }
 // pending" when it exceeds the killed processes' holds in flight (Redis
 // and grace), "expired hold" when it exceeds their pending spend and
 // grace holds, and "other" when it exceeds both listed ways together.
-// Nil if no spend was lost.
+// Since expired holds are charged (M12), "expired hold" is only what a
+// dead request cost above its hold. Nil if no spend was lost.
 func (o SimOutcome) Classes() []string {
 	if o.I1 {
 		return nil
@@ -373,7 +394,7 @@ const (
 )
 
 // Invariants lists the invariants in report order.
-var Invariants = []string{"I1", "I2", "I3"}
+var Invariants = []string{"I1", "I2", "I3", "I4"}
 
 // Simulator runs schedules on one miniredis. It is not safe for
 // concurrent use; run one per goroutine.
@@ -429,10 +450,11 @@ func (s *Simulator) Config() SimConfig { return s.cfg }
 func (s *Simulator) Run(seed uint64, steps []SimStep, trace bool) (SimOutcome, error) {
 	s.runs++
 	s.m.FlushAll()
-	r := &simRun{sim: s, seed: seed, now: simT0, trace: trace, expired: map[string]bool{}, exercised: map[SimFault]bool{}}
+	r := &simRun{sim: s, seed: seed, now: simT0, trace: trace, expired: map[string]bool{}, exercised: map[SimFault]bool{},
+		redis: map[string]simReq{}, orphans: map[string]bool{}, charged: map[string]cost.Nanos{}}
 	s.m.SetTime(simT0)
 	keys := (&Redis{prefix: simPrefix}).keys(simKey, s.budget().Window(simT0))
-	r.balKey, r.expKey = keys[0], keys[1]
+	r.balKey, r.expKey, r.amtKey = keys[0], keys[1], keys[2]
 	for range s.cfg.Replicas {
 		r.replicas = append(r.replicas, r.start())
 	}
@@ -467,6 +489,9 @@ func (s *Simulator) Run(seed uint64, steps []SimStep, trace bool) (SimOutcome, e
 		LostRedisHold: r.lostRedis,
 		LostGraceHold: r.lostGrace,
 		Doubled:       r.doubled,
+		OverExpired:   r.overExpired,
+		Orphaned:      r.orphaned,
+		ExpiredBound:  r.expiredBound,
 		PlantedLost:   r.plantedLost,
 		Trace:         r.lines,
 	}
@@ -482,8 +507,12 @@ func (s *Simulator) Run(seed uint64, steps []SimStep, trace bool) (SimOutcome, e
 	o.Bound, o.I2 = s.bound(o)
 	o.I1 = o.Spent >= o.Billed
 	// Spend above billed is only allowed where a lost reply's applied call
-	// was charged again, and only by that much.
-	o.I3 = o.Spent <= o.Billed+o.Doubled
+	// was charged again or its orphaned hold expired, and where an
+	// expired hold was charged above its request's cost, and only by that
+	// much.
+	o.I3 = o.Spent <= o.Billed+o.Doubled+o.Orphaned+o.ExpiredBound
+	// Without a lost reply, the expiry charges are the only over-count.
+	o.I4 = o.LostReply || o.Spent-o.Billed <= o.ExpiredBound
 	return o, nil
 }
 
@@ -521,21 +550,30 @@ type simRun struct {
 
 	billed, under cost.Nanos
 
-	balKey, expKey string
-	exercised      map[SimFault]bool
-	expired        map[string]bool
-	lostReply      bool
-	killedPending  bool
-	planted        int
+	balKey, expKey, amtKey string
+	exercised              map[SimFault]bool
+	expired                map[string]bool
+	lostReply              bool
+	killedPending          bool
+	planted                int
 
 	lostPending, lostRedis, lostGrace cost.Nanos
 	doubled, plantedLost              cost.Nanos
+	overExpired, orphaned             cost.Nanos
+	expiredBound                      cost.Nanos
 
-	// settling is the request being settled, and victim is set while the
-	// planted bug has emptied its settle and the store has not yet
-	// answered.
-	settling simReq
-	victim   bool
+	// redis maps the id of every request admitted on the store to it;
+	// orphans holds the ids of holds a lost reply left on the store; and
+	// charged maps every hold that expired to the amount the store
+	// charged for it.
+	redis   map[string]simReq
+	orphans map[string]bool
+	charged map[string]cost.Nanos
+
+	// victim is set while the planted bug has emptied a settle (of
+	// victimCost) and the store has not yet answered.
+	victim     bool
+	victimCost cost.Nanos
 
 	trace bool
 	lines []string
@@ -548,11 +586,19 @@ type simReplica struct {
 	conn     *simConn
 	gen      int
 	inflight []simReq
-	// dup is the part of the process's pending spend the store already
-	// applied (a lost reply's call): flushing it charges it twice, and
-	// losing it with the process loses nothing.
-	dup cost.Nanos
+	// dup is the part of the process's plain pending spend the store
+	// already applied (a lost reply's call): flushing it charges it
+	// twice, and losing it with the process loses nothing. dupHold is the
+	// same for pending spend kept under a Redis hold's id, per id.
+	dup     cost.Nanos
+	dupHold map[string]dupHold
 }
+
+// dupHold is pending spend under a hold's id whose settle the store
+// applied before the reply was lost: amount is the pending cost, store
+// what the store holds for the request (the expiry charge, if any, plus
+// what the lost call added).
+type dupHold struct{ amount, store cost.Nanos }
 
 type simReq struct {
 	res  Reservation
@@ -591,38 +637,56 @@ func (r *simRun) start() *simReplica {
 		Timeout: 10 * time.Second,
 		Now:     r.Now,
 	})
-	return &simReplica{d: d, conn: conn, gen: r.procs}
+	return &simReplica{d: d, conn: conn, gen: r.procs, dupHold: map[string]dupHold{}}
 }
 
 // dropSettle is the planted bug's choice: one request id in a hundred,
 // by a hash of the seed and the id.
-func (r *simRun) dropSettle(id string) bool {
+func (r *simRun) dropSettle(id string, actual cost.Nanos) bool {
+	if !r.picks(id) {
+		return false
+	}
+	// It counts as fired once the store applies it (simConn.do): a settle
+	// refused by a down store changes nothing.
+	r.victim, r.victimCost = true, actual
+	return true
+}
+
+// picks reports whether the planted bug empties id's settles.
+func (r *simRun) picks(id string) bool {
 	h := fnv.New64a()
 	var b [8]byte
 	binary.LittleEndian.PutUint64(b[:], r.seed)
 	_, _ = h.Write(b[:])
 	_, _ = h.Write([]byte(id))
-	if h.Sum64()%100 != 0 {
-		return false
-	}
-	// It counts as fired once the store applies it (simConn.do): a settle
-	// refused by a down store changes nothing.
-	r.victim = true
-	return true
+	return h.Sum64()%100 == 0
 }
 
 // track runs after every ledger call on rep: a lost reply's applied spend
-// becomes duplicate pending, and duplicate pending that a flush charged
-// is a double charge.
+// on a plain charge becomes duplicate pending, and duplicate pending that
+// a flush charged is a double charge. A lost settle of a Redis hold is
+// recorded by the settle step itself (dupHold).
 func (r *simRun) track(rep *simReplica) {
-	pending := rep.d.pendingTotal()
-	if l := rep.conn.lostSpent; l > 0 {
-		rep.conn.lostSpent = 0
-		rep.dup = min(rep.dup+l, pending)
+	plain, held := rep.d.pendingSplit()
+	if l := rep.conn.lostSpent; l > 0 && rep.conn.lostPlain {
+		rep.dup = min(rep.dup+l, plain)
 	}
-	if pending == 0 && rep.dup > 0 {
+	rep.conn.lostSpent, rep.conn.lostPlain = 0, false
+	if plain == 0 && rep.dup > 0 {
 		r.doubled += rep.dup
 		rep.dup = 0
+	}
+	for id, dh := range rep.dupHold {
+		if _, ok := held[id]; ok {
+			continue
+		}
+		// Flushed: the store had no hold or tombstone left for it, so the
+		// flush charged the cost again, unless the planted bug emptied
+		// that settle too (it picks by id, so it empties both).
+		delete(rep.dupHold, id)
+		if !r.sim.cfg.Planted || !r.picks(id) {
+			r.doubled += dh.amount
+		}
 	}
 }
 
@@ -639,6 +703,9 @@ func (r *simRun) step(st SimStep) error {
 		lost := rep.conn.disarm()
 		if lost {
 			r.exercised[FaultReserveLost] = true
+			if r.sim.m.HGet(r.amtKey, id) != "" {
+				r.orphans[id] = true
+			}
 		}
 		switch {
 		case errors.Is(err, ErrExhausted):
@@ -649,7 +716,11 @@ func (r *simRun) step(st SimStep) error {
 		}
 		r.billed += st.Cost
 		r.under += max(0, st.Cost-st.Hold)
-		rep.inflight = append(rep.inflight, simReq{res: res, cost: st.Cost})
+		q := simReq{res: res, cost: st.Cost}
+		rep.inflight = append(rep.inflight, q)
+		if !res.grace {
+			r.redis[id] = q
+		}
 		where := "on Redis"
 		if res.grace {
 			where = "on grace"
@@ -682,12 +753,26 @@ func (r *simRun) step(st SimStep) error {
 	case OpKill:
 		rep := r.replicas[st.Replica]
 		r.exercised[FaultKill] = true
-		pending := rep.d.pendingTotal()
-		if pending > 0 {
+		plain, held := rep.d.pendingSplit()
+		if plain > 0 {
 			r.killedPending = true
 		}
 		// The part the store already applied dies without loss.
-		lost := pending - rep.dup
+		lost := plain - rep.dup
+		for id, amount := range held {
+			if amount > 0 {
+				r.killedPending = true
+			}
+			if dh, ok := rep.dupHold[id]; ok {
+				// The store applied this settle and lost the reply: it
+				// already holds what it will ever hold for the request.
+				lost += dh.amount - dh.store
+				continue
+			}
+			// The hold is on the store, live or as a tombstone, and will
+			// have been charged at its held amount.
+			r.expiredCharge(r.redis[id].res.Amount, amount)
+		}
 		r.lostPending += lost
 		var inflight []string
 		for _, q := range rep.inflight {
@@ -696,7 +781,7 @@ func (r *simRun) step(st SimStep) error {
 				kind = "grace hold"
 				r.lostGrace += q.cost
 			} else {
-				r.lostRedis += q.cost
+				r.expiredCharge(q.res.Amount, q.cost)
 			}
 			inflight = append(inflight, fmt.Sprintf("%s (%s, cost %d)", q.res.ID, kind, q.cost))
 		}
@@ -730,13 +815,30 @@ func (r *simRun) step(st SimStep) error {
 	return nil
 }
 
+// expiredCharge records a dead request's hold, charged by the store at
+// its held amount: the part above the cost is over-counted, the part
+// below is lost.
+func (r *simRun) expiredCharge(hold, c cost.Nanos) {
+	r.overExpired += max(0, hold-c)
+	r.lostRedis += max(0, c-hold)
+}
+
 // settle settles q on rep and says where its cost went.
 func (r *simRun) settle(rep *simReplica, q simReq) (string, error) {
 	before := rep.d.pendingTotal()
 	planted := r.planted
-	r.settling = q
+	rep.conn.lostPlain = q.res.grace
 	err := rep.d.Settle(r.sim.ctx, simKey, r.sim.budget(), q.res, q.cost)
-	r.settling, r.victim = simReq{}, false
+	r.victim = false
+	if rep.conn.lost && !q.res.grace {
+		// The store applied the settle of a Redis hold and the reply was
+		// lost: the cost waits in pending under the hold's id.
+		if _, held := rep.d.pendingSplit(); held != nil {
+			if _, ok := held[q.res.ID]; ok {
+				rep.dupHold[q.res.ID] = dupHold{amount: q.cost, store: r.charged[q.res.ID] + rep.conn.lostSpent}
+			}
+		}
+	}
 	r.track(rep)
 	if err != nil {
 		return "", err
@@ -808,20 +910,36 @@ func (r *simRun) holdsOpen() bool {
 	return err == nil && len(m) > 0
 }
 
-// noteExpired records the holds the next script will purge as expired:
-// every script starts by releasing the holds whose expiry is at or before
-// Redis TIME, so a hold seen here has expired unsettled.
-func (r *simRun) noteExpired() {
+// noteExpired records the holds the next script will purge as expired
+// and returns what their expiry will charge: every script starts by
+// charging the holds whose expiry is at or before Redis TIME, so a hold
+// seen here has expired unsettled.
+func (r *simRun) noteExpired() cost.Nanos {
 	m, err := r.sim.m.SortedSet(r.expKey)
 	if err != nil {
-		return
+		return 0
 	}
 	now := float64(r.now.UnixMilli())
+	var charge cost.Nanos
 	for id, at := range m {
-		if at <= now {
-			r.expired[id] = true
+		if at > now {
+			continue
+		}
+		amount, _ := strconv.ParseInt(orZero(r.sim.m.HGet(r.amtKey, id)), 10, 64)
+		charge += cost.Nanos(amount)
+		if r.expired[id] {
+			continue
+		}
+		r.expired[id] = true
+		r.charged[id] = cost.Nanos(amount)
+		switch q, ok := r.redis[id]; {
+		case ok:
+			r.expiredBound += max(0, cost.Nanos(amount)-q.cost)
+		case r.orphans[id]:
+			r.orphaned += cost.Nanos(amount)
 		}
 	}
+	return charge
 }
 
 func lostNote(lost bool) string {
@@ -849,6 +967,26 @@ func (d *Degrading) pendingTotal() cost.Nanos {
 	return t
 }
 
+// pendingSplit is d's pending spend in two parts: the plain sum, and the
+// spend kept under a Redis hold's id, by id (nil if none).
+func (d *Degrading) pendingSplit() (cost.Nanos, map[string]cost.Nanos) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var plain cost.Nanos
+	var held map[string]cost.Nanos
+	for k, p := range d.pending {
+		if k.id == "" {
+			plain += p.amount
+			continue
+		}
+		if held == nil {
+			held = map[string]cost.Nanos{}
+		}
+		held[k.id] += p.amount
+	}
+	return plain, held
+}
+
 // belowFull reports whether any key's grace allowance is below full.
 func (d *Degrading) belowFull() bool {
 	d.mu.Lock()
@@ -869,9 +1007,11 @@ type simConn struct {
 	run   *simRun
 	inner redis.Scripter
 	// lose is armed by a lost-reply step; lost records that it fired and
-	// lostSpent what the call it fired on added to spent.
-	lose, lost bool
-	lostSpent  cost.Nanos
+	// lostSpent what the call it fired on added to spent, apart from the
+	// expiry charges it made. lostPlain marks a call whose cost the
+	// replica keeps as plain pending if the reply is lost.
+	lose, lost, lostPlain bool
+	lostSpent             cost.Nanos
 }
 
 var _ redis.Scripter = (*simConn)(nil)
@@ -892,7 +1032,7 @@ func (c *simConn) do(ctx context.Context, call func() *redis.Cmd) *redis.Cmd {
 		cmd.SetErr(errSimUnreachable)
 		return cmd
 	}
-	r.noteExpired()
+	expiring := r.noteExpired()
 	before := r.spent()
 	cmd := call()
 	if errors.Is(cmd.Err(), redis.ErrNoScript) || redis.HasErrorPrefix(cmd.Err(), "NOSCRIPT") {
@@ -904,12 +1044,12 @@ func (c *simConn) do(ctx context.Context, call func() *redis.Cmd) *redis.Cmd {
 		r.victim = false
 		r.planted++
 		if !lose {
-			r.plantedLost += r.settling.cost
+			r.plantedLost += r.victimCost
 		}
 	}
 	if lose {
 		c.lose, c.lost = false, true
-		c.lostSpent = r.spent() - before
+		c.lostSpent = r.spent() - before - expiring
 		r.lostReply = true
 		lost := redis.NewCmd(ctx)
 		lost.SetErr(errSimLost)

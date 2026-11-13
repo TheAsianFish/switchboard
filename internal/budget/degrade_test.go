@@ -163,8 +163,8 @@ func TestDegradingFlushesOnce(t *testing.T) {
 	inFlight := mustReserve(t, d, "k", monthly, "in-flight", 300)
 
 	f.down.Store(true)
-	// The in-flight request finishes during the outage; its hold stays on
-	// the primary until it expires.
+	// The in-flight request finishes during the outage; its cost waits in
+	// pending under its reservation id, and its hold stays on the primary.
 	mustSettle(t, d, "k", monthly, inFlight, 200)
 	local := mustReserve(t, d, "k", monthly, "during", 80)
 	mustSettle(t, d, "k", monthly, local, 50)
@@ -190,16 +190,18 @@ func TestDegradingFlushesOnce(t *testing.T) {
 	if bal.Spent != 100 {
 		t.Fatalf("probe balance spent = %v, want 100", bal.Spent)
 	}
+	// The flush settled the primary hold by its id, releasing it, and
+	// charged the grace hold's cost plainly.
 	bal = mustBalance(t, d, "k", monthly)
-	wantPosition(t, bal, 350, 300)
+	wantPosition(t, bal, 350, 0)
 
 	// A local reservation from the outage settles after recovery: it is a
 	// plain charge on the primary.
 	mustSettle(t, d, "k", monthly, Reservation{}, 0)
 	mustSettle(t, d, "k", monthly, mustReserve(t, d, "k", monthly, "after", 20), 25)
-	wantPosition(t, mustBalance(t, d, "k", monthly), 375, 300)
+	wantPosition(t, mustBalance(t, d, "k", monthly), 375, 0)
 
-	// The primary hold from before the outage lapses by TTL.
+	// Nothing is left on the primary to expire and be charged again.
 	c.Set(t0.Add(2 * time.Minute))
 	wantPosition(t, mustBalance(t, d, "k", monthly), 375, 0)
 	s.want(t, true, false)
@@ -207,7 +209,7 @@ func TestDegradingFlushesOnce(t *testing.T) {
 	f.mu.Lock()
 	charges := f.charges
 	f.mu.Unlock()
-	if charges != 2 { // one flush plus the zero settle after recovery
+	if charges != 2 { // the grace cost's flush plus the zero settle after recovery
 		t.Fatalf("plain charges on the primary = %d, want 2", charges)
 	}
 }
@@ -675,6 +677,66 @@ func TestDegradingConcurrentOutages(t *testing.T) {
 		t.Fatal("the primary never went down; the test does not exercise degraded mode")
 	}
 	t.Logf("%d outages, %d settled", outages.Load(), settled.Load())
+}
+
+// TestDegradingParkedSettleOutlivesTwoHoldTTLs is the case a tombstone that
+// lived one hold TTL would get wrong: a request admitted on the primary
+// settles on grace, the outage lasts longer than two hold TTLs, and the
+// flush after it must charge the request once.
+func TestDegradingParkedSettleOutlivesTwoHoldTTLs(t *testing.T) {
+	t.Parallel()
+	m := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: m.Addr(), MaxRetries: -1})
+	t.Cleanup(func() { _ = rdb.Close() })
+	c := &clock{t: t0}
+	m.SetTime(t0)
+	d := NewDegrading(NewRedis(rdb, "test:", time.Minute, c.Now), DegradeOptions{Grace: grace, Now: c.Now})
+	ctx := context.Background()
+
+	held := mustReserve(t, d, "k", monthly, "held", 80)
+	m.Close()
+	mustSettle(t, d, "k", monthly, held, 30)
+	if !d.Degraded() || pendingLen(d) != 1 {
+		t.Fatalf("degraded %v, pending entries %d; want true and 1", d.Degraded(), pendingLen(d))
+	}
+	if err := m.Restart(); err != nil {
+		t.Fatalf("restart miniredis: %v", err)
+	}
+	// The store comes back after two and a half hold TTLs: the hold has
+	// expired, and the first script to touch the key charges it at 80.
+	later := t0.Add(150 * time.Second)
+	m.SetTime(later)
+	m.FastForward(150 * time.Second)
+	c.Set(later)
+	bal, err := d.Balance(ctx, "k", monthly)
+	if err != nil {
+		t.Fatalf("Balance after the outage: %v", err)
+	}
+	if bal.Spent != 80 {
+		t.Fatalf("probe saw spent %v, want the expired hold's 80", bal.Spent)
+	}
+	if d.Degraded() || pendingLen(d) != 0 {
+		t.Fatalf("degraded %v, pending entries %d after the flush", d.Degraded(), pendingLen(d))
+	}
+	// The flush found the tombstone and corrected 80 to 30.
+	wantPosition(t, mustBalance(t, d, "k", monthly), 30, 0)
+}
+
+// TestDegradingParkedZeroSettleReleasesItsHold: a primary hold whose
+// request cost nothing and settled during an outage must still be settled
+// on the primary, or its expiry would charge the whole hold.
+func TestDegradingParkedZeroSettleReleasesItsHold(t *testing.T) {
+	t.Parallel()
+	d, f, c, _ := newTestDegrading(t)
+	held := mustReserve(t, d, "k", monthly, "held", 80)
+	f.down.Store(true)
+	mustSettle(t, d, "k", monthly, held, 0)
+	if pendingLen(d) != 1 {
+		t.Fatalf("pending entries = %d, want 1", pendingLen(d))
+	}
+	recoverAt(t, d, f, c, t0.Add(time.Second))
+	c.Set(t0.Add(2 * time.Minute))
+	wantPosition(t, mustBalance(t, d, "k", monthly), 0, 0)
 }
 
 func pendingLen(d *Degrading) int {
