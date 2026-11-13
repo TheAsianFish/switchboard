@@ -308,3 +308,123 @@ func TestSimConnLosesAppliedReply(t *testing.T) {
 		t.Fatalf("down store applied the call (n = %q) or outage not recorded", v)
 	}
 }
+
+// plantedVictim returns the first request number whose id the planted bug
+// picks for seed.
+func plantedVictim(seed uint64) int {
+	r := &simRun{seed: seed}
+	n := 0
+	for !r.dropSettle("q" + strconv.Itoa(n)) {
+		n++
+	}
+	return n
+}
+
+// TestSimAccounting checks that the fault log accounts for every run's
+// money exactly, double charges included, so a lost reply's second charge
+// cannot hide a loss and a planted settle the store never applied is not
+// counted as fired.
+func TestSimAccounting(t *testing.T) {
+	t.Parallel()
+	n := plantedVictim(1)
+	tests := []struct {
+		name                   string
+		planted                bool
+		steps                  []SimStep
+		billed, spent, doubled int64
+		lostPending, lostGrace int64
+		plantedN               int
+		plantedLost            int64
+		i1                     bool
+		classes                []string
+	}{
+		{
+			// r0's pending is a lost settle's cost the store already has,
+			// so killing r0 loses nothing; r1's grace request is lost.
+			// Without the double charge the shortfall (10) fits inside
+			// either kill's loss and no class was needed.
+			name: "kill drops pending the store already applied",
+			steps: []SimStep{reserve(0, 0, 20, 10), op(1, OpSettleLost, 0), op(2, OpStoreDown, 0),
+				reserve(3, 1, 20, 10), op(4, OpKill, 1), op(5, OpKill, 0)},
+			billed: 20, spent: 10, lostGrace: 10,
+			classes: []string{ClassOther},
+		},
+		{
+			// r0 flushes its lost settle's cost again, which pays for the
+			// grace request r1 lost: I1 holds, the double charge is seen.
+			name: "double charge covers a lost grace request",
+			steps: []SimStep{reserve(0, 0, 20, 10), op(1, OpSettleLost, 0), op(2, OpStoreDown, 0),
+				reserve(3, 1, 20, 10), op(4, OpKill, 1), op(5, OpStoreUp, 0)},
+			billed: 20, spent: 20, doubled: 10, lostGrace: 10, i1: true,
+		},
+		{
+			name:    "planted settle refused by a down store",
+			planted: true,
+			steps:   []SimStep{reserve(n, 0, 20, 10), op(n+1, OpStoreDown, 0), op(n+2, OpSettle, 0)},
+			billed:  10, spent: 10, i1: true,
+		},
+		{
+			// The store applied the emptied settle but the replica never
+			// heard, so it charges the cost from pending: fired, nothing
+			// lost.
+			name:    "planted settle with its reply lost",
+			planted: true,
+			steps:   []SimStep{reserve(n, 0, 20, 10), op(n+1, OpSettleLost, 0)},
+			billed:  10, spent: 10, plantedN: 1, i1: true,
+		},
+		{
+			name:    "planted settle applied",
+			planted: true,
+			steps:   []SimStep{reserve(n, 0, 20, 10), op(n+1, OpSettle, 0)},
+			billed:  10, spent: 0, plantedN: 1, plantedLost: 10,
+			classes: []string{ClassOther, ClassUnaccounted},
+		},
+	}
+	for _, tt := range tests {
+		o, err := newSim(t, tt.planted).Run(1, tt.steps, true)
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		got := []int64{int64(o.Billed), int64(o.Spent), int64(o.Doubled), int64(o.LostPending), int64(o.LostGraceHold), int64(o.Planted), int64(o.PlantedLost)}
+		want := []int64{tt.billed, tt.spent, tt.doubled, tt.lostPending, tt.lostGrace, int64(tt.plantedN), tt.plantedLost}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: billed, spent, doubled, pending, grace, planted, planted lost = %v, want %v\n%v", tt.name, got, want, o.Trace)
+		}
+		if !o.Balanced() {
+			t.Errorf("%s: not balanced (unaccounted %d)", tt.name, o.Unaccounted())
+		}
+		if o.I1 != tt.i1 || !o.I3 {
+			t.Errorf("%s: I1 %v I3 %v, want %v true", tt.name, o.I1, o.I3, tt.i1)
+		}
+		if c := o.Classes(); !slices.Equal(c, tt.classes) {
+			t.Errorf("%s: classes %q, want %q", tt.name, c, tt.classes)
+		}
+	}
+}
+
+// TestSimBoundNeedsHoldsToOutliveNoRequest pins the case I2's bound does
+// not cover: holds that expire under requests still in flight on a live
+// process free budget with no outage at all. The gateway's config rules
+// it out (budget.reservation_ttl must be longer than every provider's
+// timeout), but the generator can draw it, so a clean I2 depends on the
+// search not reaching it.
+func TestSimBoundNeedsHoldsToOutliveNoRequest(t *testing.T) {
+	t.Parallel()
+	ttl := DefaultSimConfig().HoldTTL
+	var steps []SimStep
+	for round := range 4 {
+		if round > 0 {
+			steps = append(steps, SimStep{Op: OpClockTTL, Advance: ttl + time.Second, N: len(steps)})
+		}
+		for _, h := range []int64{40, 40, 20} {
+			steps = append(steps, reserve(len(steps), 0, h, h))
+		}
+	}
+	o, err := newSim(t, false).Run(1, steps, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Billed != 400 || o.I2 || !o.I1 || !o.Balanced() {
+		t.Fatalf("billed %d (bound %d), I2 %v I1 %v balanced %v; want 400, false, true, true", o.Billed, o.Bound, o.I2, o.I1, o.Balanced())
+	}
+}

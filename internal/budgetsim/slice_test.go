@@ -24,8 +24,9 @@ const sliceSeeds = 200
 // once and compared with the committed records (billed, spent, the
 // invariants broken and the fault-log classes), so a change to the
 // ledger or the simulator that moves any of them fails here until the
-// results are re-run. The first seed of each class in the slice is also
-// shrunk again and must reach the committed length.
+// results are re-run. Every seed's money must balance against the fault
+// log. The first seed of each class in the slice is also shrunk again and
+// must reach the committed length.
 func TestSliceMatchesCommitted(t *testing.T) {
 	t.Parallel()
 	var sum Summary
@@ -96,6 +97,10 @@ func checkSlice(t *testing.T, cfg budget.SimConfig, recs []Record) {
 	defer sim.Close()
 	for i, o := range outcomes {
 		seed := uint64(i)
+		if !o.Balanced() {
+			t.Errorf("seed %d: the fault log does not account for the money: billed %d spent %d doubled %d, unaccounted %d against %d planted",
+				seed, o.Billed, o.Spent, o.Doubled, o.Unaccounted(), o.PlantedLost)
+		}
 		rec, ok := byseed[seed]
 		var broken []string
 		for _, inv := range budget.Invariants {

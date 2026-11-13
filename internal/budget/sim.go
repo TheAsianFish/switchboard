@@ -258,10 +258,21 @@ type SimOutcome struct {
 	// Planted counts settles the planted bug emptied.
 	Planted int
 	// LostPending, LostRedisHold and LostGraceHold are the fault log of
-	// every kill: the pending spend the killed process held, and the cost
-	// of its requests in flight with a hold on the store and on its grace
-	// allowance. A Redis hold in flight is never settled, so it expires.
+	// every kill: the pending spend the killed process held that the
+	// store had not already applied, and the cost of its requests in
+	// flight with a hold on the store and on its grace allowance. A Redis
+	// hold in flight is never settled, so it expires.
 	LostPending, LostRedisHold, LostGraceHold cost.Nanos
+	// Doubled is what the store charged twice: the spend a call applied
+	// before its reply was lost (read from the store around the call),
+	// which the replica kept as pending and later flushed again. Pending
+	// of that kind dying with its process is not counted in LostPending.
+	Doubled cost.Nanos
+	// PlantedLost is what the planted bug kept out of spent: the cost of
+	// each emptied settle the store applied and the replica heard back
+	// from. One whose reply was lost is kept as pending and charged
+	// again, so it loses nothing.
+	PlantedLost cost.Nanos
 	// Trace is one line per step and per quiescence action, filled only
 	// when asked for.
 	Trace []string
@@ -296,25 +307,36 @@ func (o SimOutcome) Classify() string {
 // Shortfall is billed − spent: the spend the store never recorded.
 func (o SimOutcome) Shortfall() cost.Nanos { return o.Billed - o.Spent }
 
-// Unexplained is the shortfall the two listed ways of losing spend do not
+// Lost is the spend that never reached the store before double charges
+// made up some of it: billed − spent + Doubled. Without adding the double
+// charges back, a lost reply's second charge would hide a loss of the
+// same size somewhere else.
+func (o SimOutcome) Lost() cost.Nanos { return o.Shortfall() + o.Doubled }
+
+// Unexplained is the loss the two listed ways of losing spend do not
 // account for: what remains after the pending spend and the in-flight
-// Redis holds of every killed process. A lost reply's double charge
-// shrinks the shortfall, so it can hide an unexplained loss, never invent
-// one.
+// Redis holds of every killed process.
 func (o SimOutcome) Unexplained() cost.Nanos {
-	return o.Shortfall() - o.LostPending - o.LostRedisHold
+	return o.Lost() - o.LostPending - o.LostRedisHold
 }
 
-// Unaccounted is the shortfall no kill accounts for: what remains after
+// Unaccounted is the loss no kill accounts for: what remains after
 // everything every killed process held, its grace holds in flight
-// included.
+// included. Negative if the store holds more than billed, the recorded
+// losses and the double charges explain.
 func (o SimOutcome) Unaccounted() cost.Nanos {
 	return o.Unexplained() - o.LostGraceHold
 }
 
+// Balanced reports whether the run's money is fully accounted for:
+// spent = billed − every kill's losses − the planted bug's + Doubled.
+// A run that is not balanced lost or invented spend in a way the fault
+// log does not record.
+func (o SimOutcome) Balanced() bool { return o.Unaccounted() == o.PlantedLost }
+
 // Classes reports which ways of losing spend the run needs, read from the
 // fault log rather than from a shrunk schedule. A way is needed when the
-// shortfall is more than every other recorded loss could cover: "killed
+// loss (Lost) is more than every other recorded loss could cover: "killed
 // pending" when it exceeds the killed processes' holds in flight (Redis
 // and grace), "expired hold" when it exceeds their pending spend and
 // grace holds, and "other" when it exceeds both listed ways together.
@@ -323,7 +345,7 @@ func (o SimOutcome) Classes() []string {
 	if o.I1 {
 		return nil
 	}
-	d := o.Shortfall()
+	d := o.Lost()
 	var c []string
 	if o.LostPending > 0 && d > o.LostRedisHold+o.LostGraceHold {
 		c = append(c, ClassKilledPending)
@@ -444,6 +466,8 @@ func (s *Simulator) Run(seed uint64, steps []SimStep, trace bool) (SimOutcome, e
 		LostPending:   r.lostPending,
 		LostRedisHold: r.lostRedis,
 		LostGraceHold: r.lostGrace,
+		Doubled:       r.doubled,
+		PlantedLost:   r.plantedLost,
 		Trace:         r.lines,
 	}
 	for id := range r.expired {
@@ -457,7 +481,9 @@ func (s *Simulator) Run(seed uint64, steps []SimStep, trace bool) (SimOutcome, e
 	}
 	o.Bound, o.I2 = s.bound(o)
 	o.I1 = o.Spent >= o.Billed
-	o.I3 = o.Spent <= o.Billed || o.LostReply
+	// Spend above billed is only allowed where a lost reply's applied call
+	// was charged again, and only by that much.
+	o.I3 = o.Spent <= o.Billed+o.Doubled
 	return o, nil
 }
 
@@ -503,6 +529,13 @@ type simRun struct {
 	planted        int
 
 	lostPending, lostRedis, lostGrace cost.Nanos
+	doubled, plantedLost              cost.Nanos
+
+	// settling is the request being settled, and victim is set while the
+	// planted bug has emptied its settle and the store has not yet
+	// answered.
+	settling simReq
+	victim   bool
 
 	trace bool
 	lines []string
@@ -515,6 +548,10 @@ type simReplica struct {
 	conn     *simConn
 	gen      int
 	inflight []simReq
+	// dup is the part of the process's pending spend the store already
+	// applied (a lost reply's call): flushing it charges it twice, and
+	// losing it with the process loses nothing.
+	dup cost.Nanos
 }
 
 type simReq struct {
@@ -568,8 +605,25 @@ func (r *simRun) dropSettle(id string) bool {
 	if h.Sum64()%100 != 0 {
 		return false
 	}
-	r.planted++
+	// It counts as fired once the store applies it (simConn.do): a settle
+	// refused by a down store changes nothing.
+	r.victim = true
 	return true
+}
+
+// track runs after every ledger call on rep: a lost reply's applied spend
+// becomes duplicate pending, and duplicate pending that a flush charged
+// is a double charge.
+func (r *simRun) track(rep *simReplica) {
+	pending := rep.d.pendingTotal()
+	if l := rep.conn.lostSpent; l > 0 {
+		rep.conn.lostSpent = 0
+		rep.dup = min(rep.dup+l, pending)
+	}
+	if pending == 0 && rep.dup > 0 {
+		r.doubled += rep.dup
+		rep.dup = 0
+	}
 }
 
 func (r *simRun) step(st SimStep) error {
@@ -581,6 +635,7 @@ func (r *simRun) step(st SimStep) error {
 		id := "q" + strconv.Itoa(st.N)
 		rep.conn.lose = st.Op == OpReserveLost
 		res, err := rep.d.Reserve(ctx, simKey, b, id, st.Hold)
+		r.track(rep)
 		lost := rep.conn.disarm()
 		if lost {
 			r.exercised[FaultReserveLost] = true
@@ -631,7 +686,9 @@ func (r *simRun) step(st SimStep) error {
 		if pending > 0 {
 			r.killedPending = true
 		}
-		r.lostPending += pending
+		// The part the store already applied dies without loss.
+		lost := pending - rep.dup
+		r.lostPending += lost
 		var inflight []string
 		for _, q := range rep.inflight {
 			kind := "Redis hold"
@@ -643,8 +700,12 @@ func (r *simRun) step(st SimStep) error {
 			}
 			inflight = append(inflight, fmt.Sprintf("%s (%s, cost %d)", q.res.ID, kind, q.cost))
 		}
+		applied := ""
+		if rep.dup > 0 {
+			applied = fmt.Sprintf(" (%d more already on the store)", rep.dup)
+		}
 		r.replicas[st.Replica] = r.start()
-		r.logf("%v: pending %d lost; in flight: %s", st, pending, orNone(inflight))
+		r.logf("%v: pending %d lost%s; in flight: %s", st, lost, applied, orNone(inflight))
 	case OpClockShort:
 		r.exercised[FaultClockShort] = true
 		r.advance(st.Advance)
@@ -673,7 +734,11 @@ func (r *simRun) step(st SimStep) error {
 func (r *simRun) settle(rep *simReplica, q simReq) (string, error) {
 	before := rep.d.pendingTotal()
 	planted := r.planted
-	if err := rep.d.Settle(r.sim.ctx, simKey, r.sim.budget(), q.res, q.cost); err != nil {
+	r.settling = q
+	err := rep.d.Settle(r.sim.ctx, simKey, r.sim.budget(), q.res, q.cost)
+	r.settling, r.victim = simReq{}, false
+	r.track(rep)
+	if err != nil {
 		return "", err
 	}
 	where := "settled on Redis"
@@ -708,7 +773,9 @@ func (r *simRun) quiesce() error {
 		r.advance(r.sim.cfg.RetryInterval)
 		done := true
 		for _, rep := range r.replicas {
-			if _, err := rep.d.Balance(ctx, simKey, b); err != nil && !errors.Is(err, ErrUnavailable) {
+			_, err := rep.d.Balance(ctx, simKey, b)
+			r.track(rep)
+			if err != nil && !errors.Is(err, ErrUnavailable) {
 				return err
 			}
 			if rep.d.Degraded() || rep.d.pendingTotal() != 0 {
@@ -725,7 +792,9 @@ func (r *simRun) quiesce() error {
 	r.logf("quiesce: every replica flushed")
 	r.advance(r.sim.cfg.HoldTTL + time.Second)
 	for _, rep := range r.replicas {
-		if _, err := rep.d.Balance(ctx, simKey, b); err != nil {
+		_, err := rep.d.Balance(ctx, simKey, b)
+		r.track(rep)
+		if err != nil {
 			return err
 		}
 	}
@@ -799,8 +868,10 @@ var errSimLost = errors.New("read tcp: i/o timeout (simulated: the store applied
 type simConn struct {
 	run   *simRun
 	inner redis.Scripter
-	// lose is armed by a lost-reply step; lost records that it fired.
+	// lose is armed by a lost-reply step; lost records that it fired and
+	// lostSpent what the call it fired on added to spent.
 	lose, lost bool
+	lostSpent  cost.Nanos
 }
 
 var _ redis.Scripter = (*simConn)(nil)
@@ -816,20 +887,44 @@ func (c *simConn) do(ctx context.Context, call func() *redis.Cmd) *redis.Cmd {
 	r := c.run
 	if r.down {
 		r.exercised[FaultOutage] = true
+		r.victim = false
 		cmd := redis.NewCmd(ctx)
 		cmd.SetErr(errSimUnreachable)
 		return cmd
 	}
 	r.noteExpired()
+	before := r.spent()
 	cmd := call()
-	if c.lose && !errors.Is(cmd.Err(), redis.ErrNoScript) && !redis.HasErrorPrefix(cmd.Err(), "NOSCRIPT") {
+	if errors.Is(cmd.Err(), redis.ErrNoScript) || redis.HasErrorPrefix(cmd.Err(), "NOSCRIPT") {
+		// Not run; go-redis loads the script and calls again.
+		return cmd
+	}
+	lose := c.lose
+	if r.victim {
+		r.victim = false
+		r.planted++
+		if !lose {
+			r.plantedLost += r.settling.cost
+		}
+	}
+	if lose {
 		c.lose, c.lost = false, true
+		c.lostSpent = r.spent() - before
 		r.lostReply = true
 		lost := redis.NewCmd(ctx)
 		lost.SetErr(errSimLost)
 		return lost
 	}
 	return cmd
+}
+
+// spent reads the store's spent for the run's key directly.
+func (r *simRun) spent() cost.Nanos {
+	v, err := strconv.ParseInt(orZero(r.sim.m.HGet(r.balKey, "spent")), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return cost.Nanos(v)
 }
 
 func (c *simConn) Eval(ctx context.Context, script string, keys []string, args ...any) *redis.Cmd {

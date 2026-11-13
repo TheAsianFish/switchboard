@@ -89,11 +89,18 @@ type Arm struct {
 	// Classes counts, per way of losing spend (budget.SimOutcome.Classes),
 	// the seeds whose shortfall needs it, each shrunk without slipping.
 	Classes []Class `json:"classes"`
-	// PlantedFired counts seeds where the planted bug emptied a settle in
-	// the full schedule.
+	// PlantedFired counts seeds where the planted bug emptied a settle the
+	// store applied in the full schedule, and PlantedLost those of them
+	// where it kept spend out of the store (the replica heard the reply,
+	// and the request cost something).
 	PlantedFired int `json:"planted_fired"`
-	// PlantedFound counts those of them whose shortfall is unaccounted.
+	PlantedLost  int `json:"planted_lost"`
+	// PlantedFound counts the fired seeds whose loss is unaccounted.
 	PlantedFound int `json:"planted_found"`
+	// Unbalanced counts seeds whose money the fault log does not account
+	// for exactly (budget.SimOutcome.Balanced): spent ≠ billed − every
+	// recorded loss + the double charges.
+	Unbalanced int `json:"unbalanced"`
 	// UnaccountedPlanted counts the unaccounted class's minimal schedules
 	// in which the planted bug fired.
 	UnaccountedPlanted int `json:"unaccounted_planted"`
@@ -316,9 +323,15 @@ func Summarise(name string, cfg budget.SimConfig, first uint64, results []budget
 		o := r.Outcome
 		if o.Planted > 0 {
 			arm.PlantedFired++
+			if o.PlantedLost > 0 {
+				arm.PlantedLost++
+			}
 			if o.Unaccounted() > 0 {
 				arm.PlantedFound++
 			}
+		}
+		if !o.Balanced() {
+			arm.Unbalanced++
 		}
 		if over := int64(o.Billed - cfg.Limit); over > 0 {
 			arm.OverLimit++
