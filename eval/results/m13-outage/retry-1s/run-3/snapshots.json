@@ -1,0 +1,6 @@
+[
+{"label": "kill switchboard-2", "unix": 1794605294.019363346, "spent_nanodollars": 137640000, "reserved_nanodollars": 1005000},
+{"label": "kill redis", "unix": 1794605324.019120717, "spent_nanodollars": 199020000, "reserved_nanodollars": 0},
+{"label": "start switchboard-2", "unix": 1794605354.017440979, "spent_nanodollars": 217620000, "reserved_nanodollars": 0},
+{"label": "end", "unix": 1794605385.870678627, "spent_nanodollars": 217620000, "reserved_nanodollars": 0}
+]
