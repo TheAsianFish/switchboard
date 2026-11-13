@@ -184,13 +184,16 @@ func (c *Cache) Lookup(ctx context.Context, tenant string, up Upstream, mode Mod
 	l := &Lookup{Status: StatusMiss, keys: keys, mode: mode, tools: tools}
 
 	start := c.opts.Now()
+	wall := time.Now()
 	seen := c.storeFailures.Load()
 	sctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	raw, found, err := c.opts.KV.Get(sctx, exactKey(keys))
 	cancel()
+	waited := time.Since(wall)
 	c.opts.Metrics.CacheLatency("exact", c.opts.Now().Sub(start))
+	telemetry.StoreWaited(ctx, telemetry.StoreCacheLookup, "get", waited, err)
 	if err != nil {
-		c.storeFailed(ctx, "get", err)
+		c.storeFailed(ctx, "get", err, waited)
 		return c.record(&Lookup{Status: StatusError, Reason: "store unavailable"})
 	}
 	c.storeAnswered(ctx, "get", seen)
@@ -242,9 +245,11 @@ func (c *Cache) semantic(ctx context.Context, l *Lookup) {
 		l.vec = nil
 		return
 	}
+	wall := time.Now()
 	sctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	matches, err := idx.Search(sctx, Query{Namespace: l.keys.Namespace, Context: l.keys.Context, Vector: l.vec, K: c.opts.Candidates})
 	cancel()
+	telemetry.StoreWaited(ctx, telemetry.StoreCacheLookup, "search", time.Since(wall), err)
 	if err != nil {
 		c.indexFailed(ctx, "search", err)
 		l.vec = nil
@@ -333,10 +338,14 @@ func (c *Cache) Fill(ctx context.Context, l *Lookup, resp *core.Response) {
 		fctx, cancel := context.WithTimeout(sctx, c.opts.Timeout)
 		defer cancel()
 		seen := c.storeFailures.Load()
-		if err := c.opts.KV.Set(fctx, exactKey(l.keys), raw, c.opts.TTL); err != nil {
+		wall := time.Now()
+		err := c.opts.KV.Set(fctx, exactKey(l.keys), raw, c.opts.TTL)
+		waited := time.Since(wall)
+		telemetry.StoreWaited(ctx, telemetry.StoreCacheFill, "set", waited, err)
+		if err != nil {
 			spanErr = err
 			c.opts.Metrics.CacheFill("error")
-			c.storeFailed(ctx, "set", err)
+			c.storeFailed(ctx, "set", err, waited)
 			return
 		}
 		c.storeAnswered(ctx, "set", seen)
@@ -345,7 +354,9 @@ func (c *Cache) Fill(ctx context.Context, l *Lookup, resp *core.Response) {
 			if err == nil {
 				// The exact key is the entry's id: refilling the same
 				// prompt in the same context replaces, not duplicates.
+				wall := time.Now()
 				err = idx.Add(fctx, Item{ID: l.keys.Exact, Namespace: l.keys.Namespace, Context: l.keys.Context, Vector: l.vec, Payload: raw, TTL: c.opts.TTL})
+				telemetry.StoreWaited(ctx, telemetry.StoreCacheFill, "add", time.Since(wall), err)
 			}
 			if err != nil {
 				// The exact entry is stored; only the semantic one is
@@ -387,7 +398,7 @@ func (c *Cache) bypassed(until *atomic.Int64) bool {
 // a store timeout on every request would make an outage slower than no
 // cache at all. A call that failed because its own client went away says
 // nothing about the store, and must not turn the cache off for everyone.
-func (c *Cache) storeFailed(ctx context.Context, op string, err error) {
+func (c *Cache) storeFailed(ctx context.Context, op string, err error, waited time.Duration) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -399,7 +410,8 @@ func (c *Cache) storeFailed(ctx context.Context, op string, err error) {
 	c.storeFailures.Add(1)
 	c.storeDown.Store(true)
 	telemetry.Logger(ctx).Warn("cache store failed; bypassing the cache", slog.String("op", op),
-		slog.String("error", err.Error()), slog.Duration("for", c.opts.RetryInterval))
+		slog.String("error", err.Error()), slog.Duration("for", c.opts.RetryInterval),
+		slog.Float64("wait_ms", telemetry.Millis(waited)))
 }
 
 // storeAnswered runs after a store call that succeeded; seen is the failure

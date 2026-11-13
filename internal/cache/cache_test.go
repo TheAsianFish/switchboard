@@ -948,3 +948,40 @@ func TestThresholdIsInclusive(t *testing.T) {
 		}
 	}
 }
+
+// sleepyKV waits d before every call.
+type sleepyKV struct {
+	cache.KV
+	d time.Duration
+}
+
+func (s sleepyKV) Get(ctx context.Context, k string) ([]byte, bool, error) {
+	time.Sleep(s.d)
+	return s.KV.Get(ctx, k)
+}
+
+func (s sleepyKV) Set(ctx context.Context, k string, v []byte, ttl time.Duration) error {
+	time.Sleep(s.d)
+	return s.KV.Set(ctx, k, v, ttl)
+}
+
+// A lookup and a fill that wait on the store are each logged as a slow
+// store call of their own component, with the request's id.
+func TestSlowStoreCallsLogged(t *testing.T) {
+	t.Parallel()
+	logs := &logBuffer{}
+	ctx := telemetry.WithRequest(context.Background(), slog.New(slog.NewTextHandler(logs, nil)), "main-12")
+	c := cache.New(cache.Options{KV: sleepyKV{KV: cache.NewMemoryKV(10, time.Now), d: 60 * time.Millisecond}, TTL: time.Hour})
+	l := c.Lookup(ctx, "a", target, cache.ModeExact, req("m", "", "hi"))
+	c.Fill(ctx, l, answer)
+	c.Wait()
+	out := logs.String()
+	for _, want := range []string{
+		`msg="store call slow" request_id=main-12 component=cache_lookup op=get wait_ms=`,
+		`msg="store call slow" request_id=main-12 component=cache_fill op=set wait_ms=`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q; logs:\n%s", want, out)
+		}
+	}
+}

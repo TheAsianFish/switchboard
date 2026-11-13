@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/TheAsianFish/switchboard/internal/cost"
+	"github.com/TheAsianFish/switchboard/internal/telemetry"
 )
 
 var errDown = errors.New("connection refused")
@@ -850,4 +853,45 @@ func TestDegradingStaleSuccessDoesNotRecover(t *testing.T) {
 	if !d.Degraded() {
 		t.Error("a success that started before the failure ended degraded mode")
 	}
+}
+
+// A primary call that waits out its timeout is logged as a slow store
+// call of the budget, with the operation and the request's id.
+func TestDegradingLogsSlowStoreCalls(t *testing.T) {
+	t.Parallel()
+	d, f, _, _ := newTestDegrading(t)
+	var buf syncBuf
+	ctx := telemetry.WithRequest(context.Background(), slog.New(slog.NewTextHandler(&buf, nil)), "budget-3")
+	r, err := d.Reserve(ctx, "k", monthly, "a", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), telemetry.SlowStoreMessage) {
+		t.Fatalf("fast call logged: %s", buf.String())
+	}
+	f.slow.Store(true)
+	if err := d.Settle(ctx, "k", monthly, r, 5); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); !strings.Contains(out, `msg="store call slow" request_id=budget-3 component=budget op=settle wait_ms=`) {
+		t.Fatalf("no slow budget line; logs:\n%s", out)
+	}
+}
+
+// syncBuf is a strings.Builder safe for concurrent writes.
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

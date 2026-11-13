@@ -359,9 +359,9 @@ func (d *Degrading) flush(ctx context.Context) (cost.Nanos, error) {
 		if !found {
 			return total, nil
 		}
-		cctx, cancel := context.WithTimeout(ctx, d.timeout)
-		err := d.primary.Settle(cctx, k.key, p.budget, Reservation{ID: k.id, Window: k.window}, p.amount)
-		cancel()
+		err := d.call(ctx, "flush", func(cctx context.Context) error {
+			return d.primary.Settle(cctx, k.key, p.budget, Reservation{ID: k.id, Window: k.window}, p.amount)
+		})
 		if err != nil {
 			return total, fmt.Errorf("budget flush %s window %s: %w", k.key, k.window, err)
 		}
@@ -388,9 +388,12 @@ func (d *Degrading) Reserve(ctx context.Context, key string, b Budget, id string
 		return Reservation{}, err
 	}
 	if try, seen := d.tryPrimary(); try {
-		cctx, cancel := context.WithTimeout(ctx, d.timeout)
-		r, err := d.primary.Reserve(cctx, key, b, id, amount)
-		cancel()
+		var r Reservation
+		err := d.call(ctx, "reserve", func(cctx context.Context) error {
+			var err error
+			r, err = d.primary.Reserve(cctx, key, b, id, amount)
+			return err
+		})
 		if !d.failed(ctx, err) {
 			if err == nil || errors.Is(err, ErrExhausted) {
 				d.succeeded(ctx, seen)
@@ -422,9 +425,20 @@ func (d *Degrading) Reserve(ctx context.Context, key string, b Budget, id string
 // primary never held, the settle charges nothing. It is best effort: if
 // it fails too, the hold expires and is charged, an over-count.
 func (d *Degrading) releaseAbandoned(ctx context.Context, key string, b Budget, id string) {
-	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.timeout)
-	defer cancel()
-	_ = d.primary.Settle(cctx, key, b, Reservation{ID: id, Window: b.Window(d.now())}, 0)
+	_ = d.call(context.WithoutCancel(ctx), "release", func(cctx context.Context) error {
+		return d.primary.Settle(cctx, key, b, Reservation{ID: id, Window: b.Window(d.now())}, 0)
+	})
+}
+
+// call runs one primary call under the per-call timeout, and logs it if
+// it waited long (telemetry.StoreWaited).
+func (d *Degrading) call(ctx context.Context, op string, fn func(context.Context) error) error {
+	start := time.Now()
+	cctx, cancel := context.WithTimeout(ctx, d.timeout)
+	err := fn(cctx)
+	cancel()
+	telemetry.StoreWaited(ctx, telemetry.StoreBudget, op, time.Since(start), err)
+	return err
 }
 
 // Settle implements Ledger. A grace hold adjusts key's grace allowance by
@@ -457,9 +471,9 @@ func (d *Degrading) Settle(ctx context.Context, key string, b Budget, r Reservat
 			// The primary never saw this hold; charge the cost plainly.
 			pr = Reservation{Window: r.Window}
 		}
-		cctx, cancel := context.WithTimeout(ctx, d.timeout)
-		err := d.primary.Settle(cctx, key, b, pr, actual)
-		cancel()
+		err := d.call(ctx, "settle", func(cctx context.Context) error {
+			return d.primary.Settle(cctx, key, b, pr, actual)
+		})
 		if err == nil {
 			d.succeeded(ctx, seen)
 			return nil
@@ -495,9 +509,12 @@ func (d *Degrading) Balance(ctx context.Context, key string, b Budget) (Balance,
 	if !try {
 		return Balance{}, fmt.Errorf("budget balance %s: %w", key, ErrUnavailable)
 	}
-	cctx, cancel := context.WithTimeout(ctx, d.timeout)
-	bal, err := d.primary.Balance(cctx, key, b)
-	cancel()
+	var bal Balance
+	err := d.call(ctx, "balance", func(cctx context.Context) error {
+		var err error
+		bal, err = d.primary.Balance(cctx, key, b)
+		return err
+	})
 	if err == nil {
 		d.succeeded(ctx, seen)
 		return bal, nil
