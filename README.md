@@ -28,8 +28,10 @@ how many requests slip past a shared limit, the cache's false-hit rate,
 what hedging buys, whether the router beats a coin flip between models, and
 what a replica kill and a Redis kill cost under load.
 
-**Status:** all seven milestones of [PLAN.md](PLAN.md) are done; the first
-release (`v1.0.0`) is prepared but not tagged ([RELEASE.md](RELEASE.md)).
+**Status:** all thirteen milestones of [PLAN.md](PLAN.md) are done: seven
+to the first release, six more answering questions the first runs
+raised. The first release (`v1.0.0`) is prepared but not tagged
+([RELEASE.md](RELEASE.md)).
 
 ## Demo
 
@@ -63,6 +65,7 @@ the method, the intervals, the hardware and the cost of every row.
 | [M10: a stalled provider and the first-token timeout](RESULTS.md#m10-a-stalled-provider-and-the-first-token-timeout) | Provider stalled at 20 req/s: breaker opened 0 times in 60 s before; with a 2 s first-token timeout, open 2.249 s into the stall, refusals p99 1.57 ms, closed 0.477 s after it ended (11.476 s when the stall ended just after a probe) | `make bench-stall` |
 | [M11: is the list of ways a budget loses spend complete?](RESULTS.md#m11-is-the-list-of-ways-a-budget-loses-spend-complete) | 100,000 seeded fault schedules on three replicas: 35,019 lost spend; by the fault log, 18,793 needed a third way (a request admitted on grace and in flight when its process died), shortest 2 steps; I2 and I3 held on every seed; a planted bug was found in 1,814 of the 2,087 seeds it hit | `make sim-budget` |
 | [M12: an unsettled hold becomes spend, without charging anything twice](RESULTS.md#m12-an-unsettled-hold-becomes-spend-without-charging-anything-twice) | Streams cut off by a replica kill with Redis up: before the fix, 5 of them left $0.001095 out of spent after the hold TTL (their bill: $0.001095); after it, 6 of them left spent $0.004890 above the bill, their holds' margin (4.29× what they were billed). Simulator re-run: seeds losing spend to an expired hold 20,581 → 2,065, the remaining loss what a dead request cost above its hold; I4 and the exact balance held on every seed | `make chaos-orphan`, `make sim-budget` |
+| [M13: what makes an outage slow, and what keeps the fleet degraded after it](RESULTS.md#m13-what-makes-an-outage-slow-and-what-keeps-the-fleet-degraded-after-it) | Slow requests in M8's flap schedule (eight 8 s Redis outages): 878 before, 876 of them cache lookups waiting out their 250 ms timeout; 211 after one cache lookup per retry interval probes the store (109.8 → 26.4 per outage); outage p99 435.73 → 431.53 ms, which a slow 1% still sets; degraded after Redis is ready 1.20–1.47 s at a 1 s retry interval, 0.39–1.38 s at 250 ms | `make chaos-probe`, `make chaos-retry` |
 
 Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2
@@ -527,9 +530,11 @@ the overshoot was the outage's grace alone; fsyncing every write cost
 milliseconds at p99, every second nothing the bench could resolve. The
 logs also explained two things: Q6's slow stretch after a Redis kill is
 calls on connections open at the kill waiting out their timeouts, after
-which failures are instant, and the fleet stays degraded for about two
-seconds after Redis is back because go-redis's dial backoff and the
-gateway's own probe interval run one after the other. RESULTS.md (Q1, Q6
+which failures are instant, and the fleet stays degraded for a while
+after Redis is back because go-redis's background redial and the
+gateway's own probe interval run one after the other (M13 measured it
+from Redis's ready line and found the redial's phase decides most of
+it). RESULTS.md (Q1, Q6
 and M9) has the tables.
 
 How the streaming path is tested:
@@ -616,8 +621,17 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   bill (RESULTS.md M12). What is left is grace spend (pending or in
   flight), which only the dead process knew, and a request that cost more
   than its hold.
-- Next (PLAN.md, evolution round 2): where an outage's slow requests come
-  from, with the cache probing the store one lookup at a time (M13).
+- Where an outage's slow requests come from (M13): every store call that
+  waits over 50 ms is logged with its component and the request's id, and
+  in M8's flap run almost every slow request was a cache lookup waiting
+  out its timeout. The cache now lets one lookup per retry interval probe
+  an unreachable store, as the limiter and the budget did, which removed
+  the bursts after the cut; the burst at the cut itself is lookups that
+  start before anything has failed, which no gate can see. The logs also
+  showed why an outage had three bursts: go-redis stops dialling after
+  its pool size of failed dials in a row and answers from the last error
+  at once, and that count is never reset by a good dial, so with fewer
+  probes it carries from one outage to the next (RESULTS.md M13).
 - Budgets across a Redis restart (M9): with the append-only file the
   compose file now ships, a restarted Redis forgot no spend and the
   overshoot was the outage's grace alone, at a p99 cost the bench could
@@ -626,9 +640,12 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   `everysec` acknowledged (the kernel holds the bytes), but a machine
   crash mid-spend can still lose about a second of charges, a case the
   container kill could not test; and the replicas stay degraded for
-  about two seconds after Redis is back, since go-redis's dial backoff
-  and the gateway's probe wait one after the other. One retry timer
-  instead of two would halve that.
+  about a second after Redis is ready, since go-redis's once-a-second
+  background redial and the gateway's next probe run one after the
+  other. M13 tried a quarter of the retry interval: it saved about what
+  the shorter probe predicts, but the redial's phase spreads the runs
+  too widely to tell in three runs, so the default stays one second
+  (RESULTS.md M13).
 - A provider that stalls (M10): before `first_token_timeout`, a provider
   that accepted connections and never answered was invisible to the
   breaker, and every request waited for its client to give up; with it,

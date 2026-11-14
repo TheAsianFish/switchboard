@@ -512,3 +512,27 @@ func TestDegradingStaleSuccessDoesNotRecover(t *testing.T) {
 		t.Errorf("transitions = %v, want [true]", states)
 	}
 }
+
+// A Primary call that waits out its timeout is logged as a slow store
+// call of the limiter, with the request's id; a fast one is not.
+func TestDegradingLogsSlowStoreCalls(t *testing.T) {
+	t.Parallel()
+	f := newDegradeFixture(3)
+	f.d.Timeout = 60 * time.Millisecond
+	lim := ratelimit.Limit{Rate: 10, Period: time.Second, Burst: 10}
+	if _, err := f.d.Allow(f.ctx, "k", lim, 1); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.logs.String(), telemetry.SlowStoreMessage) {
+		t.Fatalf("fast call logged: %s", f.logs.String())
+	}
+	f.primary.set(nil, true)
+	if _, err := f.d.Allow(f.ctx, "k", lim, 1); err != nil {
+		t.Fatal(err)
+	}
+	out := f.logs.String()
+	if !strings.Contains(out, `msg="store call slow" request_id=req_test component=limiter op=allow wait_ms=`) ||
+		!strings.Contains(out, "deadline exceeded") {
+		t.Fatalf("no slow limiter line; logs:\n%s", out)
+	}
+}

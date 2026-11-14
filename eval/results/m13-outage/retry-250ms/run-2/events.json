@@ -1,0 +1,6 @@
+[
+{"name": "kill switchboard-2", "action": "kill", "target": "switchboard-2", "phase": "replica down", "planned_seconds": 30.000, "issued_unix": 1794605166.031983849, "done_unix": 1794605166.235268242},
+{"name": "kill redis", "action": "kill", "target": "redis", "phase": "replica and Redis down", "planned_seconds": 60.000, "issued_unix": 1794605196.031580551, "done_unix": 1794605196.349837168},
+{"name": "start redis", "action": "start", "target": "redis", "phase": "replica down, Redis back", "planned_seconds": 75.000, "issued_unix": 1794605211.032538974, "done_unix": 1794605211.288154218},
+{"name": "start switchboard-2", "action": "start", "target": "switchboard-2", "phase": "all back", "planned_seconds": 90.000, "issued_unix": 1794605226.031031304, "done_unix": 1794605226.303095875}
+]

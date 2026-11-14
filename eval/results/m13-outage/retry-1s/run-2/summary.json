@@ -1,0 +1,2369 @@
+{
+  "meta": {
+    "commit": "eb2ebf7",
+    "gateway_commit": "eb2ebf7",
+    "retry_interval": "1s",
+    "date": "2026-11-13T21:23:29Z",
+    "command": "RETRY_INTERVAL=1s REDIS_PERSIST=everysec make chaos",
+    "replicas": 3,
+    "duration_seconds": 120,
+    "time_scale": 1,
+    "schedule": "q6",
+    "redis_persist": "everysec",
+    "redis": {
+      "appendonly": "yes",
+      "appendfsync": "everysec",
+      "data_fs": "overlayfs",
+      "aof_bytes_at_end": 16930452
+    },
+    "limit": {
+      "model": "fake-limited",
+      "rate": 10,
+      "period_seconds": 1
+    },
+    "budget": {
+      "model": "fake-budget",
+      "usd": "0.20",
+      "grace_usd": "0.01",
+      "grace_refill": "1h",
+      "input_price": "3",
+      "output_price": "15"
+    },
+    "fake_provider": {
+      "latency": "20ms",
+      "tokens": 30,
+      "token_interval": "5ms"
+    }
+  },
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "kernel": "7.0.0-1019-azure"
+  },
+  "rule": {
+    "bucket_seconds": 1,
+    "consecutive": 5,
+    "min_error_rate": 0.01,
+    "error_factor": 2,
+    "p99_factor": 2
+  },
+  "reference": {
+    "error_rate": 0,
+    "p99_ms": 184.591,
+    "error_limit": 0.01,
+    "p99_limit_ms": 369.182
+  },
+  "streams": [
+    {
+      "name": "main",
+      "model": "fake-chaos",
+      "rate": 200,
+      "stream": true,
+      "repeat": 0.3,
+      "repeat_pool": 50,
+      "requests": 24000,
+      "start_offset_seconds": 0,
+      "max_send_delay_ms": 4.743
+    },
+    {
+      "name": "limited",
+      "model": "fake-limited",
+      "rate": 30,
+      "stream": false,
+      "requests": 3600,
+      "start_offset_seconds": -0.001,
+      "max_send_delay_ms": 3.177
+    },
+    {
+      "name": "budget",
+      "model": "fake-budget",
+      "rate": 10,
+      "stream": false,
+      "requests": 1200,
+      "start_offset_seconds": -0.001,
+      "max_send_delay_ms": 2.043
+    }
+  ],
+  "events": [
+    {
+      "name": "kill switchboard-2",
+      "action": "kill",
+      "target": "switchboard-2",
+      "phase": "replica down",
+      "planned_seconds": 30,
+      "issued_unix": 1794605039.5654142,
+      "done_unix": 1794605039.7810147,
+      "at_seconds": 30,
+      "done_seconds": 30.216,
+      "recovered": true,
+      "recovery_seconds": 1,
+      "window_seconds": 29.999,
+      "errors_before_recovery": 10,
+      "worst_bucket": {
+        "start_seconds": 30,
+        "requests": 207,
+        "errors": 10,
+        "error_rate": 0.048309,
+        "ok": 197,
+        "p99_ms": 188.798,
+        "cache_hits": 65,
+        "good": false
+      }
+    },
+    {
+      "name": "kill redis",
+      "action": "kill",
+      "target": "redis",
+      "phase": "replica and Redis down",
+      "planned_seconds": 60,
+      "issued_unix": 1794605069.5646737,
+      "done_unix": 1794605069.765398,
+      "at_seconds": 59.999,
+      "done_seconds": 60.2,
+      "recovered": true,
+      "recovery_seconds": 0.001,
+      "window_seconds": 15.001,
+      "errors_before_recovery": 0,
+      "worst_bucket": {
+        "start_seconds": 65,
+        "requests": 200,
+        "errors": 0,
+        "error_rate": 0,
+        "ok": 200,
+        "p99_ms": 425.452,
+        "cache_hits": 0,
+        "good": false
+      }
+    },
+    {
+      "name": "start redis",
+      "action": "start",
+      "target": "redis",
+      "phase": "replica down, Redis back",
+      "planned_seconds": 75,
+      "issued_unix": 1794605084.5652192,
+      "done_unix": 1794605084.8337564,
+      "at_seconds": 75,
+      "done_seconds": 75.268,
+      "recovered": true,
+      "recovery_seconds": 0,
+      "window_seconds": 15,
+      "errors_before_recovery": 0,
+      "worst_bucket": {
+        "start_seconds": 75,
+        "requests": 204,
+        "errors": 0,
+        "error_rate": 0,
+        "ok": 204,
+        "p99_ms": 188.984,
+        "cache_hits": 4,
+        "good": true
+      }
+    },
+    {
+      "name": "start switchboard-2",
+      "action": "start",
+      "target": "switchboard-2",
+      "phase": "all back",
+      "planned_seconds": 90,
+      "issued_unix": 1794605099.5651376,
+      "done_unix": 1794605099.8292994,
+      "at_seconds": 90,
+      "done_seconds": 90.264,
+      "recovered": true,
+      "recovery_seconds": 0,
+      "window_seconds": 30,
+      "errors_before_recovery": 0,
+      "worst_bucket": {
+        "start_seconds": 90,
+        "requests": 198,
+        "errors": 0,
+        "error_rate": 0,
+        "ok": 198,
+        "p99_ms": 189.187,
+        "cache_hits": 57,
+        "good": true
+      }
+    }
+  ],
+  "phases": [
+    {
+      "name": "steady",
+      "from_seconds": 0,
+      "to_seconds": 30,
+      "replicas_up": 3,
+      "redis_up": true,
+      "main": {
+        "requests": 5972,
+        "ok": 5972,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 5972,
+          "mean_ms": 126.328,
+          "p50_ms": 177.388,
+          "p90_ms": 181.076,
+          "p95_ms": 182.112,
+          "p99_ms": 184.591,
+          "p999_ms": 192.24,
+          "max_ms": 194.288
+        },
+        "ttft": {
+          "count": 5972,
+          "mean_ms": 15.762,
+          "p50_ms": 21.536,
+          "p90_ms": 22.543,
+          "p95_ms": 22.79,
+          "p99_ms": 23.296,
+          "p999_ms": 24.289,
+          "max_ms": 27.087
+        },
+        "cache_statuses": {
+          "hit-exact": 1765,
+          "miss": 4207
+        },
+        "slow": 0,
+        "cache_hits": 1765,
+        "cache_hit_rate": 0.295546,
+        "repeat_ok": 1828,
+        "repeat_hits": 1765,
+        "repeat_hit_rate": 0.965536
+      },
+      "limited": {
+        "offered": 901,
+        "refused": 591,
+        "other_errors": 0,
+        "admitted": 310,
+        "windows": 31,
+        "most_in_window": 10,
+        "over_admissions": 0,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 300,
+        "ok": 300,
+        "refused": 0,
+        "other_errors": 0,
+        "admitted": 300,
+        "spent_nanodollars": 139500000,
+        "cumulative_nanodollars": 139500000,
+        "overshoot_nanodollars": 0,
+        "grace_bound_nanodollars": 0,
+        "reconcile": {
+          "at_seconds": 29.5,
+          "ledger_nanodollars": 137175000,
+          "redis_spent_nanodollars": 137640000,
+          "redis_reserved_nanodollars": 1005000,
+          "unreconciled_nanodollars": -465000
+        }
+      }
+    },
+    {
+      "name": "replica down",
+      "from_seconds": 30,
+      "to_seconds": 59.999,
+      "replicas_up": 2,
+      "redis_up": true,
+      "main": {
+        "requests": 6000,
+        "ok": 5990,
+        "errors": 10,
+        "error_rate": 0.001667,
+        "errors_by_kind": {
+          "http_502": 2,
+          "malformed_stream": 8
+        },
+        "latency": {
+          "count": 5990,
+          "mean_ms": 126.728,
+          "p50_ms": 177.113,
+          "p90_ms": 181.901,
+          "p95_ms": 186.029,
+          "p99_ms": 190.715,
+          "p999_ms": 427.553,
+          "max_ms": 433.83
+        },
+        "ttft": {
+          "count": 5990,
+          "mean_ms": 16.254,
+          "p50_ms": 21.56,
+          "p90_ms": 22.65,
+          "p95_ms": 23.002,
+          "p99_ms": 25.256,
+          "p999_ms": 271.97,
+          "max_ms": 275.591
+        },
+        "cache_statuses": {
+          "hit-exact": 1781,
+          "miss": 4209
+        },
+        "slow": 8,
+        "cache_hits": 1781,
+        "cache_hit_rate": 0.297329,
+        "repeat_ok": 1781,
+        "repeat_hits": 1781,
+        "repeat_hit_rate": 1
+      },
+      "limited": {
+        "offered": 899,
+        "refused": 599,
+        "other_errors": 0,
+        "admitted": 300,
+        "windows": 30,
+        "most_in_window": 16,
+        "over_admissions": 6,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 300,
+        "ok": 128,
+        "refused": 172,
+        "other_errors": 0,
+        "admitted": 128,
+        "spent_nanodollars": 59520000,
+        "cumulative_nanodollars": 199020000,
+        "overshoot_nanodollars": 0,
+        "grace_bound_nanodollars": 0,
+        "reconcile": {
+          "at_seconds": 59.5,
+          "ledger_nanodollars": 199020000,
+          "redis_spent_nanodollars": 199020000,
+          "redis_reserved_nanodollars": 0,
+          "unreconciled_nanodollars": 0
+        }
+      }
+    },
+    {
+      "name": "replica and Redis down",
+      "from_seconds": 59.999,
+      "to_seconds": 75,
+      "replicas_up": 2,
+      "redis_up": false,
+      "main": {
+        "requests": 2993,
+        "ok": 2993,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 2993,
+          "mean_ms": 178.703,
+          "p50_ms": 177.38,
+          "p90_ms": 181.149,
+          "p95_ms": 182.461,
+          "p99_ms": 185.776,
+          "p999_ms": 430.84,
+          "max_ms": 432.933
+        },
+        "ttft": {
+          "count": 2993,
+          "mean_ms": 23.081,
+          "p50_ms": 21.824,
+          "p90_ms": 22.643,
+          "p95_ms": 22.88,
+          "p99_ms": 23.882,
+          "p999_ms": 273.213,
+          "max_ms": 273.936
+        },
+        "cache_statuses": {
+          "error": 25,
+          "hit-exact": 4,
+          "miss": 41,
+          "skip": 2923
+        },
+        "slow": 15,
+        "cache_hits": 4,
+        "cache_hit_rate": 0.001336,
+        "repeat_ok": 929,
+        "repeat_hits": 4,
+        "repeat_hit_rate": 0.004306
+      },
+      "limited": {
+        "offered": 451,
+        "refused": 355,
+        "other_errors": 0,
+        "admitted": 96,
+        "windows": 15,
+        "most_in_window": 6,
+        "over_admissions": 0,
+        "local_bound": 6
+      },
+      "budget": {
+        "offered": 151,
+        "ok": 40,
+        "refused": 111,
+        "other_errors": 0,
+        "admitted": 40,
+        "spent_nanodollars": 18600000,
+        "cumulative_nanodollars": 217620000,
+        "overshoot_nanodollars": 17620000,
+        "grace_bound_nanodollars": 20000000
+      }
+    },
+    {
+      "name": "replica down, Redis back",
+      "from_seconds": 75,
+      "to_seconds": 90,
+      "replicas_up": 2,
+      "redis_up": true,
+      "main": {
+        "requests": 3009,
+        "ok": 3009,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 3009,
+          "mean_ms": 128.725,
+          "p50_ms": 176.96,
+          "p90_ms": 180.584,
+          "p95_ms": 181.466,
+          "p99_ms": 184.625,
+          "p999_ms": 241.677,
+          "max_ms": 430.058
+        },
+        "ttft": {
+          "count": 3009,
+          "mean_ms": 16.244,
+          "p50_ms": 21.51,
+          "p90_ms": 22.481,
+          "p95_ms": 22.727,
+          "p99_ms": 23.271,
+          "p999_ms": 84.6,
+          "max_ms": 272.596
+        },
+        "cache_statuses": {
+          "error": 2,
+          "hit-exact": 846,
+          "miss": 1932,
+          "skip": 229
+        },
+        "slow": 2,
+        "cache_hits": 846,
+        "cache_hit_rate": 0.281157,
+        "repeat_ok": 908,
+        "repeat_hits": 846,
+        "repeat_hit_rate": 0.931718
+      },
+      "limited": {
+        "offered": 449,
+        "refused": 292,
+        "other_errors": 0,
+        "admitted": 157,
+        "windows": 15,
+        "most_in_window": 14,
+        "over_admissions": 7,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 150,
+        "ok": 0,
+        "refused": 150,
+        "other_errors": 0,
+        "admitted": 0,
+        "spent_nanodollars": 0,
+        "cumulative_nanodollars": 217620000,
+        "overshoot_nanodollars": 17620000,
+        "grace_bound_nanodollars": 0,
+        "reconcile": {
+          "at_seconds": 89.502,
+          "ledger_nanodollars": 217620000,
+          "redis_spent_nanodollars": 217620000,
+          "redis_reserved_nanodollars": 0,
+          "unreconciled_nanodollars": 0
+        }
+      }
+    },
+    {
+      "name": "all back",
+      "from_seconds": 90,
+      "to_seconds": 120,
+      "replicas_up": 3,
+      "redis_up": true,
+      "main": {
+        "requests": 6026,
+        "ok": 6026,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 6026,
+          "mean_ms": 125.548,
+          "p50_ms": 177.014,
+          "p90_ms": 180.31,
+          "p95_ms": 181.159,
+          "p99_ms": 183.261,
+          "p999_ms": 186.868,
+          "max_ms": 191.373
+        },
+        "ttft": {
+          "count": 6026,
+          "mean_ms": 15.682,
+          "p50_ms": 21.506,
+          "p90_ms": 22.488,
+          "p95_ms": 22.737,
+          "p99_ms": 23.163,
+          "p999_ms": 23.901,
+          "max_ms": 25.184
+        },
+        "cache_statuses": {
+          "hit-exact": 1795,
+          "miss": 4231
+        },
+        "slow": 0,
+        "cache_hits": 1795,
+        "cache_hit_rate": 0.297876,
+        "repeat_ok": 1795,
+        "repeat_hits": 1795,
+        "repeat_hit_rate": 1
+      },
+      "limited": {
+        "offered": 900,
+        "refused": 600,
+        "other_errors": 0,
+        "admitted": 300,
+        "windows": 30,
+        "most_in_window": 10,
+        "over_admissions": 0,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 299,
+        "ok": 0,
+        "refused": 299,
+        "other_errors": 0,
+        "admitted": 0,
+        "spent_nanodollars": 0,
+        "cumulative_nanodollars": 217620000,
+        "overshoot_nanodollars": 17620000,
+        "grace_bound_nanodollars": 0,
+        "reconcile": {
+          "at_seconds": 121.347,
+          "ledger_nanodollars": 217620000,
+          "redis_spent_nanodollars": 217620000,
+          "redis_reserved_nanodollars": 0,
+          "unreconciled_nanodollars": 0
+        }
+      }
+    }
+  ],
+  "buckets": [
+    {
+      "start_seconds": 0,
+      "requests": 172,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 172,
+      "p99_ms": 186.037,
+      "cache_hits": 13,
+      "good": true
+    },
+    {
+      "start_seconds": 1,
+      "requests": 206,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 206,
+      "p99_ms": 182.212,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 2,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 181.67,
+      "cache_hits": 52,
+      "good": true
+    },
+    {
+      "start_seconds": 3,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 182.119,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 4,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 182.883,
+      "cache_hits": 64,
+      "good": true
+    },
+    {
+      "start_seconds": 5,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 180.129,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 6,
+      "requests": 206,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 206,
+      "p99_ms": 181.23,
+      "cache_hits": 65,
+      "good": true
+    },
+    {
+      "start_seconds": 7,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 180.51,
+      "cache_hits": 52,
+      "good": true
+    },
+    {
+      "start_seconds": 8,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 182.339,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 9,
+      "requests": 194,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 194,
+      "p99_ms": 182.003,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 10,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 182.144,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 11,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.868,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 12,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 192.857,
+      "cache_hits": 71,
+      "good": true
+    },
+    {
+      "start_seconds": 13,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 183.594,
+      "cache_hits": 69,
+      "good": true
+    },
+    {
+      "start_seconds": 14,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 184.436,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 15,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 186.858,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 16,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 183.402,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 17,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 183.657,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 18,
+      "requests": 204,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 204,
+      "p99_ms": 184.179,
+      "cache_hits": 72,
+      "good": true
+    },
+    {
+      "start_seconds": 19,
+      "requests": 192,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 192,
+      "p99_ms": 181.227,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 20,
+      "requests": 204,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 204,
+      "p99_ms": 182.259,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 21,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 180.721,
+      "cache_hits": 60,
+      "good": true
+    },
+    {
+      "start_seconds": 22,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 182.388,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 23,
+      "requests": 192,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 192,
+      "p99_ms": 182.245,
+      "cache_hits": 52,
+      "good": true
+    },
+    {
+      "start_seconds": 24,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 182.681,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 25,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 184.265,
+      "cache_hits": 66,
+      "good": true
+    },
+    {
+      "start_seconds": 26,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 181.495,
+      "cache_hits": 65,
+      "good": true
+    },
+    {
+      "start_seconds": 27,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 181.716,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 28,
+      "requests": 195,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 195,
+      "p99_ms": 182.429,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 29,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 183.833,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 30,
+      "requests": 207,
+      "errors": 10,
+      "error_rate": 0.048309,
+      "ok": 197,
+      "p99_ms": 188.798,
+      "cache_hits": 65,
+      "good": false
+    },
+    {
+      "start_seconds": 31,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 180.782,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 32,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 182.396,
+      "cache_hits": 57,
+      "good": true
+    },
+    {
+      "start_seconds": 33,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 180.912,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 34,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 181.67,
+      "cache_hits": 51,
+      "good": true
+    },
+    {
+      "start_seconds": 35,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 181.68,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 36,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 180.875,
+      "cache_hits": 60,
+      "good": true
+    },
+    {
+      "start_seconds": 37,
+      "requests": 204,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 204,
+      "p99_ms": 184.447,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 38,
+      "requests": 192,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 192,
+      "p99_ms": 182.656,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 39,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 190.186,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 40,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 192.82,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 41,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 193.808,
+      "cache_hits": 57,
+      "good": true
+    },
+    {
+      "start_seconds": 42,
+      "requests": 195,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 195,
+      "p99_ms": 183.22,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 43,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 182.295,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 44,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 192.031,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 45,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 194.434,
+      "cache_hits": 65,
+      "good": true
+    },
+    {
+      "start_seconds": 46,
+      "requests": 206,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 206,
+      "p99_ms": 189.932,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 47,
+      "requests": 196,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 196,
+      "p99_ms": 183.076,
+      "cache_hits": 67,
+      "good": true
+    },
+    {
+      "start_seconds": 48,
+      "requests": 195,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 195,
+      "p99_ms": 183.232,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 49,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 183.229,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 50,
+      "requests": 207,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 207,
+      "p99_ms": 181.792,
+      "cache_hits": 65,
+      "good": true
+    },
+    {
+      "start_seconds": 51,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 181.547,
+      "cache_hits": 65,
+      "good": true
+    },
+    {
+      "start_seconds": 52,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 181.843,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 53,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 183.644,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 54,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 183.836,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 55,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 179.721,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 56,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 180.949,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 57,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 181.927,
+      "cache_hits": 70,
+      "good": true
+    },
+    {
+      "start_seconds": 58,
+      "requests": 204,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 204,
+      "p99_ms": 183.159,
+      "cache_hits": 72,
+      "good": true
+    },
+    {
+      "start_seconds": 59,
+      "requests": 192,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 192,
+      "p99_ms": 183.716,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 60,
+      "requests": 193,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 193,
+      "p99_ms": 189.242,
+      "cache_hits": 4,
+      "good": true
+    },
+    {
+      "start_seconds": 61,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 181.799,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 62,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 183.862,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 63,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 182.994,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 64,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 183.946,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 65,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 425.452,
+      "cache_hits": 0,
+      "good": false
+    },
+    {
+      "start_seconds": 66,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 182.814,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 67,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 183.454,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 68,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.508,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 69,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 182.434,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 70,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 180.366,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 71,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 183.842,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 72,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 183.631,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 73,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 180.178,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 74,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 185.354,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 75,
+      "requests": 204,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 204,
+      "p99_ms": 188.984,
+      "cache_hits": 4,
+      "good": true
+    },
+    {
+      "start_seconds": 76,
+      "requests": 206,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 206,
+      "p99_ms": 182.703,
+      "cache_hits": 52,
+      "good": true
+    },
+    {
+      "start_seconds": 77,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 184.445,
+      "cache_hits": 60,
+      "good": true
+    },
+    {
+      "start_seconds": 78,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 183.232,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 79,
+      "requests": 205,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 205,
+      "p99_ms": 179.859,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 80,
+      "requests": 196,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 196,
+      "p99_ms": 181.025,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 81,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 180.638,
+      "cache_hits": 69,
+      "good": true
+    },
+    {
+      "start_seconds": 82,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 180.488,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 83,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 182.63,
+      "cache_hits": 71,
+      "good": true
+    },
+    {
+      "start_seconds": 84,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 184.344,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 85,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.796,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 86,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 184.043,
+      "cache_hits": 64,
+      "good": true
+    },
+    {
+      "start_seconds": 87,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 182.109,
+      "cache_hits": 73,
+      "good": true
+    },
+    {
+      "start_seconds": 88,
+      "requests": 194,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 194,
+      "p99_ms": 181.87,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 89,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 184.873,
+      "cache_hits": 51,
+      "good": true
+    },
+    {
+      "start_seconds": 90,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 189.187,
+      "cache_hits": 57,
+      "good": true
+    },
+    {
+      "start_seconds": 91,
+      "requests": 208,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 208,
+      "p99_ms": 182.63,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 92,
+      "requests": 195,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 195,
+      "p99_ms": 184.726,
+      "cache_hits": 64,
+      "good": true
+    },
+    {
+      "start_seconds": 93,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 181.499,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 94,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 180.011,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 95,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 186.276,
+      "cache_hits": 60,
+      "good": true
+    },
+    {
+      "start_seconds": 96,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 180.559,
+      "cache_hits": 52,
+      "good": true
+    },
+    {
+      "start_seconds": 97,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 183.86,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 98,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 180.448,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 99,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 181.054,
+      "cache_hits": 69,
+      "good": true
+    },
+    {
+      "start_seconds": 100,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 182.317,
+      "cache_hits": 69,
+      "good": true
+    },
+    {
+      "start_seconds": 101,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 182.574,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 102,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.997,
+      "cache_hits": 48,
+      "good": true
+    },
+    {
+      "start_seconds": 103,
+      "requests": 206,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 206,
+      "p99_ms": 183.261,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 104,
+      "requests": 194,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 194,
+      "p99_ms": 181.558,
+      "cache_hits": 66,
+      "good": true
+    },
+    {
+      "start_seconds": 105,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 180.375,
+      "cache_hits": 57,
+      "good": true
+    },
+    {
+      "start_seconds": 106,
+      "requests": 195,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 195,
+      "p99_ms": 180.725,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 107,
+      "requests": 206,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 206,
+      "p99_ms": 182.361,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 108,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 181.192,
+      "cache_hits": 66,
+      "good": true
+    },
+    {
+      "start_seconds": 109,
+      "requests": 205,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 205,
+      "p99_ms": 181.906,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 110,
+      "requests": 195,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 195,
+      "p99_ms": 182.318,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 111,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 182.376,
+      "cache_hits": 66,
+      "good": true
+    },
+    {
+      "start_seconds": 112,
+      "requests": 196,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 196,
+      "p99_ms": 181.086,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 113,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 183.8,
+      "cache_hits": 69,
+      "good": true
+    },
+    {
+      "start_seconds": 114,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 182.815,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 115,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.823,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 116,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.535,
+      "cache_hits": 50,
+      "good": true
+    },
+    {
+      "start_seconds": 117,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 182.547,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 118,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 181.335,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 119,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.76,
+      "cache_hits": 63,
+      "good": true
+    }
+  ],
+  "store": {
+    "transitions": [
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.089,
+        "degraded": true,
+        "error": "cache: set: EOF",
+        "class": "closed"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.089,
+        "degraded": true,
+        "error": "cache: get: EOF",
+        "class": "closed"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "ratelimit",
+        "at_seconds": 60.2,
+        "degraded": true,
+        "error": "ratelimit: fixed window allow: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "budget",
+        "at_seconds": 60.201,
+        "degraded": true,
+        "error": "budget reserve budget: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.344,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.349,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.354,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.361,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.366,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "ratelimit",
+        "at_seconds": 60.367,
+        "degraded": true,
+        "error": "ratelimit: fixed window allow: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.367,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.372,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.389,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.394,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.4,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.406,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.412,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.42,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.423,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.425,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.431,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.433,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.438,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.449,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.455,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.459,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.469,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.47,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.477,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.477,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.499,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "budget",
+        "at_seconds": 60.5,
+        "degraded": true,
+        "error": "budget reserve budget: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.507,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.511,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.513,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 61.767,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 61.771,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 63.022,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 63.036,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 64.276,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 64.301,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 65.527,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 65.567,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 66.786,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 66.832,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 67.836,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 68.046,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 68.836,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 69.051,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 69.841,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 70.061,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 70.856,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 71.061,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 71.856,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 72.086,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 72.861,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 73.091,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 73.861,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 74.097,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 74.871,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 75.098,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "ratelimit",
+        "at_seconds": 75.633,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 75.892,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "budget",
+        "at_seconds": 76.101,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 76.106,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "budget",
+        "at_seconds": 76.4,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "ratelimit",
+        "at_seconds": 76.8,
+        "degraded": false
+      }
+    ],
+    "outages": [
+      {
+        "event": "kill redis",
+        "at_seconds": 59.999,
+        "to_seconds": 75,
+        "classes": [
+          {
+            "class": "closed",
+            "lines": 2,
+            "pool_lines": 0,
+            "first_seconds": 0.09,
+            "last_seconds": 0.09,
+            "example": "cache: set: EOF"
+          },
+          {
+            "class": "timeout",
+            "lines": 46,
+            "pool_lines": 0,
+            "first_seconds": 0.201,
+            "last_seconds": 8.047,
+            "example": "ratelimit: fixed window allow: context deadline exceeded"
+          },
+          {
+            "class": "dns",
+            "lines": 110,
+            "pool_lines": 96,
+            "first_seconds": 0.528,
+            "last_seconds": 14.872,
+            "example": "redis: 2026/11/13 21:24:30 pool.go:770: redis: connection pool: failed to dial after 5 attempts: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+          }
+        ]
+      }
+    ],
+    "restarts": [
+      {
+        "at_seconds": 75,
+        "ready_seconds": 0.333,
+        "aof_loaded_seconds": 0.028,
+        "errors": [
+          {
+            "class": "dns",
+            "lines": 1,
+            "pool_lines": 0,
+            "first_seconds": 0.098,
+            "last_seconds": 0.098,
+            "example": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+          }
+        ],
+        "loading_errors": 0,
+        "recoveries": [
+          {
+            "replica": "switchboard-1",
+            "component": "budget",
+            "seconds": 1.4
+          },
+          {
+            "replica": "switchboard-1",
+            "component": "cache",
+            "seconds": 0.892
+          },
+          {
+            "replica": "switchboard-1",
+            "component": "ratelimit",
+            "seconds": 1.8
+          },
+          {
+            "replica": "switchboard-3",
+            "component": "budget",
+            "seconds": 1.101
+          },
+          {
+            "replica": "switchboard-3",
+            "component": "cache",
+            "seconds": 1.106
+          },
+          {
+            "replica": "switchboard-3",
+            "component": "ratelimit",
+            "seconds": 0.633
+          }
+        ],
+        "degraded_seconds": 1.8
+      }
+    ]
+  }
+}

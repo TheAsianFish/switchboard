@@ -47,6 +47,8 @@ make check
 | `make chaos` | the phased kill run (Q6) | local, manual workflow |
 | `make chaos-flap RUN=before\|after` | M8: Redis cut off and reconnected eight times with its state kept, a replica killed while degraded, budget reconciled against the provider's ledger (about 4 minutes) | local, manual workflow |
 | `make chaos-orphan RUN=before\|after` | M12: a replica killed with streamed budget requests in flight and Redis up, the provider's ledger reconciled against `spent` past a 30 s hold TTL; `before` runs replicas built from `BEFORE_REF` (default `c22dd75`) (about 3 minutes) | local, manual workflow |
+| `make chaos-probe RUN=before\|after` | M13: M8's flap schedule with every store call over 50 ms logged and each slow request attributed to a component and a burst (`switchboard chaos outage`); `before` runs replicas built from `BEFORE_REF` (default `42f5f0c`) (about 5 minutes) | local, manual workflow |
+| `make chaos-retry` | M13: the Q6 schedule with `REDIS_PERSIST=everysec` at `RETRY_INTERVAL=1s` and `250ms`, three runs each, interleaved (about 30 minutes; `RUNS=`, `INTERVALS=`) | local, manual workflow |
 | `make results` | re-render RESULTS.md and the README results table from `eval/results/` | after any of the above |
 | `make dist` | release archives (linux/darwin × amd64/arm64) and `SHA256SUMS` in `dist/`; `VERSION=v1.2.3` stamps the binaries | local, release workflow |
 | `make check-install` | `go install` from a bare copy of the repo in a clean `golang:1.27` container, then one request to the installed binary (`REF=` a commit) | local, before a release |

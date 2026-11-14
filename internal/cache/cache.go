@@ -59,8 +59,9 @@ type Options struct {
 	// Timeout bounds each store and embedding call. Zero means 250 ms.
 	Timeout time.Duration
 	// RetryInterval is how long the cache stays bypassed after a store
-	// error, so an unreachable Redis costs one timeout per interval and
-	// not one per request; the semantic layer alone is bypassed as long
+	// error; after it one lookup probes the store while the rest still
+	// bypass, so an unreachable Redis costs one timeout per interval and
+	// not one per request. The semantic layer alone is bypassed as long
 	// after an embedder or vector index error. Zero means one second.
 	RetryInterval time.Duration
 	// Metrics records lookups and fills; nil records nothing.
@@ -76,9 +77,10 @@ type Cache struct {
 	index   Index
 	dims    int
 
-	// downUntil is the unix-nano time until which the store is bypassed,
-	// embedDownUntil and indexDownUntil the same for the embedder and the
-	// vector index, whose failures bypass the semantic layer only.
+	// downUntil is the unix-nano time until which the store is bypassed
+	// while it is down, and then the time of the next probe (mayCall);
+	// embedDownUntil and indexDownUntil bypass the embedder and the vector
+	// index, whose failures bypass the semantic layer only.
 	downUntil      atomic.Int64
 	embedDownUntil atomic.Int64
 	indexDownUntil atomic.Int64
@@ -174,7 +176,7 @@ func (c *Cache) Lookup(ctx context.Context, tenant string, up Upstream, mode Mod
 	if !ok {
 		return Skip("last turn is not the user's")
 	}
-	if c.bypassed(&c.downUntil) {
+	if !c.mayCall() {
 		return c.record(&Lookup{Status: StatusSkip, Reason: "store unavailable"})
 	}
 	tools := req.HasToolContent()
@@ -184,13 +186,16 @@ func (c *Cache) Lookup(ctx context.Context, tenant string, up Upstream, mode Mod
 	l := &Lookup{Status: StatusMiss, keys: keys, mode: mode, tools: tools}
 
 	start := c.opts.Now()
+	wall := time.Now()
 	seen := c.storeFailures.Load()
 	sctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	raw, found, err := c.opts.KV.Get(sctx, exactKey(keys))
 	cancel()
+	waited := time.Since(wall)
 	c.opts.Metrics.CacheLatency("exact", c.opts.Now().Sub(start))
+	telemetry.StoreWaited(ctx, telemetry.StoreCacheLookup, "get", waited, err)
 	if err != nil {
-		c.storeFailed(ctx, "get", err)
+		c.storeFailed(ctx, "get", err, waited)
 		return c.record(&Lookup{Status: StatusError, Reason: "store unavailable"})
 	}
 	c.storeAnswered(ctx, "get", seen)
@@ -242,9 +247,11 @@ func (c *Cache) semantic(ctx context.Context, l *Lookup) {
 		l.vec = nil
 		return
 	}
+	wall := time.Now()
 	sctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	matches, err := idx.Search(sctx, Query{Namespace: l.keys.Namespace, Context: l.keys.Context, Vector: l.vec, K: c.opts.Candidates})
 	cancel()
+	telemetry.StoreWaited(ctx, telemetry.StoreCacheLookup, "search", time.Since(wall), err)
 	if err != nil {
 		c.indexFailed(ctx, "search", err)
 		l.vec = nil
@@ -333,10 +340,14 @@ func (c *Cache) Fill(ctx context.Context, l *Lookup, resp *core.Response) {
 		fctx, cancel := context.WithTimeout(sctx, c.opts.Timeout)
 		defer cancel()
 		seen := c.storeFailures.Load()
-		if err := c.opts.KV.Set(fctx, exactKey(l.keys), raw, c.opts.TTL); err != nil {
+		wall := time.Now()
+		err := c.opts.KV.Set(fctx, exactKey(l.keys), raw, c.opts.TTL)
+		waited := time.Since(wall)
+		telemetry.StoreWaited(ctx, telemetry.StoreCacheFill, "set", waited, err)
+		if err != nil {
 			spanErr = err
 			c.opts.Metrics.CacheFill("error")
-			c.storeFailed(ctx, "set", err)
+			c.storeFailed(ctx, "set", err, waited)
 			return
 		}
 		c.storeAnswered(ctx, "set", seen)
@@ -345,7 +356,9 @@ func (c *Cache) Fill(ctx context.Context, l *Lookup, resp *core.Response) {
 			if err == nil {
 				// The exact key is the entry's id: refilling the same
 				// prompt in the same context replaces, not duplicates.
+				wall := time.Now()
 				err = idx.Add(fctx, Item{ID: l.keys.Exact, Namespace: l.keys.Namespace, Context: l.keys.Context, Vector: l.vec, Payload: raw, TTL: c.opts.TTL})
+				telemetry.StoreWaited(ctx, telemetry.StoreCacheFill, "add", time.Since(wall), err)
 			}
 			if err != nil {
 				// The exact entry is stored; only the semantic one is
@@ -383,11 +396,34 @@ func (c *Cache) bypassed(until *atomic.Int64) bool {
 	return c.opts.Now().UnixNano() < until.Load()
 }
 
+// mayCall reports whether a lookup may call the store. While the store is
+// down only one lookup per RetryInterval does: the first to find the
+// interval over moves it a further interval on and is the probe, and the
+// rest go on bypassing the cache until the probe has answered, as the
+// limiter and the budget let one call through. Without the gate every
+// lookup that arrives between the interval's end and the probe's failure
+// calls the store too, and each waits out the store's timeout (M13).
+func (c *Cache) mayCall() bool {
+	if !c.storeDown.Load() {
+		return true
+	}
+	now := c.opts.Now()
+	for {
+		until := c.downUntil.Load()
+		if now.UnixNano() < until {
+			return false
+		}
+		if c.downUntil.CompareAndSwap(until, now.Add(c.opts.RetryInterval).UnixNano()) {
+			return true
+		}
+	}
+}
+
 // storeFailed bypasses the cache for RetryInterval. A cache that waits out
 // a store timeout on every request would make an outage slower than no
 // cache at all. A call that failed because its own client went away says
 // nothing about the store, and must not turn the cache off for everyone.
-func (c *Cache) storeFailed(ctx context.Context, op string, err error) {
+func (c *Cache) storeFailed(ctx context.Context, op string, err error, waited time.Duration) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -399,7 +435,8 @@ func (c *Cache) storeFailed(ctx context.Context, op string, err error) {
 	c.storeFailures.Add(1)
 	c.storeDown.Store(true)
 	telemetry.Logger(ctx).Warn("cache store failed; bypassing the cache", slog.String("op", op),
-		slog.String("error", err.Error()), slog.Duration("for", c.opts.RetryInterval))
+		slog.String("error", err.Error()), slog.Duration("for", c.opts.RetryInterval),
+		slog.Float64("wait_ms", telemetry.Millis(waited)))
 }
 
 // storeAnswered runs after a store call that succeeded; seen is the failure

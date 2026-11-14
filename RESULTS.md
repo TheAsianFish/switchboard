@@ -1852,6 +1852,207 @@ quiesce: clock past hold TTL
 - After arm: `dd7b49a`, 2026-11-13T14:18:30Z.
 - Cost: $0 (fake provider, no model).
 
+## M13: what makes an outage slow, and what keeps the fleet degraded after it
+
+Are the slow requests of M8's flap run the cache's ungated probe, why
+are there three bursts per outage and not eight, and is the time a
+replica stays degraded after Redis returns the two retry timers M9
+named? Commands: `make chaos-probe RUN=before|after` (M8's flap schedule)
+and `make chaos-retry` (`RETRY_INTERVAL=1s|250ms REDIS_PERSIST=everysec
+make chaos`, three runs each), raw files in `eval/results/m13-outage/`;
+`switchboard chaos outage` writes each run's `outage.json`.
+
+**Method.** Every replica logs each store call that waits 50 ms
+or longer (`store call slow`: the component, which is the limiter, the
+budget, a cache lookup or a cache fill, the operation, the wait, the
+error and the request's id), and the cache's failure line carries the
+failed call's wait. The load generator sends each request's id as
+`<stream>-<index>`, the index its own log records, so every slow request
+is joined to the store calls that held it, not matched by time. A
+request is slow above 363.52 ms, Q6's committed line, in every
+run. Each slow request is attributed to the component of its longest
+slow store call ("none" if it logged none) and belongs to the outage in
+which its outcome was observed, from Redis's disconnect to the next one
+(the 8 s outage and the 4 s after it). An outage's bursts are its slow
+requests split wherever two consecutive ones were scheduled more than
+0.4 s apart. Times are from the moment the harness issued
+`docker network disconnect`; the command returns a few hundred
+milliseconds later and the cut falls somewhere in between, so a
+request's longest store call is placed against both ends: started
+before the command was issued (in flight at the cut for certain) and
+before it returned (possibly in flight). The before arm runs replicas
+built from the commit before the cache's single probe, the after arm the
+commit with it; the load generator and the fake provider are the same.
+The phases and the rule for each hypothesis are PLAN.md's (M13), written
+before these runs.
+
+**Per outage, before** (outage p99 is the main stream's over the 8 s
+the store is cut off, back p99 over the 4 s after; the last columns are
+per replica: when its cache first failed without waiting, from the
+disconnect, and how many failed dials go-redis had logged on it by
+then):
+
+| Outage | At (s) | Slow requests | By component | Bursts | Outage p99 (ms) | Back p99 (ms) | Store calls timed out | Replicas failing fast | First fast failure (s) | Failed dials before it |
+|-------:|-------:|--------------:|--------------|-------:|----------------:|--------------:|----------------------:|----------------------|------------------------|------------------------|
+| 1 | 50.0 | 105 | cache lookup 105 | 3 | 436.52 | 187.75 | 154 | 3 of 3 | 4.63 / 3.06 / 4.52 | 57 / 41 / 48 |
+| 2 | 62.0 | 100 | cache lookup 100 | 3 | 434.66 | 185.45 | 148 | 3 of 3 | 4.58 / 3.07 / 4.55 | 53 / 40 / 51 |
+| 3 | 74.0 | 107 | cache lookup 107 | 3 | 435.05 | 184.08 | 156 | 3 of 3 | 3.08 / 4.59 / 4.60 | 45 / 57 / 49 |
+| 4 | 86.0 | 108 | cache lookup 108 | 3 | 436.30 | 186.48 | 154 | 3 of 3 | 4.55 / 4.60 / 3.07 | 52 / 57 / 40 |
+| 5 | 98.0 | 126 | cache lookup 124, none 2 | 5 | 436.78 | 189.74 | 174 | 3 of 3 | 4.58 / 3.02 / 4.58 | 62 / 42 / 66 |
+| 6 | 110.0 | 123 | cache lookup 123 | 3 | 435.31 | 184.66 | 172 | 3 of 3 | 4.58 / 4.58 / 4.54 | 53 / 55 / 63 |
+| 7 | 122.0 | 101 | cache lookup 101 | 3 | 434.94 | 187.79 | 151 | 3 of 3 | 4.57 / 3.02 / 4.59 | 50 / 41 / 57 |
+| 8 | 134.0 | 108 | cache lookup 108 | 3 | 436.27 | 186.07 | 159 | 3 of 3 | 4.59 / 3.14 / 4.57 | 57 / 41 / 51 |
+
+In the run: 878 slow requests of 29988 (cache lookup 876, none 2), 109.8 per
+outage; hit rate of repeats 52.7%.
+
+**Per outage, after:**
+
+| Outage | At (s) | Slow requests | By component | Bursts | Outage p99 (ms) | Back p99 (ms) | Store calls timed out | Replicas failing fast | First fast failure (s) | Failed dials before it |
+|-------:|-------:|--------------:|--------------|-------:|----------------:|--------------:|----------------------:|----------------------|------------------------|------------------------|
+| 1 | 50.0 | 32 | cache lookup 32 | 7 | 431.61 | 186.76 | 102 | 0 of 3 | – / – / – | 32 / 35 / 41 |
+| 2 | 62.0 | 17 | cache lookup 17 | 1 | 431.66 | 185.35 | 55 | 3 of 3 | 1.56 / 1.54 / 1.60 | 18 / 16 / 13 |
+| 3 | 74.0 | 36 | cache lookup 36 | 7 | 432.75 | 186.52 | 103 | 0 of 3 | – / – / – | 37 / 36 / 38 |
+| 4 | 86.0 | 18 | cache lookup 18 | 1 | 431.52 | 187.09 | 55 | 3 of 3 | 1.58 / 1.55 / 1.57 | 18 / 13 / 15 |
+| 5 | 98.0 | 31 | cache lookup 30, none 1 | 7 | 432.77 | 188.42 | 95 | 0 of 3 | – / – / – | 37 / 19 / 36 |
+| 6 | 110.0 | 22 | cache lookup 22 | 6 | 431.18 | 188.09 | 75 | 2 of 3 | 1.53 / – / 1.59 | 11 / 39 / 23 |
+| 7 | 122.0 | 31 | cache lookup 31 | 7 | 429.24 | 186.63 | 86 | 1 of 3 | – / 1.56 / – | 36 / 17 / 37 |
+| 8 | 134.0 | 24 | cache lookup 24 | 7 | 431.50 | 185.75 | 70 | 2 of 3 | 1.56 / – / 1.57 | 17 / 35 / 17 |
+
+In the run: 211 slow requests of 29989 (cache lookup 210, none 1), 26.4 per
+outage; hit rate of repeats 51.5%.
+
+**Per burst, by its place in the outage** (all eight outages; the start
+is the burst's first request's scheduled time from the disconnect; the
+wait is the median over bursts of each burst's median longest wait):
+
+| Burst | Before: requests (per outage) | Before: starts | Before: by component; by error | Before: call started before the command was issued / returned | Before: wait | After: requests (per outage) | After: starts | After: by component; by error | After: wait |
+|-------|------------------------------:|----------------|-------------------------------|-----------------------------:|-------------:|-----------------------------:|---------------|------------------------------|------------:|
+| 1st (the cut) | 147 (18.4) | +0.16 to +0.17 s | cache lookup 147; timeout 147 | 0 / 51 | 250 ms | 139 (17.4) | +0.14 to +0.34 s | cache lookup 139; timeout 139 | 250 ms |
+| 2nd | 418 (52.2) | +1.52 to +1.57 s | cache lookup 418; timeout 418 | 0 / 0 | 250 ms | 13 (1.6) | +1.51 to +1.71 s | cache lookup 13; timeout 13 | 250 ms |
+| 3rd | 311 (38.9) | +3.01 to +3.09 s | cache lookup 311; timeout 311 | 0 / 0 | 250 ms | 12 (1.5) | +2.77 to +2.97 s | cache lookup 12; timeout 12 | 251 ms |
+| 4th and later | 2 (0.2) | +5.30 to +8.32 s | none 2; – | 0 / 0 | 0 ms | 47 (5.9) | +4.03 to +8.01 s | cache lookup 46, none 1; timeout 44, ok 2 | 250 ms |
+
+**The retry interval** (the Q6 schedule with `REDIS_PERSIST=everysec`;
+Redis is killed at 60 s and started at 75 s; degraded is from `docker
+start` until every live replica's limiter, budget and cache logged their
+recovery, read from the kept logs as in M9; after ready subtracts Redis's
+own "Ready to accept connections"; the hit rate of repeats is the main
+stream's over the run and over the phase after the restart; timed out
+counts slow store calls that failed on a timeout while Redis was down):
+
+| Interval | Run | Ready (s) | Degraded (s) | After ready (s) | Recoveries (replica, component, s) | Repeats hit (run) | Repeats hit (after the restart) | Slow requests from the kill to the end | Store calls timed out |
+|---------:|-----|----------:|-------------:|----------------:|------------------------------------|------------------:|--------------------------------:|----------------------------:|----------------------:|
+| 1s | run-1 | 0.484 | 1.679 | 1.195 | 1 budget 0.90, 1 cache 1.66, 1 ratelimit 1.20, 3 budget 1.50, 3 cache 1.68, 3 ratelimit 1.07 | 85.0% | 89.3% | 48 | 88 |
+| 1s | run-2 | 0.333 | 1.800 | 1.467 | 1 budget 1.40, 1 cache 0.89, 1 ratelimit 1.80, 3 budget 1.10, 3 cache 1.11, 3 ratelimit 0.63 | 85.5% | 93.2% | 17 | 74 |
+| 1s | run-3 | 0.325 | 1.639 | 1.314 | 1 budget 0.90, 1 cache 1.64, 1 ratelimit 0.97, 3 budget 1.00, 3 cache 1.16, 3 ratelimit 0.67 | 85.2% | 90.6% | 31 | 82 |
+| 250ms | run-1 | 0.325 | 1.702 | 1.377 | 1 budget 1.10, 1 cache 1.08, 1 ratelimit 0.93, 3 budget 1.70, 3 cache 0.92, 3 ratelimit 0.77 | 85.3% | 92.6% | 37 | 83 |
+| 250ms | run-2 | 0.412 | 0.799 | 0.387 | 1 budget 0.80, 1 cache 0.64, 1 ratelimit 0.73, 3 budget 0.60, 3 cache 0.69, 3 ratelimit 0.53 | 85.6% | 95.3% | 35 | 85 |
+| 250ms | run-3 | 0.324 | 1.300 | 0.976 | 1 budget 0.80, 1 cache 1.03, 1 ratelimit 1.03, 3 budget 1.30, 3 cache 1.25, 3 ratelimit 1.20 | 85.5% | 93.0% | 48 | 92 |
+
+- 1s: degraded after ready 1.20–1.47 s, from the start 1.64–1.80 s; repeats hit 85.0–85.5%; store calls timed out 74–88 per run.
+- 250ms: degraded after ready 0.39–1.38 s, from the start 0.80–1.70 s; repeats hit 85.3–85.6%; store calls timed out 83–92 per run.
+
+**The default.** PLAN.md's rule: `retry_interval`'s default moves to
+250 ms only if the three-run ranges of degraded time after ready do not
+overlap and the outage phases show no more store calls timing out than
+before. The ranges overlap (0.39–1.38 s at 250 ms against 1.20–1.47 s at 1 s), and the outages timed out 260 store calls at 250 ms against 244 at 1 s: the default stays 1 s.
+
+**Reading the retry runs.** The fleet stayed degraded 1.33 s after Redis
+was ready on average at 1 s and 0.91 s at 250 ms, but the three runs at
+250 ms spread over most of a second and reach into the 1 s arm's range.
+Two waits follow a restart, as M9 said, though the first is not a dial
+backoff. A Redis kill trips go-redis's dial breaker (in 6 of the
+6 runs a replica's cache failed without waiting once 40 or
+more dials had failed), and from then the pool answers every call with
+its last dial error, here a DNS failure, and redials in the background
+once a second. After Redis was ready the replicas still logged 13
+cache failures (13 of them that DNS error) in 5 of the runs. Only after the background dial succeeds can a component's next
+probe, at most one retry interval later, find Redis. The first wait is
+up to a second whatever the interval, and where it falls is luck; a
+shorter interval only shortens the second, by half the difference
+between the intervals on average, three eighths of a second here. That
+is about the difference between the means, and three runs of a wait
+spread over a second cannot resolve it, so M9's explanation stands with
+its first timer renamed, and the default stays where the rule leaves it.
+The shorter interval also probes four times as often while Redis is
+down, and the outages timed out more store calls at 250 ms. The hit rate
+of repeats barely moves: the cache is off for a second or so out of
+two minutes.
+
+**Hypotheses (PLAN.md, M13) against the runs.**
+
+| Hypothesis | Measured | Held |
+|------------|----------|------|
+| The bursts at +1.5 s and +3 s are cache lookups | 729 of their 729 slow requests waited longest on a cache lookup | yes |
+| The burst at the cut is calls already in flight | of its 147 slow requests, 0 had their store call start before the disconnect command was issued, 51 after it was issued but before it returned (+0.18 to +0.34 s), when the cut may or may not have happened yet, and 96 after it returned, after the cut for certain | no |
+| Slow requests per outage fall from about 108 to at most 25 | 109.8 → 26.4 (before arm 878 in the run, M8's 865) | no |
+| Slow requests in the run fall from 865 to at most 200 | 878 → 211 | no |
+| The outage phases' p99 may not move (reported either way) | mean outage p99 435.73 → 431.53 ms, mean back p99 186.50 → 186.83 ms | reported |
+| Three bursts, not eight, because go-redis answers from its last dial error after its third failed dial | before: in 24 of 24 replica-outages the cache first failed fast after 40 to 66 failed dials, 3.02–4.63 s after the cut (go-redis's breaker answers from its last dial error once PoolSize, 40, dials have failed) | no |
+| Degraded time after Redis is ready falls from about 2.0 s to about 1.25 s at 250 ms | 1.20–1.47 s at 1 s (mean 1.33), 0.39–1.38 s at 250 ms (mean 0.91), three runs each | no |
+
+**Why three bursts.** go-redis stops dialling once 40 dials in a row
+have failed (its pool size, 10 per CPU, is also its breaker's threshold)
+and from then answers every call with the last dial error at once, until a
+background dial, retried once a second, succeeds. A failed dial is only
+counted when it gives up, after five attempts 100 ms apart, while the
+caller gives up at its own timeout (250 ms for the cache), so each
+lookup that needs a connection in an outage both waits 250 ms and adds a
+failed dial. Before the single probe, each round of lookups added
+roughly a third of 40 on each replica, and in 24 of 24
+replica-outages the cache failed without waiting from 3.02–4.63 s after
+the cut, once the replica's count stood between 40 and 66. The rounds
+are 1.5 s apart, not 1 s, because every failing lookup of a round restarts
+the cache's one-second bypass when it fails, and the round's lookups fail
+over a quarter of a second or more.
+With one probe per retry interval, each replica adds only a few failed
+dials an outage, and the count is never reset by a successful dial, only
+by the background dial that starts once the breaker trips (or by the
+process restarting). So the count can carry over from one outage to the
+next. Read that way, with the count started again after a restart
+(1 replica-outage(s)) and after an outage that reached 40 too late
+for a fast failure to show (1), 10 of the 11 replica-outages
+that failed fast did so on fewer than 40 dials of their own, with the
+carried count making up the rest (a count of 48 to 59 at the
+first fast failure). An outage that does not trip the breaker
+costs the cache's probe, a 250 ms wait per replica each time its bypass
+runs out, for its whole length; one that trips it costs only the burst
+at the cut. 1 replica-outage(s) failed fast on a count
+that, read this way, never reached 40 (switchboard-3 in outage 2 (0 carried + 13)): the
+logged dials do not explain them, so the carried count is a reading
+that fits the rest, not a measured mechanism.
+
+**Reading the flap runs.** Every slow request but a handful, before and
+after, is a cache lookup waiting out its 250 ms timeout. The limiter and
+the budget wait too, but only for the limited and budgeted keys, whose
+requests are not measured against the line, and a cache fill runs after
+its reply has been sent. The burst at the cut is lookups that called the
+store before any lookup had failed to turn the cache off. Their calls
+started +0.16 to +0.28 s after the disconnect was issued, and the command
+returned +0.18 to +0.34 s after it was issued: 51 of the 147 started before it
+returned and may have been in flight, the rest started after the cut.
+No gate can save them either way, since nothing is yet known to be
+down; they are
+18.4 slow requests an outage before and 17.4 after, most of the 25 the
+hypothesis allowed. The single probe removed the second and third
+bursts, 52.2 and 38.9 an outage before and 1.6 and 1.5 after; what is left
+beyond the cut is one 250 ms probe per replica per retry interval in the
+outages where go-redis's breaker did not trip (5.9 an outage from
+the fourth burst on). So the run missed both targets by the probes of
+the outages the breaker left open, and the p99 of an outage phase did
+not move: it is set by the cut's burst, which stays.
+
+- Before: harness at `273e803`, replicas built from `42f5f0c`, 2026-11-13T21:10:22Z, `make chaos-probe RUN=before`; AMD EPYC 9V74 80-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- After: `5d0e833`, 2026-11-13T21:16:06Z, `make chaos-probe RUN=after`; AMD EPYC 9V74 80-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Retry run-1: `eb2ebf7`, 2026-11-13T21:19:13Z, `RETRY_INTERVAL=1s REDIS_PERSIST=everysec make chaos`; AMD EPYC 9V74 80-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Retry run-2: `eb2ebf7`, 2026-11-13T21:23:29Z, `RETRY_INTERVAL=1s REDIS_PERSIST=everysec make chaos`; AMD EPYC 9V74 80-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Retry run-3: `eb2ebf7`, 2026-11-13T21:27:44Z, `RETRY_INTERVAL=1s REDIS_PERSIST=everysec make chaos`; AMD EPYC 9V74 80-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Retry run-1: `eb2ebf7`, 2026-11-13T21:21:21Z, `RETRY_INTERVAL=250ms REDIS_PERSIST=everysec make chaos`; AMD EPYC 9V74 80-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Retry run-2: `eb2ebf7`, 2026-11-13T21:25:36Z, `RETRY_INTERVAL=250ms REDIS_PERSIST=everysec make chaos`; AMD EPYC 9V74 80-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Retry run-3: `eb2ebf7`, 2026-11-13T21:29:51Z, `RETRY_INTERVAL=250ms REDIS_PERSIST=everysec make chaos`; AMD EPYC 9V74 80-Core Processor, 4 logical CPUs (GOMAXPROCS 4), linux/amd64, kernel 7.0.0-1019-azure, go1.27.0.
+- Cost: $0 (fake provider, no model).
+
 ## Unmodified SDKs through the gateway
 
 Does a stock client stream a reply through the gateway, whichever wire
@@ -1922,11 +2123,26 @@ observed.
   M11, 11,520 of 100,000 seeds ended with `spent` above billed, 11,520 of
   them after a lost reply; the two-step schedule (a reserve, then a settle
   whose reply is lost) is a unit test (`TestSimSchedules`).
-- **About two seconds degraded after Redis comes back.** go-redis's
-  dial backoff and the gateway's one-second probe run one after the
-  other, so a replica keeps using its local limits, grace and no cache for
-  about two seconds after Redis is ready (M9, every mode). The cache is
-  the visible cost: hits lost, not wrong answers.
+- **About a second degraded after Redis comes back, decided by luck.**
+  A killed Redis trips go-redis's dial breaker, which then redials once
+  a second in the background whatever the gateway's settings; only after
+  that dial succeeds does each component's next probe (one retry interval
+  later at most) find Redis. M13 measured 1.20–1.47 s after ready at the
+  1 s default (mean 1.33 s) and 0.39–1.38 s at 250 ms (mean 0.91 s),
+  three runs each: the shorter interval saves about what its shorter
+  probe wait predicts, but the redial's phase spreads the runs over most
+  of a second, and the default stays 1 s under PLAN.md's rule. M9's
+  "about two seconds" was from `docker start`, not from ready. The cost
+  is the cache's hits and the shared limits for that second: no wrong
+  answers. Shortening it would mean giving the pool a redial that the
+  gateway controls, which go-redis does not expose.
+- **Every Redis outage still costs a burst of slow requests at the cut.**
+  The lookups that start before the first one fails each wait out the
+  cache's 250 ms timeout (17.4 slow requests an outage after M13's single
+  probe), since nothing knows the store is down yet; and when go-redis's
+  dial breaker has not tripped, each replica's probe waits 250 ms once a
+  retry interval for the whole outage. A shorter cache timeout would
+  shrink both; it was not measured.
 - **`everysec` can lose the last second of charges to a machine crash.**
   A killed Redis process loses nothing it acknowledged (the kernel holds
   the written bytes), which is the case M9's container kill tested; a

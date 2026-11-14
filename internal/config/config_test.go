@@ -294,3 +294,36 @@ func TestReplicasFromEnvMustParse(t *testing.T) {
 		t.Errorf("err = %v, want it to name SWITCHBOARD_RATELIMIT_REPLICAS", err)
 	}
 }
+
+func TestRetryIntervalFromEnv(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		v       string
+		want    time.Duration
+		wantErr bool
+	}{
+		{v: "", want: DefaultRetryInterval},
+		{v: "250ms", want: 250 * time.Millisecond},
+		{v: "1s", want: time.Second},
+		{v: "0s", wantErr: true},
+		{v: "fast", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.v, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := Load(writeFile(t, shared), env(map[string]string{"SWITCHBOARD_RATELIMIT_RETRY_INTERVAL": tt.v}))
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "SWITCHBOARD_RATELIMIT_RETRY_INTERVAL") {
+					t.Fatalf("err = %v, want it to name the variable", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.RateLimit.RetryInterval != tt.want {
+				t.Fatalf("retry interval = %v, want %v", cfg.RateLimit.RetryInterval, tt.want)
+			}
+		})
+	}
+}

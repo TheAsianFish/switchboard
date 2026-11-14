@@ -1,0 +1,3519 @@
+{
+  "meta": {
+    "commit": "eb2ebf7",
+    "gateway_commit": "eb2ebf7",
+    "retry_interval": "250ms",
+    "date": "2026-11-13T21:29:51Z",
+    "command": "RETRY_INTERVAL=250ms REDIS_PERSIST=everysec make chaos",
+    "replicas": 3,
+    "duration_seconds": 120,
+    "time_scale": 1,
+    "schedule": "q6",
+    "redis_persist": "everysec",
+    "redis": {
+      "appendonly": "yes",
+      "appendfsync": "everysec",
+      "data_fs": "overlayfs",
+      "aof_bytes_at_end": 16903788
+    },
+    "limit": {
+      "model": "fake-limited",
+      "rate": 10,
+      "period_seconds": 1
+    },
+    "budget": {
+      "model": "fake-budget",
+      "usd": "0.20",
+      "grace_usd": "0.01",
+      "grace_refill": "1h",
+      "input_price": "3",
+      "output_price": "15"
+    },
+    "fake_provider": {
+      "latency": "20ms",
+      "tokens": 30,
+      "token_interval": "5ms"
+    }
+  },
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "kernel": "7.0.0-1019-azure"
+  },
+  "rule": {
+    "bucket_seconds": 1,
+    "consecutive": 5,
+    "min_error_rate": 0.01,
+    "error_factor": 2,
+    "p99_factor": 2
+  },
+  "reference": {
+    "error_rate": 0,
+    "p99_ms": 182.637,
+    "error_limit": 0.01,
+    "p99_limit_ms": 365.274
+  },
+  "streams": [
+    {
+      "name": "main",
+      "model": "fake-chaos",
+      "rate": 200,
+      "stream": true,
+      "repeat": 0.3,
+      "repeat_pool": 50,
+      "requests": 24000,
+      "start_offset_seconds": 0,
+      "max_send_delay_ms": 2.825
+    },
+    {
+      "name": "limited",
+      "model": "fake-limited",
+      "rate": 30,
+      "stream": false,
+      "requests": 3600,
+      "start_offset_seconds": 0,
+      "max_send_delay_ms": 1.85
+    },
+    {
+      "name": "budget",
+      "model": "fake-budget",
+      "rate": 10,
+      "stream": false,
+      "requests": 1200,
+      "start_offset_seconds": -0,
+      "max_send_delay_ms": 1.843
+    }
+  ],
+  "events": [
+    {
+      "name": "kill switchboard-2",
+      "action": "kill",
+      "target": "switchboard-2",
+      "phase": "replica down",
+      "planned_seconds": 30,
+      "issued_unix": 1794605421.4126468,
+      "done_unix": 1794605421.602929,
+      "at_seconds": 30.001,
+      "done_seconds": 30.191,
+      "recovered": true,
+      "recovery_seconds": 0.999,
+      "window_seconds": 30,
+      "errors_before_recovery": 10,
+      "worst_bucket": {
+        "start_seconds": 30,
+        "requests": 207,
+        "errors": 10,
+        "error_rate": 0.048309,
+        "ok": 197,
+        "p99_ms": 186.482,
+        "cache_hits": 65,
+        "good": false
+      }
+    },
+    {
+      "name": "kill redis",
+      "action": "kill",
+      "target": "redis",
+      "phase": "replica and Redis down",
+      "planned_seconds": 60,
+      "issued_unix": 1794605451.412596,
+      "done_unix": 1794605451.5893085,
+      "at_seconds": 60.001,
+      "done_seconds": 60.178,
+      "recovered": true,
+      "recovery_seconds": 0.999,
+      "window_seconds": 15,
+      "errors_before_recovery": 0,
+      "worst_bucket": {
+        "start_seconds": 60,
+        "requests": 194,
+        "errors": 0,
+        "error_rate": 0,
+        "ok": 194,
+        "p99_ms": 438.795,
+        "cache_hits": 4,
+        "good": false
+      }
+    },
+    {
+      "name": "start redis",
+      "action": "start",
+      "target": "redis",
+      "phase": "replica down, Redis back",
+      "planned_seconds": 75,
+      "issued_unix": 1794605466.4123495,
+      "done_unix": 1794605466.6703691,
+      "at_seconds": 75.001,
+      "done_seconds": 75.259,
+      "recovered": true,
+      "recovery_seconds": 0.999,
+      "window_seconds": 14.999,
+      "errors_before_recovery": 0,
+      "worst_bucket": {
+        "start_seconds": 75,
+        "requests": 200,
+        "errors": 0,
+        "error_rate": 0,
+        "ok": 200,
+        "p99_ms": 188.7,
+        "cache_hits": 0,
+        "good": true
+      }
+    },
+    {
+      "name": "start switchboard-2",
+      "action": "start",
+      "target": "switchboard-2",
+      "phase": "all back",
+      "planned_seconds": 90,
+      "issued_unix": 1794605481.4119127,
+      "done_unix": 1794605481.7225177,
+      "at_seconds": 90,
+      "done_seconds": 90.311,
+      "recovered": true,
+      "recovery_seconds": 0,
+      "window_seconds": 30,
+      "errors_before_recovery": 0,
+      "worst_bucket": {
+        "start_seconds": 98,
+        "requests": 201,
+        "errors": 0,
+        "error_rate": 0,
+        "ok": 201,
+        "p99_ms": 263.661,
+        "cache_hits": 54,
+        "good": true
+      }
+    }
+  ],
+  "phases": [
+    {
+      "name": "steady",
+      "from_seconds": 0,
+      "to_seconds": 30.001,
+      "replicas_up": 3,
+      "redis_up": true,
+      "main": {
+        "requests": 5972,
+        "ok": 5972,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 5972,
+          "mean_ms": 125.943,
+          "p50_ms": 177.112,
+          "p90_ms": 180.125,
+          "p95_ms": 181.086,
+          "p99_ms": 182.637,
+          "p999_ms": 185.335,
+          "max_ms": 187.113
+        },
+        "ttft": {
+          "count": 5972,
+          "mean_ms": 15.743,
+          "p50_ms": 21.52,
+          "p90_ms": 22.506,
+          "p95_ms": 22.731,
+          "p99_ms": 23.238,
+          "p999_ms": 24.355,
+          "max_ms": 25.365
+        },
+        "cache_statuses": {
+          "hit-exact": 1765,
+          "miss": 4207
+        },
+        "slow": 0,
+        "cache_hits": 1765,
+        "cache_hit_rate": 0.295546,
+        "repeat_ok": 1828,
+        "repeat_hits": 1765,
+        "repeat_hit_rate": 0.965536
+      },
+      "limited": {
+        "offered": 901,
+        "refused": 591,
+        "other_errors": 0,
+        "admitted": 310,
+        "windows": 30,
+        "most_in_window": 10,
+        "over_admissions": 0,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 300,
+        "ok": 300,
+        "refused": 0,
+        "other_errors": 0,
+        "admitted": 301,
+        "spent_nanodollars": 139965000,
+        "cumulative_nanodollars": 139965000,
+        "overshoot_nanodollars": 0,
+        "grace_bound_nanodollars": 0,
+        "reconcile": {
+          "at_seconds": 29.502,
+          "ledger_nanodollars": 137640000,
+          "redis_spent_nanodollars": 137640000,
+          "redis_reserved_nanodollars": 1005000,
+          "unreconciled_nanodollars": 0
+        }
+      }
+    },
+    {
+      "name": "replica down",
+      "from_seconds": 30.001,
+      "to_seconds": 60.001,
+      "replicas_up": 2,
+      "redis_up": true,
+      "main": {
+        "requests": 5999,
+        "ok": 5989,
+        "errors": 10,
+        "error_rate": 0.001667,
+        "errors_by_kind": {
+          "http_502": 2,
+          "malformed_stream": 8
+        },
+        "latency": {
+          "count": 5989,
+          "mean_ms": 125.888,
+          "p50_ms": 176.889,
+          "p90_ms": 180.245,
+          "p95_ms": 181.251,
+          "p99_ms": 183.276,
+          "p999_ms": 251.707,
+          "max_ms": 430.222
+        },
+        "ttft": {
+          "count": 5989,
+          "mean_ms": 16.039,
+          "p50_ms": 21.52,
+          "p90_ms": 22.513,
+          "p95_ms": 22.726,
+          "p99_ms": 23.284,
+          "p999_ms": 251.268,
+          "max_ms": 272.217
+        },
+        "cache_statuses": {
+          "hit-exact": 1781,
+          "miss": 4208
+        },
+        "slow": 4,
+        "cache_hits": 1781,
+        "cache_hit_rate": 0.297379,
+        "repeat_ok": 1781,
+        "repeat_hits": 1781,
+        "repeat_hit_rate": 1
+      },
+      "limited": {
+        "offered": 899,
+        "refused": 599,
+        "other_errors": 0,
+        "admitted": 300,
+        "windows": 30,
+        "most_in_window": 10,
+        "over_admissions": 0,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 300,
+        "ok": 128,
+        "refused": 172,
+        "other_errors": 0,
+        "admitted": 127,
+        "spent_nanodollars": 59055000,
+        "cumulative_nanodollars": 199020000,
+        "overshoot_nanodollars": 0,
+        "grace_bound_nanodollars": 0,
+        "reconcile": {
+          "at_seconds": 59.501,
+          "ledger_nanodollars": 199020000,
+          "redis_spent_nanodollars": 199020000,
+          "redis_reserved_nanodollars": 0,
+          "unreconciled_nanodollars": 0
+        }
+      }
+    },
+    {
+      "name": "replica and Redis down",
+      "from_seconds": 60.001,
+      "to_seconds": 75.001,
+      "replicas_up": 2,
+      "redis_up": false,
+      "main": {
+        "requests": 2994,
+        "ok": 2994,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 2994,
+          "mean_ms": 181.111,
+          "p50_ms": 176.719,
+          "p90_ms": 180.337,
+          "p95_ms": 182.017,
+          "p99_ms": 433.373,
+          "p999_ms": 438.626,
+          "max_ms": 438.859
+        },
+        "ttft": {
+          "count": 2994,
+          "mean_ms": 26.08,
+          "p50_ms": 21.866,
+          "p90_ms": 22.639,
+          "p95_ms": 23.008,
+          "p99_ms": 272.506,
+          "p999_ms": 275.005,
+          "max_ms": 276.584
+        },
+        "cache_statuses": {
+          "error": 160,
+          "hit-exact": 4,
+          "miss": 42,
+          "skip": 2788
+        },
+        "slow": 47,
+        "cache_hits": 4,
+        "cache_hit_rate": 0.001336,
+        "repeat_ok": 929,
+        "repeat_hits": 4,
+        "repeat_hit_rate": 0.004306
+      },
+      "limited": {
+        "offered": 450,
+        "refused": 354,
+        "other_errors": 0,
+        "admitted": 96,
+        "windows": 15,
+        "most_in_window": 16,
+        "over_admissions": 6,
+        "local_bound": 6
+      },
+      "budget": {
+        "offered": 150,
+        "ok": 40,
+        "refused": 110,
+        "other_errors": 0,
+        "admitted": 40,
+        "spent_nanodollars": 18600000,
+        "cumulative_nanodollars": 217620000,
+        "overshoot_nanodollars": 17620000,
+        "grace_bound_nanodollars": 20000000
+      }
+    },
+    {
+      "name": "replica down, Redis back",
+      "from_seconds": 75.001,
+      "to_seconds": 90,
+      "replicas_up": 2,
+      "redis_up": true,
+      "main": {
+        "requests": 3009,
+        "ok": 3009,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 3009,
+          "mean_ms": 128.634,
+          "p50_ms": 176.903,
+          "p90_ms": 180.226,
+          "p95_ms": 181.233,
+          "p99_ms": 184.648,
+          "p999_ms": 188.707,
+          "max_ms": 426.927
+        },
+        "ttft": {
+          "count": 3009,
+          "mean_ms": 16.17,
+          "p50_ms": 21.529,
+          "p90_ms": 22.529,
+          "p95_ms": 22.759,
+          "p99_ms": 23.445,
+          "p999_ms": 25.872,
+          "max_ms": 272.834
+        },
+        "cache_statuses": {
+          "error": 9,
+          "hit-exact": 844,
+          "miss": 1906,
+          "skip": 250
+        },
+        "slow": 1,
+        "cache_hits": 844,
+        "cache_hit_rate": 0.280492,
+        "repeat_ok": 908,
+        "repeat_hits": 844,
+        "repeat_hit_rate": 0.929515
+      },
+      "limited": {
+        "offered": 450,
+        "refused": 294,
+        "other_errors": 0,
+        "admitted": 156,
+        "windows": 15,
+        "most_in_window": 16,
+        "over_admissions": 6,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 150,
+        "ok": 0,
+        "refused": 150,
+        "other_errors": 0,
+        "admitted": 0,
+        "spent_nanodollars": 0,
+        "cumulative_nanodollars": 217620000,
+        "overshoot_nanodollars": 17620000,
+        "grace_bound_nanodollars": 0,
+        "reconcile": {
+          "at_seconds": 89.502,
+          "ledger_nanodollars": 217620000,
+          "redis_spent_nanodollars": 217620000,
+          "redis_reserved_nanodollars": 0,
+          "unreconciled_nanodollars": 0
+        }
+      }
+    },
+    {
+      "name": "all back",
+      "from_seconds": 90,
+      "to_seconds": 120,
+      "replicas_up": 3,
+      "redis_up": true,
+      "main": {
+        "requests": 6026,
+        "ok": 6026,
+        "errors": 0,
+        "error_rate": 0,
+        "errors_by_kind": {},
+        "latency": {
+          "count": 6026,
+          "mean_ms": 125.782,
+          "p50_ms": 176.915,
+          "p90_ms": 180.114,
+          "p95_ms": 181.166,
+          "p99_ms": 184.023,
+          "p999_ms": 249.984,
+          "max_ms": 275.664
+        },
+        "ttft": {
+          "count": 6026,
+          "mean_ms": 16.041,
+          "p50_ms": 21.522,
+          "p90_ms": 22.549,
+          "p95_ms": 22.776,
+          "p99_ms": 23.756,
+          "p999_ms": 93.204,
+          "max_ms": 116.779
+        },
+        "cache_statuses": {
+          "hit-exact": 1795,
+          "miss": 4231
+        },
+        "slow": 0,
+        "cache_hits": 1795,
+        "cache_hit_rate": 0.297876,
+        "repeat_ok": 1795,
+        "repeat_hits": 1795,
+        "repeat_hit_rate": 1
+      },
+      "limited": {
+        "offered": 900,
+        "refused": 600,
+        "other_errors": 0,
+        "admitted": 300,
+        "windows": 31,
+        "most_in_window": 10,
+        "over_admissions": 0,
+        "local_bound": 10
+      },
+      "budget": {
+        "offered": 300,
+        "ok": 0,
+        "refused": 300,
+        "other_errors": 0,
+        "admitted": 0,
+        "spent_nanodollars": 0,
+        "cumulative_nanodollars": 217620000,
+        "overshoot_nanodollars": 17620000,
+        "grace_bound_nanodollars": 0,
+        "reconcile": {
+          "at_seconds": 121.349,
+          "ledger_nanodollars": 217620000,
+          "redis_spent_nanodollars": 217620000,
+          "redis_reserved_nanodollars": 0,
+          "unreconciled_nanodollars": 0
+        }
+      }
+    }
+  ],
+  "buckets": [
+    {
+      "start_seconds": 0,
+      "requests": 172,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 172,
+      "p99_ms": 187.095,
+      "cache_hits": 13,
+      "good": true
+    },
+    {
+      "start_seconds": 1,
+      "requests": 205,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 205,
+      "p99_ms": 180.527,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 2,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 181.117,
+      "cache_hits": 52,
+      "good": true
+    },
+    {
+      "start_seconds": 3,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 181.532,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 4,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 181.429,
+      "cache_hits": 64,
+      "good": true
+    },
+    {
+      "start_seconds": 5,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 181.143,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 6,
+      "requests": 206,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 206,
+      "p99_ms": 181.831,
+      "cache_hits": 65,
+      "good": true
+    },
+    {
+      "start_seconds": 7,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 183.334,
+      "cache_hits": 52,
+      "good": true
+    },
+    {
+      "start_seconds": 8,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 181.268,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 9,
+      "requests": 194,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 194,
+      "p99_ms": 182.374,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 10,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 182.759,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 11,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 181.193,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 12,
+      "requests": 204,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 204,
+      "p99_ms": 182.327,
+      "cache_hits": 71,
+      "good": true
+    },
+    {
+      "start_seconds": 13,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 182.851,
+      "cache_hits": 69,
+      "good": true
+    },
+    {
+      "start_seconds": 14,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 182.9,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 15,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 182.316,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 16,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 183.263,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 17,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 181.79,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 18,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 182.497,
+      "cache_hits": 72,
+      "good": true
+    },
+    {
+      "start_seconds": 19,
+      "requests": 193,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 193,
+      "p99_ms": 182.549,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 20,
+      "requests": 204,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 204,
+      "p99_ms": 182.319,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 21,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 182.875,
+      "cache_hits": 60,
+      "good": true
+    },
+    {
+      "start_seconds": 22,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 183.295,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 23,
+      "requests": 193,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 193,
+      "p99_ms": 183.136,
+      "cache_hits": 52,
+      "good": true
+    },
+    {
+      "start_seconds": 24,
+      "requests": 204,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 204,
+      "p99_ms": 180.959,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 25,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 182.37,
+      "cache_hits": 66,
+      "good": true
+    },
+    {
+      "start_seconds": 26,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 182.77,
+      "cache_hits": 65,
+      "good": true
+    },
+    {
+      "start_seconds": 27,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 182.45,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 28,
+      "requests": 196,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 196,
+      "p99_ms": 182.919,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 29,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 184.579,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 30,
+      "requests": 207,
+      "errors": 10,
+      "error_rate": 0.048309,
+      "ok": 197,
+      "p99_ms": 186.482,
+      "cache_hits": 65,
+      "good": false
+    },
+    {
+      "start_seconds": 31,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 182.268,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 32,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 181.1,
+      "cache_hits": 57,
+      "good": true
+    },
+    {
+      "start_seconds": 33,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 181.592,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 34,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 183.224,
+      "cache_hits": 51,
+      "good": true
+    },
+    {
+      "start_seconds": 35,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.739,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 36,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 182.994,
+      "cache_hits": 60,
+      "good": true
+    },
+    {
+      "start_seconds": 37,
+      "requests": 204,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 204,
+      "p99_ms": 183.124,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 38,
+      "requests": 191,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 191,
+      "p99_ms": 184.027,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 39,
+      "requests": 206,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 206,
+      "p99_ms": 185.634,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 40,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 183.19,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 41,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.885,
+      "cache_hits": 57,
+      "good": true
+    },
+    {
+      "start_seconds": 42,
+      "requests": 196,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 196,
+      "p99_ms": 182.97,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 43,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 183.892,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 44,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 182.825,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 45,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 179.702,
+      "cache_hits": 65,
+      "good": true
+    },
+    {
+      "start_seconds": 46,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 180.929,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 47,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 182.056,
+      "cache_hits": 67,
+      "good": true
+    },
+    {
+      "start_seconds": 48,
+      "requests": 195,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 195,
+      "p99_ms": 184.753,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 49,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.016,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 50,
+      "requests": 207,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 207,
+      "p99_ms": 180.864,
+      "cache_hits": 65,
+      "good": true
+    },
+    {
+      "start_seconds": 51,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 182.039,
+      "cache_hits": 65,
+      "good": true
+    },
+    {
+      "start_seconds": 52,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 182.657,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 53,
+      "requests": 196,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 196,
+      "p99_ms": 181.582,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 54,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 182.471,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 55,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 182.794,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 56,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 181.792,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 57,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 181.453,
+      "cache_hits": 70,
+      "good": true
+    },
+    {
+      "start_seconds": 58,
+      "requests": 204,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 204,
+      "p99_ms": 183.656,
+      "cache_hits": 72,
+      "good": true
+    },
+    {
+      "start_seconds": 59,
+      "requests": 191,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 191,
+      "p99_ms": 185.273,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 60,
+      "requests": 194,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 194,
+      "p99_ms": 438.795,
+      "cache_hits": 4,
+      "good": false
+    },
+    {
+      "start_seconds": 61,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.423,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 62,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 183.339,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 63,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 180.736,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 64,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 182.2,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 65,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 180.704,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 66,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 179.8,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 67,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 181.542,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 68,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 180.966,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 69,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 180.669,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 70,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 180.009,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 71,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 183.282,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 72,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 179.59,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 73,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 180.444,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 74,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 183.045,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 75,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 188.7,
+      "cache_hits": 0,
+      "good": true
+    },
+    {
+      "start_seconds": 76,
+      "requests": 210,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 210,
+      "p99_ms": 183.671,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 77,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 180.3,
+      "cache_hits": 60,
+      "good": true
+    },
+    {
+      "start_seconds": 78,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 181.381,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 79,
+      "requests": 205,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 205,
+      "p99_ms": 181.129,
+      "cache_hits": 56,
+      "good": true
+    },
+    {
+      "start_seconds": 80,
+      "requests": 197,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 197,
+      "p99_ms": 182.974,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 81,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 182.381,
+      "cache_hits": 69,
+      "good": true
+    },
+    {
+      "start_seconds": 82,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 185.301,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 83,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 181.764,
+      "cache_hits": 71,
+      "good": true
+    },
+    {
+      "start_seconds": 84,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 181.635,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 85,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.005,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 86,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 181.382,
+      "cache_hits": 64,
+      "good": true
+    },
+    {
+      "start_seconds": 87,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 183.19,
+      "cache_hits": 73,
+      "good": true
+    },
+    {
+      "start_seconds": 88,
+      "requests": 194,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 194,
+      "p99_ms": 182.196,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 89,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 183.719,
+      "cache_hits": 51,
+      "good": true
+    },
+    {
+      "start_seconds": 90,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 188.181,
+      "cache_hits": 57,
+      "good": true
+    },
+    {
+      "start_seconds": 91,
+      "requests": 209,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 209,
+      "p99_ms": 182.137,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 92,
+      "requests": 194,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 194,
+      "p99_ms": 182.747,
+      "cache_hits": 64,
+      "good": true
+    },
+    {
+      "start_seconds": 93,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 182.117,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 94,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 180.716,
+      "cache_hits": 58,
+      "good": true
+    },
+    {
+      "start_seconds": 95,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 183.942,
+      "cache_hits": 60,
+      "good": true
+    },
+    {
+      "start_seconds": 96,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.418,
+      "cache_hits": 52,
+      "good": true
+    },
+    {
+      "start_seconds": 97,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 189.544,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 98,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 263.661,
+      "cache_hits": 54,
+      "good": true
+    },
+    {
+      "start_seconds": 99,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 244.865,
+      "cache_hits": 69,
+      "good": true
+    },
+    {
+      "start_seconds": 100,
+      "requests": 199,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 199,
+      "p99_ms": 180.826,
+      "cache_hits": 69,
+      "good": true
+    },
+    {
+      "start_seconds": 101,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 182.544,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 102,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 180.928,
+      "cache_hits": 48,
+      "good": true
+    },
+    {
+      "start_seconds": 103,
+      "requests": 208,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 208,
+      "p99_ms": 183.348,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 104,
+      "requests": 194,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 194,
+      "p99_ms": 183.053,
+      "cache_hits": 66,
+      "good": true
+    },
+    {
+      "start_seconds": 105,
+      "requests": 203,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 203,
+      "p99_ms": 180.387,
+      "cache_hits": 57,
+      "good": true
+    },
+    {
+      "start_seconds": 106,
+      "requests": 194,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 194,
+      "p99_ms": 182.367,
+      "cache_hits": 55,
+      "good": true
+    },
+    {
+      "start_seconds": 107,
+      "requests": 207,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 207,
+      "p99_ms": 182.442,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 108,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 184.592,
+      "cache_hits": 66,
+      "good": true
+    },
+    {
+      "start_seconds": 109,
+      "requests": 206,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 206,
+      "p99_ms": 201.717,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 110,
+      "requests": 194,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 194,
+      "p99_ms": 182.211,
+      "cache_hits": 59,
+      "good": true
+    },
+    {
+      "start_seconds": 111,
+      "requests": 202,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 202,
+      "p99_ms": 181.302,
+      "cache_hits": 66,
+      "good": true
+    },
+    {
+      "start_seconds": 112,
+      "requests": 196,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 196,
+      "p99_ms": 181.698,
+      "cache_hits": 62,
+      "good": true
+    },
+    {
+      "start_seconds": 113,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 182.756,
+      "cache_hits": 69,
+      "good": true
+    },
+    {
+      "start_seconds": 114,
+      "requests": 198,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 198,
+      "p99_ms": 182.101,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 115,
+      "requests": 201,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 201,
+      "p99_ms": 181.533,
+      "cache_hits": 61,
+      "good": true
+    },
+    {
+      "start_seconds": 116,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 179.783,
+      "cache_hits": 50,
+      "good": true
+    },
+    {
+      "start_seconds": 117,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 181.196,
+      "cache_hits": 53,
+      "good": true
+    },
+    {
+      "start_seconds": 118,
+      "requests": 205,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 205,
+      "p99_ms": 182.076,
+      "cache_hits": 63,
+      "good": true
+    },
+    {
+      "start_seconds": 119,
+      "requests": 200,
+      "errors": 0,
+      "error_rate": 0,
+      "ok": 200,
+      "p99_ms": 182.479,
+      "cache_hits": 63,
+      "good": true
+    }
+  ],
+  "store": {
+    "transitions": [
+      {
+        "replica": "switchboard-1",
+        "component": "budget",
+        "at_seconds": 60.202,
+        "degraded": true,
+        "error": "budget reserve budget: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "ratelimit",
+        "at_seconds": 60.202,
+        "degraded": true,
+        "error": "ratelimit: fixed window allow: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "ratelimit",
+        "at_seconds": 60.235,
+        "degraded": true,
+        "error": "ratelimit: fixed window allow: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "budget",
+        "at_seconds": 60.302,
+        "degraded": true,
+        "error": "budget reserve budget: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.336,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.337,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.341,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.342,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.347,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.347,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.351,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.353,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.357,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.357,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.361,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.363,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.366,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.368,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.372,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.372,
+        "degraded": true,
+        "error": "cache: get: redis: connection pool timeout",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.374,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.376,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.381,
+        "degraded": true,
+        "error": "cache: get: redis: connection pool timeout",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.381,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.388,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.392,
+        "degraded": true,
+        "error": "cache: get: redis: connection pool timeout",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.392,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.393,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.397,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.398,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.401,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.401,
+        "degraded": true,
+        "error": "cache: get: redis: connection pool timeout",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.404,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.409,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.41,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.413,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.416,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.416,
+        "degraded": true,
+        "error": "cache: get: redis: connection pool timeout",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.416,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.416,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.421,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.422,
+        "degraded": true,
+        "error": "cache: get: redis: connection pool timeout",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.422,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.426,
+        "degraded": true,
+        "error": "cache: get: redis: connection pool timeout",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.426,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.426,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.431,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.432,
+        "degraded": true,
+        "error": "cache: get: redis: connection pool timeout",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.432,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.436,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.437,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.441,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.443,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.446,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.451,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.453,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.456,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.461,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.461,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.463,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.464,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.466,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.469,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.472,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.475,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.477,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.48,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.481,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.486,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.492,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.496,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.497,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.502,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.502,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.506,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.506,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.512,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.512,
+        "degraded": true,
+        "error": "cache: set: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.516,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.527,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.537,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.546,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.557,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.561,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 60.587,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 60.77,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 61.021,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 61.091,
+        "degraded": true,
+        "error": "cache: get: context deadline exceeded",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 61.281,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 61.346,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 61.531,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 61.596,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 61.791,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 61.846,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 62.086,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 62.116,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 62.346,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 62.367,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 62.596,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 62.626,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 62.846,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 62.876,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 63.096,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 63.126,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 63.381,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 63.386,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 63.631,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 63.636,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 63.886,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 63.896,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 64.136,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 64.151,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 64.395,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 64.416,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 64.646,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 64.671,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 64.906,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 64.932,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 65.162,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 65.196,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 65.416,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 65.451,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 65.667,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 65.721,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 65.921,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 65.971,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 66.176,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 66.236,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 66.436,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 66.491,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 66.691,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 66.746,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 66.941,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 67.001,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 67.202,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 67.266,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 67.456,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 67.521,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 67.711,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 67.776,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 67.966,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 68.026,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 68.221,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 68.281,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 68.496,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 68.541,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 68.746,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 68.791,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 69.006,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 69.041,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 69.257,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 69.296,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 69.525,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 69.547,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 69.786,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 69.806,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 70.036,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 70.061,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 70.301,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 70.311,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 70.555,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 70.566,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 70.806,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 70.821,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 71.061,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 71.081,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 71.311,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 71.351,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 71.565,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 71.601,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 71.821,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 71.861,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 72.071,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 72.121,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 72.341,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 72.401,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 72.601,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 72.665,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 72.856,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 72.92,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 73.111,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 73.171,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 73.366,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 73.426,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 73.621,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 73.676,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 73.881,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 73.946,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 74.146,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 74.211,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 74.407,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 74.466,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 74.661,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 74.721,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 74.915,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 74.971,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 75.176,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 75.241,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 75.446,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 75.502,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 75.741,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 75.771,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "budget",
+        "at_seconds": 75.802,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 75.991,
+        "degraded": true,
+        "error": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving",
+        "class": "dns"
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "ratelimit",
+        "at_seconds": 76.035,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-1",
+        "component": "cache",
+        "at_seconds": 76.036,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "ratelimit",
+        "at_seconds": 76.202,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "cache",
+        "at_seconds": 76.246,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-3",
+        "component": "budget",
+        "at_seconds": 76.301,
+        "degraded": false
+      },
+      {
+        "replica": "switchboard-2",
+        "component": "cache",
+        "at_seconds": 98.752,
+        "degraded": true,
+        "error": "cache: set: read tcp 172.18.0.5:60054-\u003e172.18.0.3:6379: i/o timeout",
+        "class": "timeout"
+      },
+      {
+        "replica": "switchboard-2",
+        "component": "cache",
+        "at_seconds": 98.768,
+        "degraded": false
+      }
+    ],
+    "outages": [
+      {
+        "event": "kill redis",
+        "at_seconds": 60.001,
+        "to_seconds": 75.001,
+        "classes": [
+          {
+            "class": "timeout",
+            "lines": 86,
+            "pool_lines": 0,
+            "first_seconds": 0.201,
+            "last_seconds": 1.09,
+            "example": "ratelimit: fixed window allow: context deadline exceeded"
+          },
+          {
+            "class": "dns",
+            "lines": 210,
+            "pool_lines": 98,
+            "first_seconds": 0.503,
+            "last_seconds": 14.97,
+            "example": "redis: 2026/11/13 21:30:51 pool.go:770: redis: connection pool: failed to dial after 5 attempts: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+          }
+        ]
+      }
+    ],
+    "restarts": [
+      {
+        "at_seconds": 75.001,
+        "ready_seconds": 0.324,
+        "aof_loaded_seconds": 0.031,
+        "errors": [
+          {
+            "class": "dns",
+            "lines": 7,
+            "pool_lines": 0,
+            "first_seconds": 0.175,
+            "last_seconds": 0.99,
+            "example": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+          },
+          {
+            "class": "timeout",
+            "lines": 1,
+            "pool_lines": 0,
+            "first_seconds": 23.751,
+            "last_seconds": 23.751,
+            "example": "cache: set: read tcp 172.18.0.5:60054-\u003e172.18.0.3:6379: i/o timeout"
+          }
+        ],
+        "loading_errors": 0,
+        "recoveries": [
+          {
+            "replica": "switchboard-1",
+            "component": "budget",
+            "seconds": 0.801
+          },
+          {
+            "replica": "switchboard-1",
+            "component": "cache",
+            "seconds": 1.035
+          },
+          {
+            "replica": "switchboard-1",
+            "component": "ratelimit",
+            "seconds": 1.034
+          },
+          {
+            "replica": "switchboard-3",
+            "component": "budget",
+            "seconds": 1.3
+          },
+          {
+            "replica": "switchboard-3",
+            "component": "cache",
+            "seconds": 1.245
+          },
+          {
+            "replica": "switchboard-3",
+            "component": "ratelimit",
+            "seconds": 1.201
+          }
+        ],
+        "degraded_seconds": 1.3
+      }
+    ]
+  }
+}

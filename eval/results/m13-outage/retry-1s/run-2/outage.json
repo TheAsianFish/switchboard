@@ -1,0 +1,460 @@
+{
+  "meta": {
+    "commit": "eb2ebf7",
+    "gateway_commit": "eb2ebf7",
+    "retry_interval": "1s",
+    "date": "2026-11-13T21:23:29Z",
+    "command": "RETRY_INTERVAL=1s REDIS_PERSIST=everysec make chaos",
+    "replicas": 3,
+    "duration_seconds": 120,
+    "time_scale": 1,
+    "schedule": "q6",
+    "redis_persist": "everysec",
+    "redis": {
+      "appendonly": "yes",
+      "appendfsync": "everysec",
+      "data_fs": "overlayfs",
+      "aof_bytes_at_end": 16930452
+    },
+    "limit": {
+      "model": "fake-limited",
+      "rate": 10,
+      "period_seconds": 1
+    },
+    "budget": {
+      "model": "fake-budget",
+      "usd": "0.20",
+      "grace_usd": "0.01",
+      "grace_refill": "1h",
+      "input_price": "3",
+      "output_price": "15"
+    },
+    "fake_provider": {
+      "latency": "20ms",
+      "tokens": 30,
+      "token_interval": "5ms"
+    }
+  },
+  "hardware": {
+    "num_cpu": 4,
+    "gomaxprocs": 4,
+    "goos": "linux",
+    "goarch": "amd64",
+    "go_version": "go1.27.0",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "kernel": "7.0.0-1019-azure"
+  },
+  "line_ms": 363.52,
+  "burst_gap_seconds": 0.4,
+  "run": {
+    "requests": 23990,
+    "slow_requests": 25,
+    "slow_by_component": {
+      "cache_lookup": 11,
+      "none": 14
+    },
+    "slow_store_calls": {
+      "budget": 14,
+      "cache_fill": 29,
+      "cache_lookup": 11,
+      "limiter": 20
+    },
+    "slow_store_calls_timed_out": 74,
+    "repeat_ok": 7241,
+    "repeat_hits": 6191,
+    "repeat_hit_rate": 0.854992
+  },
+  "outages": [
+    {
+      "event": "kill redis",
+      "at_seconds": 59.999,
+      "done_seconds": 0.201,
+      "back_seconds": 15.001,
+      "to_seconds": 120,
+      "outage_p99_ms": 185.776,
+      "back_p99_ms": 184.625,
+      "slow_requests": 17,
+      "slow_by_component": {
+        "cache_lookup": 11,
+        "none": 6
+      },
+      "bursts": [
+        {
+          "from_seconds": 1.516,
+          "to_seconds": 1.521,
+          "requests": 2,
+          "by_component": {
+            "cache_lookup": 2
+          },
+          "by_class": {
+            "timeout": 2
+          },
+          "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 1.517,
+          "calls_to_seconds": 1.522,
+          "replicas": 2,
+          "median_wait_ms": 250.632
+        },
+        {
+          "from_seconds": 2.436,
+          "to_seconds": 2.786,
+          "requests": 3,
+          "by_component": {
+            "cache_lookup": 2,
+            "none": 1
+          },
+          "by_class": {
+            "timeout": 2
+          },
+          "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 2.773,
+          "calls_to_seconds": 2.787,
+          "replicas": 2,
+          "median_wait_ms": 250.501
+        },
+        {
+          "from_seconds": 4.026,
+          "to_seconds": 4.051,
+          "requests": 2,
+          "by_component": {
+            "cache_lookup": 2
+          },
+          "by_class": {
+            "timeout": 2
+          },
+          "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 4.026,
+          "calls_to_seconds": 4.052,
+          "replicas": 2,
+          "median_wait_ms": 250.18
+        },
+        {
+          "from_seconds": 5.276,
+          "to_seconds": 5.441,
+          "requests": 3,
+          "by_component": {
+            "cache_lookup": 2,
+            "none": 1
+          },
+          "by_class": {
+            "timeout": 2
+          },
+          "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 5.277,
+          "calls_to_seconds": 5.317,
+          "replicas": 2,
+          "median_wait_ms": 250.353
+        },
+        {
+          "from_seconds": 6.536,
+          "to_seconds": 6.581,
+          "requests": 2,
+          "by_component": {
+            "cache_lookup": 2
+          },
+          "by_class": {
+            "timeout": 2
+          },
+          "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 6.537,
+          "calls_to_seconds": 6.582,
+          "replicas": 2,
+          "median_wait_ms": 250.399
+        },
+        {
+          "from_seconds": 7.796,
+          "to_seconds": 7.796,
+          "requests": 1,
+          "by_component": {
+            "cache_lookup": 1
+          },
+          "by_class": {
+            "timeout": 1
+          },
+          "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "calls_from_seconds": 7.797,
+          "calls_to_seconds": 7.797,
+          "replicas": 1,
+          "median_wait_ms": 250.233
+        },
+        {
+          "from_seconds": 8.436,
+          "to_seconds": 8.436,
+          "requests": 1,
+          "by_component": {
+            "none": 1
+          },
+          "by_class": {},
+          "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "replicas": 0,
+          "median_wait_ms": 0
+        },
+        {
+          "from_seconds": 14.441,
+          "to_seconds": 14.441,
+          "requests": 1,
+          "by_component": {
+            "none": 1
+          },
+          "by_class": {},
+          "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "replicas": 0,
+          "median_wait_ms": 0
+        },
+        {
+          "from_seconds": 20.436,
+          "to_seconds": 20.436,
+          "requests": 1,
+          "by_component": {
+            "none": 1
+          },
+          "by_class": {},
+          "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "replicas": 0,
+          "median_wait_ms": 0
+        },
+        {
+          "from_seconds": 26.436,
+          "to_seconds": 26.436,
+          "requests": 1,
+          "by_component": {
+            "none": 1
+          },
+          "by_class": {},
+          "in_flight_at_cut": 0,
+          "started_before_done": 0,
+          "replicas": 0,
+          "median_wait_ms": 0
+        }
+      ],
+      "cache_rounds": [
+        {
+          "from_seconds": 0.09,
+          "to_seconds": 0.514,
+          "failures": 31,
+          "slow_failures": 29,
+          "max_wait_ms": 251.095,
+          "by_class": {
+            "closed": 2,
+            "timeout": 29
+          }
+        },
+        {
+          "from_seconds": 1.768,
+          "to_seconds": 1.772,
+          "failures": 2,
+          "slow_failures": 2,
+          "max_wait_ms": 250.928,
+          "by_class": {
+            "timeout": 2
+          }
+        },
+        {
+          "from_seconds": 3.023,
+          "to_seconds": 3.037,
+          "failures": 2,
+          "slow_failures": 2,
+          "max_wait_ms": 250.505,
+          "by_class": {
+            "timeout": 2
+          }
+        },
+        {
+          "from_seconds": 4.277,
+          "to_seconds": 4.302,
+          "failures": 2,
+          "slow_failures": 2,
+          "max_wait_ms": 250.296,
+          "by_class": {
+            "timeout": 2
+          }
+        },
+        {
+          "from_seconds": 5.528,
+          "to_seconds": 5.568,
+          "failures": 2,
+          "slow_failures": 2,
+          "max_wait_ms": 250.624,
+          "by_class": {
+            "timeout": 2
+          }
+        },
+        {
+          "from_seconds": 6.787,
+          "to_seconds": 6.833,
+          "failures": 2,
+          "slow_failures": 2,
+          "max_wait_ms": 250.633,
+          "by_class": {
+            "timeout": 2
+          }
+        },
+        {
+          "from_seconds": 7.837,
+          "to_seconds": 8.047,
+          "failures": 2,
+          "slow_failures": 1,
+          "max_wait_ms": 250.233,
+          "by_class": {
+            "dns": 1,
+            "timeout": 1
+          }
+        },
+        {
+          "from_seconds": 8.837,
+          "to_seconds": 9.052,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.028,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 9.842,
+          "to_seconds": 10.062,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.024,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 10.857,
+          "to_seconds": 11.062,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.032,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 11.857,
+          "to_seconds": 12.087,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.032,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 12.862,
+          "to_seconds": 13.092,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.03,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 13.862,
+          "to_seconds": 14.098,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.034,
+          "by_class": {
+            "dns": 2
+          }
+        },
+        {
+          "from_seconds": 14.872,
+          "to_seconds": 15.099,
+          "failures": 2,
+          "slow_failures": 0,
+          "max_wait_ms": 0.075,
+          "by_class": {
+            "dns": 2
+          }
+        }
+      ],
+      "pool_lines": 96,
+      "timed_out": 74,
+      "replicas": [
+        {
+          "replica": "switchboard-1",
+          "first_fast_seconds": 0.09,
+          "dials_before": 0,
+          "slow_cache_failures": 20
+        },
+        {
+          "replica": "switchboard-3",
+          "first_fast_seconds": 9.052,
+          "dials_before": 45,
+          "slow_cache_failures": 20
+        }
+      ]
+    }
+  ],
+  "restarts": [
+    {
+      "at_seconds": 75,
+      "ready_seconds": 0.333,
+      "aof_loaded_seconds": 0.028,
+      "errors": [
+        {
+          "class": "dns",
+          "lines": 1,
+          "pool_lines": 0,
+          "first_seconds": 0.098,
+          "last_seconds": 0.098,
+          "example": "cache: get: dial tcp: lookup redis on 127.0.0.11:53: server misbehaving"
+        }
+      ],
+      "loading_errors": 0,
+      "recoveries": [
+        {
+          "replica": "switchboard-1",
+          "component": "budget",
+          "seconds": 1.4
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "cache",
+          "seconds": 0.892
+        },
+        {
+          "replica": "switchboard-1",
+          "component": "ratelimit",
+          "seconds": 1.8
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "budget",
+          "seconds": 1.101
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "cache",
+          "seconds": 1.106
+        },
+        {
+          "replica": "switchboard-3",
+          "component": "ratelimit",
+          "seconds": 0.633
+        }
+      ],
+      "degraded_seconds": 1.8
+    }
+  ],
+  "after_ready": [
+    {
+      "at_seconds": 75,
+      "ready_seconds": 0.333,
+      "failures": 0,
+      "by_class": {}
+    }
+  ]
+}

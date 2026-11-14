@@ -266,6 +266,15 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		}
 		cfg.RateLimit.Replicas = n
 	}
+	if v := getenv("SWITCHBOARD_RATELIMIT_RETRY_INTERVAL"); v != "" {
+		// The chaos script's RETRY_INTERVAL switch sets this on every
+		// replica (PLAN.md M13); a typo must not fall back to the file's.
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("SWITCHBOARD_RATELIMIT_RETRY_INTERVAL: %q is not a positive duration", v)
+		}
+		cfg.RateLimit.RetryInterval = d
+	}
 	if err := applyTracingEnv(&cfg.Tracing, getenv); err != nil {
 		return err
 	}

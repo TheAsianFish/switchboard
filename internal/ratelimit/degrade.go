@@ -97,7 +97,7 @@ func (d *Degrading) Allow(ctx context.Context, key string, l Limit, cost int64) 
 		return Decision{}, err
 	}
 	var dec Decision
-	local, err := d.tryPrimary(ctx, func(ctx context.Context) error {
+	local, err := d.tryPrimary(ctx, "allow", func(ctx context.Context) error {
 		var err error
 		dec, err = d.Primary.Allow(ctx, key, l, cost)
 		return err
@@ -122,7 +122,7 @@ func (d *Degrading) Adjust(ctx context.Context, key string, l Limit, delta int64
 	if err := l.Validate(); err != nil {
 		return err
 	}
-	local, err := d.tryPrimary(ctx, func(ctx context.Context) error {
+	local, err := d.tryPrimary(ctx, "adjust", func(ctx context.Context) error {
 		return d.Primary.Adjust(ctx, key, l, delta)
 	})
 	if !local {
@@ -131,10 +131,11 @@ func (d *Degrading) Adjust(ctx context.Context, key string, l Limit, delta int64
 	return d.Local.Adjust(ctx, key, d.LocalLimit(l), delta)
 }
 
-// tryPrimary runs call against Primary under Timeout unless the limiter is
-// degraded and not yet due a probe. It reports whether the caller should
-// use Local instead; when it should not, err is Primary's result.
-func (d *Degrading) tryPrimary(ctx context.Context, call func(context.Context) error) (local bool, err error) {
+// tryPrimary runs call (the operation op) against Primary under Timeout
+// unless the limiter is degraded and not yet due a probe, and logs it if
+// it waited long (telemetry.StoreWaited). It reports whether the caller
+// should use Local instead; when it should not, err is Primary's result.
+func (d *Degrading) tryPrimary(ctx context.Context, op string, call func(context.Context) error) (local bool, err error) {
 	try, seen := d.shouldTry()
 	if !try {
 		return true, nil
@@ -143,9 +144,11 @@ func (d *Degrading) tryPrimary(ctx context.Context, call func(context.Context) e
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
+	start := time.Now()
 	pctx, cancel := context.WithTimeout(ctx, timeout)
 	err = call(pctx)
 	cancel()
+	telemetry.StoreWaited(ctx, telemetry.StoreLimiter, op, time.Since(start), err)
 	switch {
 	case err == nil:
 		d.recover(ctx, seen)

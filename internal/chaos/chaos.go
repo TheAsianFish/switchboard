@@ -62,6 +62,14 @@ type Meta struct {
 	// Commit is the short commit under test, "-dirty" if the tree had
 	// uncommitted changes.
 	Commit string `json:"commit"`
+	// GatewayCommit is the commit the replicas were built from: Commit,
+	// unless the run built them from another (REPLICA_REF, M13's before
+	// arm). Empty for runs from before M13.
+	GatewayCommit string `json:"gateway_commit,omitempty"`
+	// RetryInterval is every replica's ratelimit.retry_interval, a Go
+	// duration (M13's switch); empty for runs from before M13, which ran
+	// the default, 1 s.
+	RetryInterval string `json:"retry_interval,omitempty"`
 	// Date is when the run started, RFC 3339 in UTC.
 	Date    string `json:"date"`
 	Command string `json:"command"`

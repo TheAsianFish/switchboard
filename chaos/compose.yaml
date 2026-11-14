@@ -24,6 +24,9 @@ x-replica-env: &replica-env
   SWITCHBOARD_REDIS_URL: redis://redis:6379/0
   SWITCHBOARD_ADMIN_LISTEN: 0.0.0.0:9090
   SWITCHBOARD_LOG_FORMAT: json
+  # chaos/run.sh's RETRY_INTERVAL switch (PLAN.md M13); empty keeps the
+  # file's (the default, 1 s).
+  SWITCHBOARD_RATELIMIT_RETRY_INTERVAL: ${RETRY_INTERVAL:-}
 
 services:
   redis:
