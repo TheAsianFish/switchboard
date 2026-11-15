@@ -596,8 +596,11 @@ a real Redis 8, and `make ui-check` the admin page's typecheck, lint, tests
 and build. Each measured number has its own target: `make bench` (Q1),
 `make test-limits` (Q2), `make eval-cache` (Q3), `make bench-hedge` (Q4),
 `make eval-router` (Q5, offline from committed recordings), `make chaos`
-(Q6) and `make chaos-flap` (M8); `make results` re-renders RESULTS.md and
-the table above. None of them runs on a push; `.github/workflows/measure.yml` runs some by hand.
+(Q6), `make chaos-flap` (M8), `make chaos-persist` and `make bench-persist`
+(M9), `make bench-stall` (M10), `make sim-budget` (M11, M12),
+`make chaos-orphan` (M12), and `make chaos-probe` and `make chaos-retry`
+(M13); `make results` re-renders RESULTS.md and the table above. None of
+them runs on a push; `.github/workflows/measure.yml` runs some by hand.
 
 Releases: `make dist` builds the archives, `make check-install` checks the
 `go install` path in a clean container, and a `v*` tag runs
