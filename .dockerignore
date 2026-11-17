@@ -3,6 +3,3 @@ bin
 dist
 eval/results
 web/node_modules
-.agent
-.claude
-CLAUDE.md

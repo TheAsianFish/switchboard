@@ -22,12 +22,6 @@ web/dist/
 .vscode/
 .DS_Store
 
-# Agent and assistant files are never committed
-CLAUDE.md
-AGENTS.md
-.claude/
-.agent/
-
 # Local gateway config (copy of switchboard.example.yaml)
 /switchboard.yaml
 eval/results/*.partial/
