@@ -307,6 +307,64 @@ the client, and says nothing about the gateway's overhead (Q1 does).
 
 Not measured yet. Start Ollama with `qwen2.5:0.5b`, run `make sdk-smoke`, then `make results`.
 
+## Outside reference points
+
+Everything above compares Switchboard with itself: a direct call, an
+earlier commit, a baseline built here. This section sets three of the
+headline results beside the nearest published figure for the same question.
+None of the outside figures was re-run here, and none shares a protocol
+with the run it sits beside, so each is a reference point and not a
+comparison: nothing in this file supports "faster than" or "better than"
+another project. Sources were read on 2026-11-24.
+
+- **Q1, gateway overhead, beside LiteLLM's published benchmark.** LiteLLM's
+  documentation ([Benchmarks](https://docs.litellm.ai/docs/benchmarks))
+  reports the proxy's own overhead against a mock OpenAI endpoint under
+  Locust (1,000 users), read from its `x-litellm-overhead-duration-ms`
+  response header: 2 ms median, 8 ms p95 and 13 ms p99 on four instances
+  (4 vCPUs and 8 GB each) at 1,170 requests per second, and 12 ms median
+  and 43 ms p99 on two instances at 1,036.
+  Where this is unfair: the load here is about a sixth of theirs and never
+  near one process's capacity, on one gateway process on a shared 4-CPU
+  machine; LiteLLM's figure is time measured inside the proxy and this
+  one is a difference of two client-side runs; and their proxy ran with
+  PostgreSQL attached, where the passthrough row has every feature off.
+  A LiteLLM arm of `make bench` against the same fake provider on the
+  same machine would make it a comparison; it is under To measure.
+- **Q3, false hits at a default threshold, beside MeanCache's measurement
+  of GPTCache.** Gill et al., "MeanCache: User-Centric Semantic Caching
+  for LLM Web Services" ([arXiv:2403.02694](https://arxiv.org/abs/2403.02694),
+  Table 1 of v3) ran GPTCache with Albert embeddings at its cosine
+  threshold of 0.7 on GPTCache's own 1,000-query set (30% repeats) and
+  measured a hit precision of 0.52 at recall 0.85, so about half of the
+  served hits were answers to a different question; their own cache
+  reached 0.72. The "at a guessed threshold" table above is the same
+  finding on harder data: at 0.90 to 0.97 most adversarial non-paraphrases
+  hit.
+  Where this is unfair: the metrics differ (their precision is over a
+  query stream against a filled cache; the false-hit rate here is per
+  pair over negatives, a floor for a filled cache), the embedders differ,
+  and PAWS and the GSM8K perturbations are built to be near-duplicates
+  with a different answer, where their set is ordinary traffic with
+  repeats. GPTCache was not run on these pair sets.
+- **Q5, the router against a random mix, beside RouterBench.** Hu et al.,
+  "RouterBench: A Benchmark for Multi-LLM Routing System"
+  ([arXiv:2403.12031](https://arxiv.org/abs/2403.12031), March 2024, v2)
+  define the Zero router as the non-decreasing convex hull of the
+  candidate models, reached by mixing them at random, and call a router
+  significant only if it beats it. That is the hull used above (it was
+  added here after the first run, without knowing the paper's name for
+  it). Their KNN and MLP routers, which predict per-model quality from
+  the prompt as the router here does, did not significantly outperform
+  the Zero router overall (section 5.3: above it on MMLU and Winogrande,
+  level on Hellaswag and GSM8K, below on ARC-Challenge and MBPP).
+  Where this is unfair: RouterBench routes between hosted and open
+  models priced in dollars (over 405k recorded outcomes) and scores the
+  area under the cost-quality curve; this eval has three sizes of one
+  local model family, compute as cost, and 600 questions from two
+  datasets. The
+  agreement is in the direction of the finding, not in any number.
+
 ## Known problems
 
 Measured weaknesses and cases the runs could not reach, each with what was
@@ -342,6 +400,11 @@ observed.
 - Q1 per-feature breakdown (limits, budget, exact and semantic cache miss
   paths, router, tracing toggled one at a time; CPU and RSS per replica at
   500 req/s): M6, `make bench`.
+- Q1 beside LiteLLM on the same machine: not built. It needs an arm in
+  `eval/bench/q1.sh` that starts the LiteLLM proxy image
+  (`ghcr.io/berriai/litellm`, free) with one model pointed at the same
+  `switchboard fake-provider`, and `switchboard bench` run against
+  direct, Switchboard and LiteLLM back to back at the same rates; $0.
 - Q2 with GCRA: `ALGORITHMS=gcra make test-limits` once the GCRA limiter
   is implemented (`internal/ratelimit/gcra.go`; its contract tests skip
   until then).

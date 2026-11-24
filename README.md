@@ -71,6 +71,11 @@ Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2
 with GCRA, which is not implemented yet).
 
+How three of these sit beside published figures (LiteLLM's proxy overhead,
+GPTCache's hit precision as MeanCache measured it, RouterBench's Zero
+router), and why none of them is a like-for-like comparison:
+[Outside reference points](RESULTS.md#outside-reference-points).
+
 <!-- results:end -->
 
 ## Quickstart
@@ -660,6 +665,9 @@ Releases: `make dist` builds the archives, `make check-install` checks the
   tokens would cover the first.
 - Q4 against Claude, and the router's Claude candidates (both need an API
   key; RESULTS.md lists the commands and the estimated cost).
+- Q1 with a LiteLLM arm on the same machine and fake provider, so the
+  overhead has an outside number beside it under the same protocol
+  (RESULTS.md, "Outside reference points", has only published figures).
 - Pass `traceparent` on to providers.
 - Accept tool-call arguments that are not JSON in OpenAI-format history (a
   cut-off call echoed back is refused today).
