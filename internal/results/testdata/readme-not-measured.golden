@@ -17,3 +17,8 @@
 Still to measure, with the commands to run: [To measure](RESULTS.md#to-measure)
 in RESULTS.md (among them the Claude rows, which need an API key, and Q2
 with GCRA, which is not implemented yet).
+
+How three of these sit beside published figures (LiteLLM's proxy overhead,
+GPTCache's hit precision as MeanCache measured it, RouterBench's Zero
+router), and why none of them is a like-for-like comparison:
+[Outside reference points](RESULTS.md#outside-reference-points).
